@@ -7,6 +7,10 @@ sources/
 backup/
 out/
 
+# Rockchip 打包工具（由 fetch-pack-tools.sh 安装）
+vendor/tools/pack-firmware/afptool
+vendor/tools/pack-firmware/rkImageMaker
+
 # 构建日志
 logs/
 *.log

@@ -75,6 +75,13 @@ run_root chroot "${ROOTFS}" env \
 	ROOTFS_USER_PASSWORD="${ROOTFS_USER_PASSWORD}" \
 	bash /tmp/chroot-setup.sh
 
+if [[ "${KERNEL_MODULES_INSTALL}" == "y" ]] && [[ -d "${KERNEL_DIR}" ]] && \
+	[[ -f "${OUT_DIR}/kernel/Image" ]]; then
+	info "安装内核模块到 rootfs..."
+	KERNEL_RELEASE="$("${SCRIPT_DIR}/install-kernel-modules.sh" "${ROOTFS}")"
+	run_root chroot "${ROOTFS}" depmod -a "${KERNEL_RELEASE}"
+fi
+
 run_root rm -f "${ROOTFS}/tmp/chroot-setup.sh" "${ROOTFS}/tmp/extra-packages.list"
 run_root rm -f "${ROOTFS}/usr/bin/qemu-aarch64-static"
 

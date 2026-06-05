@@ -39,6 +39,11 @@ fi
 : "${ROOTFS_USER_PASSWORD:=debian}"
 : "${BOOT_FIT_ITS:=${BSP_ROOT}/vendor/fit/boot.its}"
 : "${MKIMAGE_BIN:=}"
+: "${KERNEL_MODULES_INSTALL:=y}"
+: "${PACK_TOOLS_DIR:=${BSP_ROOT}/vendor/tools/pack-firmware}"
+: "${PACK_TOOLS_SRC:=}"
+: "${FIRMWARE_PARAMETER:=${BSP_ROOT}/vendor/firmware/parameter.txt}"
+: "${FIRMWARE_PACKAGE_FILE:=${BSP_ROOT}/vendor/firmware/package-file}"
 : "${CROSS_COMPILE_PREFIX:=aarch64-linux-gnu-}"
 : "${TOOLCHAIN_BIN:=}"
 : "${RKBIN_BACKUP_SRC:=}"
@@ -57,6 +62,15 @@ info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*" >&2; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
+# 无 sudo 时可用 .local/host-tools（flex/bison 等，见 scripts/fetch-host-tools.sh）
+ensure_host_build_tools() {
+	local ht="${BSP_ROOT}/.local/host-tools"
+	if [[ -d "${ht}/usr/bin" ]]; then
+		export PATH="${ht}/usr/bin:${ht}/usr/sbin:${PATH}"
+		[[ -d "${ht}/usr/share/bison" ]] && export BISON_PKGDATADIR="${ht}/usr/share/bison"
+	fi
+}
+
 ensure_python2_wrapper() {
 	mkdir -p "${LOCAL_BIN}"
 	if [[ ! -x "${LOCAL_BIN}/python2" ]]; then
@@ -71,6 +85,7 @@ PYWRAP
 }
 
 setup_cross_compile() {
+	ensure_host_build_tools
 	if [[ -n "${TOOLCHAIN_BIN}" ]]; then
 		[[ -d "${TOOLCHAIN_BIN}" ]] || die "TOOLCHAIN_BIN 不存在: ${TOOLCHAIN_BIN}"
 		export PATH="${TOOLCHAIN_BIN}:${PATH}"

@@ -26,9 +26,10 @@ fi
 # shellcheck disable=SC2086
 "${KMAKE[@]}" "${KERNEL_DEFCONFIG}" ${FRAGMENTS}
 
-info "编译 Image 与 ${KERNEL_DTS_NAME}.dtb (jobs=${JOBS})..."
+DTS_TARGET="rockchip/${KERNEL_DTS_NAME}.dtb"
+info "编译 Image 与 ${DTS_TARGET} (jobs=${JOBS})..."
 "${KMAKE[@]}" Image
-"${KMAKE[@]}" "${KERNEL_DTS_NAME}.dtb"
+"${KMAKE[@]}" "${DTS_TARGET}"
 
 mkdir -p "${OUT_DIR}/kernel"
 install -m 644 "${KERNEL_DIR}/arch/arm64/boot/Image" "${OUT_DIR}/kernel/Image"

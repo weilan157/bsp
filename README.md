@@ -25,6 +25,12 @@ rockchip-bsp/
 │   ├── build-bootimg.sh
 │   ├── mk-fitimage.sh
 │   ├── build-debian-rootfs.sh
+│   ├── install-kernel-modules.sh
+│   ├── stage-firmware.sh
+│   ├── pack-firmware.sh
+│   ├── fetch-pack-tools.sh
+│   ├── fetch-host-tools.sh
+│   ├── build-all.sh
 │   ├── ch-rootfs.sh
 │   └── setup-all.sh
 ├── out/                     # kernel/、rootfs/、rootfs.ext4（不入库）
@@ -78,6 +84,27 @@ TSPI_VENDOR_KERNEL_CONFIG=y
 
 默认 **Debian 13 (trixie)**、`arm64`、无桌面。若主机 debootstrap 过旧，在 `config.env` 将 `DEBIAN_RELEASE=bookworm`。
 
+构建 rootfs 时默认执行 `modules_install`（`KERNEL_MODULES_INSTALL=y`，须先 `build-kernel.sh`）。
+
+### 固件打包（update.img）
+
+```bash
+./scripts/fetch-pack-tools.sh   # 从 PACK_TOOLS_SRC 或本机 SDK 复制 afptool
+./scripts/stage-firmware.sh     # 收集到 out/firmware/
+./scripts/pack-firmware.sh      # out/update.img
+```
+
+分区表见 `vendor/firmware/parameter.txt`（泰山派 RK3576 GPT）。
+
+### 一键全编译
+
+```bash
+sudo ./scripts/init-env.sh
+./scripts/build-all.sh
+```
+
+无 sudo 且缺 flex/bison 时：`./scripts/fetch-host-tools.sh`；可 `SKIP_ROOTFS=y ./scripts/build-all.sh` 仅编引导链。
+
 | 对比 | rockchip-bsp | 泰山派 SDK debian |
 |------|--------------|-------------------|
 | 基线 | 官方 debootstrap minbase | live-build + linaro 基线 |
@@ -101,7 +128,10 @@ TSPI_VENDOR_KERNEL_CONFIG=y
 | `build-uboot.sh` | `sources/u-boot/uboot.img`、`trust.img`、loader 等 |
 | `build-kernel.sh` | `out/kernel/Image`、`out/kernel/tspi-3m-rk3576.dtb` |
 | `build-bootimg.sh` | `out/kernel/resource.img`、`out/boot.img`（FIT） |
-| `build-debian-rootfs.sh` | `out/rootfs/`、`out/rootfs.ext4` |
+| `build-debian-rootfs.sh` | `out/rootfs/`、`out/rootfs.ext4`（含内核模块） |
+| `stage-firmware.sh` | `out/firmware/` 分区镜像集合 |
+| `pack-firmware.sh` | `out/update.img` |
+| `build-all.sh` | 上述全流程 |
 
 ## 与 SDK 的关系
 
