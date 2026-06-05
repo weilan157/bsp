@@ -11,7 +11,9 @@ rockchip-bsp/
 │   ├── init-env.sh       # 安装编译依赖
 │   ├── setup-sources.sh  # 备份 SDK rkbin + clone GitHub 源码
 │   ├── build-uboot.sh    # 编译 RK3576 loader / uboot / trust
+│   ├── build-recovery-ota.sh  # 调 SDK 编 recovery.img + ota.img
 │   └── setup-all.sh      # 一键：环境 + 源码 + 编译
+├── docs/RECOVERY-OTA.md  # Recovery OTA 流程说明
 ├── backup/               # SDK rkbin 备份（脚本生成，不入库）
 └── sources/              # u-boot / rkbin 克隆目录（不入库）
 ```
