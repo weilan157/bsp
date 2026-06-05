@@ -19,6 +19,26 @@ fi
 : "${RKBIN_REPO:=https://github.com/rockchip-linux/rkbin.git}"
 : "${RKBIN_BRANCH:=master}"
 : "${UBOOT_BOARD:=rk3576}"
+: "${KERNEL_REPO:=https://github.com/rockchip-linux/kernel.git}"
+: "${KERNEL_BRANCH:=develop-6.1}"
+: "${KERNEL_DEFCONFIG:=rockchip_linux_defconfig}"
+: "${KERNEL_DEFCONFIG_FRAGMENTS:=rk3576.config}"
+: "${KERNEL_DTS_NAME:=tspi-3m-rk3576}"
+: "${TSPI_DTS_SOURCE:=}"
+: "${TSPI_VENDOR_KERNEL_CONFIG:=n}"
+: "${TSPI_KERNEL_CONFIG_SOURCE:=}"
+: "${KERNEL_EXTRA_FRAGMENTS:=}"
+: "${DEBIAN_RELEASE:=trixie}"
+: "${DEBIAN_ARCH:=arm64}"
+: "${DEBIAN_MIRROR:=deb.debian.org}"
+: "${DEBIAN_VARIANT:=minbase}"
+: "${ROOTFS_HOSTNAME:=rockchip}"
+: "${ROOTFS_LOCALE:=en_US.UTF-8}"
+: "${ROOTFS_ROOT_PASSWORD:=root}"
+: "${ROOTFS_USER:=debian}"
+: "${ROOTFS_USER_PASSWORD:=debian}"
+: "${BOOT_FIT_ITS:=${BSP_ROOT}/vendor/fit/boot.its}"
+: "${MKIMAGE_BIN:=}"
 : "${CROSS_COMPILE_PREFIX:=aarch64-linux-gnu-}"
 : "${TOOLCHAIN_BIN:=}"
 : "${RKBIN_BACKUP_SRC:=}"
@@ -28,6 +48,9 @@ SOURCES_DIR="${BSP_ROOT}/sources"
 BACKUP_DIR="${BSP_ROOT}/backup"
 UBOOT_DIR="${SOURCES_DIR}/u-boot"
 RKBIN_DIR="${SOURCES_DIR}/rkbin"
+KERNEL_DIR="${SOURCES_DIR}/kernel"
+VENDOR_DTS_DIR="${BSP_ROOT}/vendor/dts/rockchip"
+OUT_DIR="${BSP_ROOT}/out"
 LOCAL_BIN="${BSP_ROOT}/.local/bin"
 
 info() { echo "[INFO] $*"; }
@@ -64,4 +87,17 @@ job_count() {
 	else
 		nproc
 	fi
+}
+
+# 返回传给 make 的 defconfig fragment 列表（空格分隔）
+kernel_defconfig_fragments() {
+	local frags="${KERNEL_DEFCONFIG_FRAGMENTS}"
+
+	if [[ "${TSPI_VENDOR_KERNEL_CONFIG}" == "y" ]]; then
+		frags="${frags} tspi-vendor.config"
+	fi
+	if [[ -n "${KERNEL_EXTRA_FRAGMENTS}" ]]; then
+		frags="${frags} ${KERNEL_EXTRA_FRAGMENTS//,/ }"
+	fi
+	echo "${frags}"
 }

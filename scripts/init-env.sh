@@ -24,6 +24,11 @@ PACKAGES=(
 	curl
 	pkg-config
 	gcc-aarch64-linux-gnu
+	debootstrap
+	qemu-user-static
+	binfmt-support
+	debian-archive-keyring
+	e2fsprogs
 )
 
 info "安装 apt 依赖（需要 sudo）..."
@@ -48,6 +53,9 @@ if ! command -v python2 >/dev/null 2>&1 && [[ ! -x "${LOCAL_BIN}/python2" ]]; th
 fi
 if ! command -v "${CROSS_COMPILE_PREFIX}gcc" >/dev/null 2>&1; then
 	die "交叉编译器 ${CROSS_COMPILE_PREFIX}gcc 未安装成功"
+fi
+if ! command -v debootstrap >/dev/null 2>&1; then
+	die "debootstrap 未安装成功"
 fi
 
 info "主机环境就绪"

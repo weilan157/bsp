@@ -5,6 +5,7 @@ config.env
 # 克隆的源码与编译产物
 sources/
 backup/
+out/
 
 # 构建日志
 logs/

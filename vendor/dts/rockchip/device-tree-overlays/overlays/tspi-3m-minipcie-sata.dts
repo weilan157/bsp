@@ -1,0 +1,95 @@
+/********************************************************************
+ * SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+ *
+ * Copyright (c) 2023 Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2026 LCKFB <lckfb@sz-jlc.com>
+ *********************************************************************
+ * Wiki (Chinese): https://wiki.lckfb.com/
+ * Wiki (English): https://wiki.lckfb.com/en/
+ *********************************************************************/
+
+/*
+ * Overlay: tspi-3m-minipcie-sata.dtbo
+ *
+ * Purpose:
+ *   Configures the MINI-PCIe slot for mSATA mode.
+ *   Enables the SATA0 controller and its 3.3V power supply,
+ *   and explicitly disables the PCIe0 controller to avoid conflicts.
+ *
+ * Hardware:
+ *   - MINI-PCIe slot wired to SATA0 (combphy0_ps)
+ *   - 3.3V power rail controlled by GPIO1_D5
+ *
+ * Usage:
+ *   Add the following line to /boot/ubootEnv.txt and reboot:
+ *     overlays=tspi-3m-minipcie-sata.dtbo
+ *
+ * Mutual exclusion:
+ *   Do NOT combine with tspi-3m-minipcie-pcie.dtbo or
+ *   tspi-3m-minipcie-ec20.dtbo. Only one MINI-PCIe overlay
+ *   may be active at a time.
+ *
+ * Note:
+ *   combphy0_ps (the shared high-speed PHY for SATA0/PCIe0) is
+ *   already enabled in tspi-3m-rk3576-core.dtsi and does not
+ *   need to be configured here.
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+/ {
+	/*-----------------------------------------------------------
+	 * fragment@0 - SATA0 3.3V Power Supply
+	 *
+	 * Creates a fixed regulator node that controls the 3.3V power
+	 * rail for the mSATA device via GPIO1_D5 (active-high enable).
+	 * The regulator is marked always-on once the system boots.
+	 *----------------------------------------------------------*/
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			vcc3v3_sata0: vcc3v3-sata0 {
+				compatible = "regulator-fixed";
+				regulator-name = "vcc3v3_sata0";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				enable-active-high;
+				regulator-always-on;
+				gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_HIGH>;
+				startup-delay-us = <5000>;
+				vin-supply = <&vcc_sys>;
+			};
+		};
+	};
+
+	/*-----------------------------------------------------------
+	 * fragment@1 - SATA0 Controller
+	 *
+	 * Enables the SATA0 controller and binds it to the 3.3V
+	 * power supply created in fragment@0.
+	 *----------------------------------------------------------*/
+	fragment@1 {
+		target = <&sata0>;
+		__overlay__ {
+			vpcie3v3-supply = <&vcc3v3_sata0>;
+			status = "okay";
+		};
+	};
+
+	/*-----------------------------------------------------------
+	 * fragment@2 - PCIe0 Controller (disabled)
+	 *
+	 * Explicitly disables PCIe0 to prevent it from claiming
+	 * the shared combphy0_ps PHY while SATA0 is in use.
+	 *----------------------------------------------------------*/
+	fragment@2 {
+		target = <&pcie0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

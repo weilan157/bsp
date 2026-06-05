@@ -1,0 +1,64 @@
+#*********************************************************************
+# SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+#
+# Copyright (c) 2023 Rockchip Electronics Co., Ltd.
+# Copyright (c) 2026 LCKFB <lckfb@sz-jlc.com>
+#*********************************************************************
+# Wiki (Chinese): https://wiki.lckfb.com/
+# Wiki (English): https://wiki.lckfb.com/en/
+#*********************************************************************
+#
+# ubootEnv.txt - TaishanPi-3 RK3576 Dynamic Device Tree Overlay Configuration
+#
+# This file is read by U-Boot at boot time to load device tree overlays.
+# Overlay .dtbo files must be placed in /boot/overlays/ on the board.
+#
+# Syntax:
+#   overlays=file1.dtbo file2.dtbo   (space-separated, multiple on one line)
+#   overlays=file1.dtbo              (or one per line, both styles work)
+#   # Lines starting with '#' are comments and are ignored.
+#
+# After editing this file, reboot the board to apply changes.
+#
+#*********************************************************************
+
+
+# ============================================================
+# MINI-PCIe Slot Configuration
+#
+# The MINI-PCIe slot supports three mutually exclusive modes.
+# Uncomment EXACTLY ONE of the three lines below.
+# Loading more than one at a time will cause hardware conflicts.
+#
+#   Hardware mapping:
+#     PCIe  mode : combphy0_ps -> PCIe0 controller
+#     mSATA mode : combphy0_ps -> SATA0 controller
+#     EC20  mode : GPIO-controlled modem (no combphy0_ps needed)
+#
+#   GPIO conflict warning:
+#     PCIe and EC20 share GPIOs.
+#     Never enable both overlays simultaneously.
+# ============================================================
+
+# Mode 1: Standard MINI-PCIe card
+# overlays=tspi-3m-minipcie-pcie.dtbo
+
+# Mode 2: mSATA SSD
+# overlays=tspi-3m-minipcie-sata.dtbo
+
+# Mode 3: Quectel EC20 4G LTE modem
+# overlays=tspi-3m-minipcie-ec20.dtbo
+
+
+# ============================================================
+# MIPI DSI Display Configuration
+#
+# Uncomment the line matching your screen model.
+# Only one DSI screen can be active at a time.
+# ============================================================
+
+# LCKFB-TSPI-10.1inch-MIPI-TP  (800x1280, LCSC: C41409463)
+# overlays=tspi-3m-dsi-c41409463.dtbo
+
+# LCKFB-mipi-3.1inch-screen    (480x800,  LCSC: C42388916)
+# overlays=tspi-3m-dsi-c42388916.dtbo

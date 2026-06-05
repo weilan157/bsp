@@ -1,0 +1,119 @@
+/********************************************************************
+ * SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+ *
+ * Copyright (c) 2023 Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2026 LCKFB <lckfb@sz-jlc.com>
+ *********************************************************************
+ * Wiki (Chinese): https://wiki.lckfb.com/
+ * Wiki (English): https://wiki.lckfb.com/en/
+ *********************************************************************/
+
+/*
+ * Overlay: tspi-3m-minipcie-pcie.dtbo
+ *
+ * Purpose:
+ *   Configures the MINI-PCIe slot for standard PCIe mode.
+ *   Enables the PCIe0 controller with its reset/disable GPIOs and
+ *   3.3V power supply, and explicitly disables the SATA0 controller.
+ *
+ * Hardware:
+ *   - MINI-PCIe slot wired to PCIe0 (combphy0_ps)
+ *   - 3.3V power rail controlled by GPIO1_D5
+ *   - PCIe reset signal:  GPIO2_B1 (active-high)
+ *   - PCIe disable signal: GPIO4_C7 (active-high, pull-up)
+ *
+ * Usage:
+ *   Add the following line to /boot/ubootEnv.txt and reboot:
+ *     overlays=tspi-3m-minipcie-pcie.dtbo
+ *
+ * Mutual exclusion:
+ *   Do NOT combine with tspi-3m-minipcie-sata.dtbo or
+ *   tspi-3m-minipcie-ec20.dtbo. Only one MINI-PCIe overlay
+ *   may be active at a time.
+ *
+ * Note:
+ *   combphy0_ps (the shared high-speed PHY for SATA0/PCIe0) is
+ *   already enabled in tspi-3m-rk3576-core.dtsi and does not
+ *   need to be configured here.
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+/ {
+	/*-----------------------------------------------------------
+	 * fragment@0 - PCIe0 3.3V Power Supply
+	 *
+	 * Creates a fixed regulator node that controls the 3.3V power
+	 * rail for the PCIe device via GPIO1_D5 (active-high enable).
+	 * The regulator is marked always-on once the system boots.
+	 *----------------------------------------------------------*/
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			vcc3v3_pcie0: vcc3v3-pcie0 {
+				compatible = "regulator-fixed";
+				regulator-name = "vcc3v3_pcie0";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				enable-active-high;
+				regulator-always-on;
+				gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_HIGH>;
+				startup-delay-us = <5000>;
+				vin-supply = <&vcc_sys>;
+			};
+		};
+	};
+
+	/*-----------------------------------------------------------
+	 * fragment@1 - PCIe0 Disable GPIO Pinmux
+	 *
+	 * Defines the pinmux configuration for the PCIe0 disable
+	 * signal (GPIO4_C7). Configured as GPIO with pull-up so the
+	 * slot is enabled by default (disable signal inactive).
+	 *----------------------------------------------------------*/
+	fragment@1 {
+		target = <&pinctrl>;
+		__overlay__ {
+			pcie {
+				pcie_disable_gpio: pcie-disable-gpio {
+					rockchip,pins = <4 RK_PC7 RK_FUNC_GPIO &pcfg_pull_up>;
+				};
+			};
+		};
+	};
+
+	/*-----------------------------------------------------------
+	 * fragment@2 - PCIe0 Controller
+	 *
+	 * Enables the PCIe0 controller, binds the reset/disable GPIOs,
+	 * and connects the 3.3V power supply from fragment@0.
+	 *----------------------------------------------------------*/
+	fragment@2 {
+		target = <&pcie0>;
+		__overlay__ {
+			reset-gpios = <&gpio2 RK_PB1 GPIO_ACTIVE_HIGH>;
+			disable-gpios = <&gpio4 RK_PC7 GPIO_ACTIVE_HIGH>;
+			vpcie3v3-supply = <&vcc3v3_pcie0>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&pcie_disable_gpio>;
+			status = "okay";
+		};
+	};
+
+	/*-----------------------------------------------------------
+	 * fragment@3 - SATA0 Controller (disabled)
+	 *
+	 * Explicitly disables SATA0 to prevent it from claiming
+	 * the shared combphy0_ps PHY while PCIe0 is in use.
+	 *----------------------------------------------------------*/
+	fragment@3 {
+		target = <&sata0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

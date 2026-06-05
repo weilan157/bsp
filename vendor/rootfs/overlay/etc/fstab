@@ -1,0 +1,5 @@
+# /etc/fstab: 泰山派 RK3576 典型 GPT（rootfs 分区 grow）
+# 实际 UUID 以板端 blkid 为准，首次启动后可用 tune2fs/ blkid 核对
+
+UUID=614e0000-0000-4b53-8000-1d28000054a9  /          ext4  defaults,noatime  0 1
+tmpfs                                         /tmp       tmpfs defaults,noatime,mode=1777  0 0

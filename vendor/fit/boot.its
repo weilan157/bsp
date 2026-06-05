@@ -1,0 +1,49 @@
+/*
+ * Rockchip RK3576 boot FIT (unsigned, for rockchip-bsp)
+ * Placeholders replaced by scripts/mk-fitimage.sh
+ */
+
+/dts-v1/;
+/ {
+	description = "Linux kernel + DTB + resource (rockchip-bsp)";
+
+	images {
+		fdt {
+			data = /incbin/("@KERNEL_DTB@");
+			type = "flat_dt";
+			arch = "arm64";
+			compression = "none";
+			load = <0xffffff00>;
+			hash { algo = "sha256"; };
+		};
+
+		kernel {
+			data = /incbin/("@KERNEL_IMG@");
+			type = "kernel";
+			arch = "arm64";
+			os = "linux";
+			compression = "none";
+			entry = <0xffffff01>;
+			load = <0xffffff01>;
+			hash { algo = "sha256"; };
+		};
+
+		resource {
+			data = /incbin/("@RESOURCE_IMG@");
+			type = "multi";
+			arch = "arm64";
+			compression = "none";
+			hash { algo = "sha256"; };
+		};
+	};
+
+	configurations {
+		default = "conf";
+		conf {
+			rollback-index = <0x00>;
+			fdt = "fdt";
+			kernel = "kernel";
+			multi = "resource";
+		};
+	};
+};

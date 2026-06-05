@@ -1,0 +1,2 @@
+# 可选：每行一个 apt 包名（无桌面）
+# openssh-server 等已在 chroot-setup.sh 默认安装
