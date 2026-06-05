@@ -17,6 +17,27 @@ BUILD_LOG="${LOG_DIR}/build-uboot-$(date +%Y%m%d-%H%M%S).log"
 [[ -d "$UBOOT_DIR" ]] || die "请先运行: ./scripts/setup-sources.sh"
 [[ -e "$RKBIN_LINK" ]] || die "缺少 sources/rkbin 链接，请先运行 setup-sources.sh"
 
+for cmd in dtc make; do
+	command -v "$cmd" >/dev/null 2>&1 || die "缺少 $cmd，请先运行: ./scripts/init-env.sh"
+done
+
+# RK make.sh 要求 python2；Ubuntu 24.04 等无 python2 包时用 python3 包装
+if ! command -v python2 >/dev/null 2>&1; then
+	if command -v python3 >/dev/null 2>&1; then
+		WRAP_DIR="${ROOT_DIR}/.local/bin"
+		ensure_dir "$WRAP_DIR"
+		cat > "${WRAP_DIR}/python2" <<'EOF'
+#!/bin/bash
+exec python3 "$@"
+EOF
+		chmod +x "${WRAP_DIR}/python2"
+		export PATH="${WRAP_DIR}:${PATH}"
+		warn "未找到 python2，使用 python3 包装为 python2（建议仍安装真实 python2）"
+	else
+		die "缺少 python2/python3，请先运行: ./scripts/init-env.sh"
+	fi
+fi
+
 JOBS="${MAKE_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 CROSS_COMPILE_ARG=""
 
