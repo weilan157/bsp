@@ -47,7 +47,9 @@ cp config.env.example config.env
 ## 远程仓库
 
 ```bash
-git remote add origin https://github.com/weilan157/rockchip-bsp.git
+git remote add origin git@github.com:weilan157/rockchip-bsp.git
+# 已有 https 远程时改为 SSH：
+# git remote set-url origin git@github.com:weilan157/rockchip-bsp.git
 git push -u origin main
 git push -u origin rk3576
 ```
