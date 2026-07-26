@@ -1,0 +1,11 @@
+auto lo
+iface lo inet loopback
+
+auto eth0
+allow-hotplug eth0
+iface eth0 inet dhcp
+
+# AP6256：先配 /etc/wpa_supplicant/wpa_supplicant.conf 再 ifup
+allow-hotplug wlan0
+iface wlan0 inet dhcp
+	wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf

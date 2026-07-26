@@ -83,6 +83,8 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 
 默认 Debian 13 (trixie)。主机 debootstrap 过旧时：`./bsp config DEBIAN_RELEASE=bookworm`。
 
+AP6256 WiFi：内核已含 `bcmdhd`；rootfs 会安装固件到 `/vendor/etc/firmware`。改 `overlay/etc/wpa_supplicant/wpa_supplicant.conf` 后 `ifup wlan0`。
+
 ### 从 SDK 刷新设备树
 
 ```bash

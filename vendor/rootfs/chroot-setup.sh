@@ -12,11 +12,11 @@ ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD:-root}"
 USER_NAME="${ROOTFS_USER:-debian}"
 USER_PASSWORD="${ROOTFS_USER_PASSWORD:-debian}"
 
-echo ">>> 配置 sources.list（仅 main）"
+echo ">>> 配置 sources.list（仅 main，默认清华源）"
 cat > /etc/apt/sources.list <<EOF
 deb http://${DEBIAN_MIRROR}/debian ${DEBIAN_RELEASE} main
 deb http://${DEBIAN_MIRROR}/debian ${DEBIAN_RELEASE}-updates main
-deb http://security.debian.org/debian-security ${DEBIAN_RELEASE}-security main
+deb http://${DEBIAN_MIRROR}/debian-security ${DEBIAN_RELEASE}-security main
 EOF
 
 echo ">>> apt update"
@@ -24,9 +24,10 @@ apt-get update
 
 echo ">>> 安装基础包"
 # shellcheck disable=SC2086
-${APT_INSTALL} systemd systemd-sysv dbus sudo openssh-server \
+${APT_INSTALL} systemd systemd-sysv systemd-timesyncd dbus sudo openssh-server \
 	locales ca-certificates net-tools iproute2 iputils-ping \
-	ifupdown isc-dhcp-client wget curl nano less kmod
+	ifupdown isc-dhcp-client wget curl nano less kmod \
+	wpasupplicant iw rfkill wireless-regdb
 
 if [[ -f /tmp/extra-packages.list ]]; then
 	mapfile -t EXTRA_PKGS < <(grep -vE '^\s*(#|$)' /tmp/extra-packages.list || true)
@@ -57,8 +58,10 @@ if ! id "${USER_NAME}" >/dev/null 2>&1; then
 	usermod -aG sudo "${USER_NAME}"
 fi
 
-echo ">>> 启用 ssh"
+echo ">>> 启用 ssh / timesyncd"
 systemctl enable ssh 2>/dev/null || true
+# 板子无有效 RTC 时常停在错误日期，apt/sqv 会报 Not live until
+systemctl enable systemd-timesyncd.service 2>/dev/null || true
 
 echo ">>> 启用 rockchip-partnames（原生 systemd，替代 SysV）"
 chmod 755 /usr/local/sbin/rockchip-partnames 2>/dev/null || true

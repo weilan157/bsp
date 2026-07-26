@@ -46,32 +46,35 @@
 	 * WIFI,poweren_gpio: WiFi power enable pin (comment out if using sdio_pwrseq)
 	 */
 	wireless_wlan: wireless-wlan {
-		status = "okay";                                // Enable WiFi
+		status = "okay";
 		compatible = "wlan-platdata";
-		clocks = <&hym8563>;                            // RTC output 32KHz clock
-		clock-names = "ext_clock";
-		wifi_chip_type = "";                      		// WiFi chip type (currently not identified by this property)
+		/* rfkill-wlan.c：clock-names 必须是 clk_wifi */
+		clocks = <&hym8563>;
+		clock-names = "clk_wifi";
+		wifi_chip_type = "ap6256";
 		pinctrl-names = "default";
-		pinctrl-0 = <&wifi_host_wake_irq>;              // Wake host IRQ pin
-		WIFI,vbat_gpio = <&gpio0 RK_PD1 GPIO_ACTIVE_HIGH>; // VBAT power enable
-		WIFI,host_wake_irq = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>; // Wake host
-		WIFI,poweren_gpio = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>; // WiFi power enable (needed for rfkill recovery)
+		pinctrl-0 = <&wifi_host_wake_irq>;
+		WIFI,vbat_gpio = <&gpio0 RK_PD1 GPIO_ACTIVE_HIGH>;
+		WIFI,host_wake_irq = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
+		/*
+		 * 不要再配 WIFI,poweren_gpio：与下方 sdio_pwrseq 的 reset-gpios
+		 * 同为 GPIO1_PC6，双驱动会导致 REG_ON 被反复拉低，出现 HT Avail timeout。
+		 * WL_REG_ON 只由 mmc-pwrseq 控制。
+		 */
 	};
 
 	/*
-	 * SDIO Power Sequence Node
-	 * compatible: Simple power sequence driver
-	 * pinctrl-names/0: Power enable pin configuration
-	 * post-power-on-delay-ms: Power-on delay (e.g. 200ms)
-	 * reset-gpios: WiFi module reset pin (active low reset)
+	 * SDIO Power Sequence：打开 hym8563 的 32K (ext_clock) + 控制 WL_REG_ON
 	 */
 	sdio_pwrseq: sdio-pwrseq {
-		status = "okay";                                 // Enable SDIO power sequence
+		status = "okay";
 		compatible = "mmc-pwrseq-simple";
+		clocks = <&hym8563>;
+		clock-names = "ext_clock";
 		pinctrl-names = "default";
 		pinctrl-0 = <&wifi_poweren_gpio>;
-		post-power-on-delay-ms = <200>;                  // Power-on delay
-		reset-gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_LOW>;   // Reset pin
+		post-power-on-delay-ms = <500>;
+		reset-gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -115,7 +118,6 @@
 	non-removable;
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmmc1m0_bus4 &sdmmc1m0_clk &sdmmc1m0_cmd>;
-	sd-uhs-sdr104;
 };
 
 /*-----------------------------------------------------------

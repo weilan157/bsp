@@ -18,6 +18,51 @@ rootfs_umount() {
 	done
 }
 
+# AP6256：bcmdhd 需要 fw_bcm43456c5_ag.bin + nvram_ap6256.txt
+fetch_ap6256_firmware() {
+	local dir="${BSP_ROOT}/vendor/firmware/ap6256"
+	local base="https://raw.githubusercontent.com/armbian/firmware/master"
+	local f
+	mkdir -p "${dir}"
+	for f in fw_bcm43456c5_ag.bin nvram_ap6256.txt BCM4345C5.hcd; do
+		if [[ -s "${dir}/${f}" ]]; then
+			continue
+		fi
+		info "下载 AP6256 固件: ${f}"
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsSL -o "${dir}/${f}" "${base}/${f}" || die "下载失败: ${f}"
+		elif command -v wget >/dev/null 2>&1; then
+			wget -q -O "${dir}/${f}" "${base}/${f}" || die "下载失败: ${f}"
+		else
+			die "需要 curl 或 wget 以下载 AP6256 固件"
+		fi
+	done
+}
+
+install_ap6256_firmware() {
+	local root="$1"
+	local src="${BSP_ROOT}/vendor/firmware/ap6256"
+	fetch_ap6256_firmware
+	[[ -s "${src}/fw_bcm43456c5_ag.bin" ]] || die "缺少 ${src}/fw_bcm43456c5_ag.bin"
+	[[ -s "${src}/nvram_ap6256.txt" ]] || die "缺少 ${src}/nvram_ap6256.txt"
+
+	info "安装 AP6256 固件到 rootfs (/vendor/etc/firmware 与 /lib/firmware)"
+	run_root mkdir -p "${root}/vendor/etc/firmware" "${root}/lib/firmware/brcm"
+	run_root cp -a "${src}/fw_bcm43456c5_ag.bin" "${src}/nvram_ap6256.txt" \
+		"${root}/vendor/etc/firmware/"
+	run_root cp -a "${src}/fw_bcm43456c5_ag.bin" "${src}/nvram_ap6256.txt" \
+		"${root}/lib/firmware/"
+	# 兼容内核默认占位文件名（实际加载时会按芯片改写为上面的名字）
+	run_root ln -sf fw_bcm43456c5_ag.bin "${root}/vendor/etc/firmware/fw_bcmdhd.bin"
+	run_root ln -sf nvram_ap6256.txt "${root}/vendor/etc/firmware/nvram.txt"
+	run_root ln -sf fw_bcm43456c5_ag.bin "${root}/lib/firmware/fw_bcmdhd.bin"
+	run_root ln -sf nvram_ap6256.txt "${root}/lib/firmware/nvram.txt"
+	if [[ -s "${src}/BCM4345C5.hcd" ]]; then
+		run_root cp -a "${src}/BCM4345C5.hcd" "${root}/lib/firmware/brcm/"
+		run_root cp -a "${src}/BCM4345C5.hcd" "${root}/vendor/etc/firmware/"
+	fi
+}
+
 cmd_rootfs() {
 	parse_build_flags "$@"
 	command -v debootstrap >/dev/null 2>&1 || die "缺少 debootstrap，请运行 ./bsp env"
@@ -65,6 +110,7 @@ cmd_rootfs() {
 		run_root rsync -a "${overlay}/" "${rootfs}/"
 		run_root chmod 755 "${rootfs}/usr/local/sbin/rockchip-partnames" 2>/dev/null || true
 	fi
+	install_ap6256_firmware "${rootfs}"
 
 	rootfs_mount "${rootfs}"
 	cleanup_rootfs() { rootfs_umount "${rootfs}"; }

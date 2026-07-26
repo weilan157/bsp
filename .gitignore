@@ -20,6 +20,9 @@ logs/
 *.img
 *.itb
 *.dtb
+# 允许入库的 WiFi/BT 固件
+!vendor/firmware/ap6256/*.bin
+!vendor/firmware/ap6256/*.hcd
 
 # 编辑器
 .vscode/
