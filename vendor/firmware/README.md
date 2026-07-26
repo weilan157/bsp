@@ -5,4 +5,4 @@
 
 `rootfs` UUID `614e0000-0000-4b53-8000-1d28000054a9` 与 `vendor/rootfs/overlay/etc/fstab`、设备树 `bootargs` 一致。
 
-打包工具（`afptool`、`rkImageMaker`）见 `scripts/fetch-pack-tools.sh`。
+打包工具（`afptool`、`rkImageMaker`）由 `./bsp pack` 自动安装，或 `./bsp tools pack`。

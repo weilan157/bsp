@@ -7,7 +7,7 @@ sources/
 backup/
 out/
 
-# Rockchip 打包工具（由 fetch-pack-tools.sh 安装）
+# Rockchip 打包工具（由 ./bsp pack / tools pack 安装）
 vendor/tools/pack-firmware/afptool
 vendor/tools/pack-firmware/rkImageMaker
 

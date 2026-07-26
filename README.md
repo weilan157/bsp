@@ -2,154 +2,123 @@
 
 独立仓库：从 GitHub 拉取 `rockchip-linux/u-boot`、`rkbin`、`kernel`，在主机上编译 RK3576 引导链与内核。**不调用 SDK 的 `./build.sh`**。
 
-泰山派设备树已放在 `vendor/dts/rockchip/`，构建时复制到 GitHub kernel 树。
+统一入口：仓库根目录 **`./bsp`**。
+
+泰山派设备树在 `vendor/dts/rockchip/`，构建时复制到 GitHub kernel 树。
 
 ## 目录结构
 
 ```
 rockchip-bsp/
+├── bsp                      # 唯一构建入口
 ├── config.env.example
 ├── vendor/
 │   ├── dts/rockchip/        # 泰山派设备树
 │   ├── kernel-config/
 │   ├── fit/boot.its         # FIT 打包模板
+│   ├── firmware/            # parameter.txt / package-file
 │   └── rootfs/              # debootstrap overlay + chroot 配置
 ├── scripts/
-│   ├── init-env.sh
-│   ├── setup-sources.sh
-│   ├── setup-kernel.sh
-│   ├── sync-kernel-dts.sh
-│   ├── sync-kernel-config.sh
-│   ├── build-uboot.sh
-│   ├── build-kernel.sh
-│   ├── build-bootimg.sh
-│   ├── mk-fitimage.sh
-│   ├── build-debian-rootfs.sh
-│   ├── install-kernel-modules.sh
-│   ├── stage-firmware.sh
-│   ├── pack-firmware.sh
-│   ├── fetch-pack-tools.sh
-│   ├── fetch-host-tools.sh
-│   ├── build-all.sh
-│   ├── ch-rootfs.sh
-│   └── setup-all.sh
-├── out/                     # kernel/、rootfs/、rootfs.ext4（不入库）
-└── sources/
+│   ├── lib.sh               # 公共变量与工具函数
+│   ├── mod-env.sh
+│   ├── mod-sources.sh
+│   ├── mod-uboot.sh
+│   ├── mod-kernel.sh
+│   ├── mod-rootfs.sh
+│   └── mod-pack.sh
+├── out/                     # 产物（不入库）
+└── sources/                 # 克隆的源码（不入库）
 ```
 
 ## 快速开始
 
-### U-Boot
-
 ```bash
-cp config.env.example config.env
-./scripts/init-env.sh
-./scripts/setup-sources.sh
-./scripts/build-uboot.sh
+cp config.env.example config.env   # 或 ./bsp config 自动创建
+./bsp env                          # 主机依赖（需 sudo）
+./bsp setup all                    # 克隆 u-boot / rkbin / kernel
+./bsp uboot
+./bsp kernel
+./bsp bootimg                      # FIT boot.img → out/boot.img
+./bsp rootfs                       # Debian minbase → out/rootfs.ext4
+./bsp pack                         # out/update.img
 ```
 
-### Kernel（GitHub 官方 + 泰山派 DTS）
+一键全流程：
 
 ```bash
-./scripts/setup-kernel.sh      # clone develop-6.1 + 复制 tspi 设备树
-./scripts/build-kernel.sh      # Image + dtb
-./scripts/build-bootimg.sh     # FIT boot.img（resource.img + boot.img）
+./bsp env
+./bsp all                  # 有源码/产物缓存则跳过
+./bsp all --clean          # 强制重编
+./bsp all --update         # 拉取最新源码（产物仍可复用）
+./bsp all --skip-rootfs -j 8
+./bsp clean out            # 清除 out/；./bsp clean all 清编译缓存
 ```
 
-`out/boot.img` 可烧录 **boot 分区**（与 SDK 的 FIT 结构一致：kernel + dtb + resource，无 ramdisk）。
+常用命令见 `./bsp help`。配置项：
 
-与 SDK 一致的 GPU/触摸配置（可选）：
+```bash
+./bsp config                       # 列出有效配置
+./bsp config UBOOT_BOARD           # 读取
+./bsp config UBOOT_BOARD=rk3576    # 写入 config.env
+./bsp uboot --board rk3576 -j 8    # 仅当前命令覆盖
+```
+
+无 sudo 且缺 flex/bison：`./bsp env --host-tools`。
+
+### 可选：厂商内核配置
+
+```bash
+./bsp config TSPI_VENDOR_KERNEL_CONFIG=y
+./bsp kernel
+```
+
+默认 `n`，使用 GitHub 官方 defconfig，不启用 PANFROST。
+
+### Debian rootfs
+
+官方 **debootstrap minbase**（无桌面）。产物：
+
+- `out/rootfs/` — 根文件系统目录  
+- `out/rootfs.ext4` — 可烧录 rootfs 分区  
+
+默认 Debian 13 (trixie)。主机 debootstrap 过旧时：`./bsp config DEBIAN_RELEASE=bookworm`。
+
+### 从 SDK 刷新设备树
 
 ```bash
 # config.env
-TSPI_VENDOR_KERNEL_CONFIG=y
-./scripts/build-kernel.sh
-```
-
-默认 `TSPI_VENDOR_KERNEL_CONFIG=n`，使用 GitHub 官方 defconfig，不启用 PANFROST。
-
-### Debian 官方无桌面 rootfs
-
-与 SDK 的 `live-build` + 桌面/X/Weston 栈不同，使用 **官方 debootstrap minbase**：
-
-```bash
-./scripts/init-env.sh              # 含 debootstrap、qemu-user-static
-./scripts/build-debian-rootfs.sh
-```
-
-产物：
-
-- `out/rootfs/` — 根文件系统目录  
-- `out/rootfs.ext4` — 可烧录 rootfs 分区镜像  
-
-默认 **Debian 13 (trixie)**、`arm64`、无桌面。若主机 debootstrap 过旧，在 `config.env` 将 `DEBIAN_RELEASE=bookworm`。
-
-构建 rootfs 时默认执行 `modules_install`（`KERNEL_MODULES_INSTALL=y`，须先 `build-kernel.sh`）。
-
-### 固件打包（update.img）
-
-```bash
-./scripts/fetch-pack-tools.sh   # 从 PACK_TOOLS_SRC 或本机 SDK 复制 afptool
-./scripts/stage-firmware.sh     # 收集到 out/firmware/
-./scripts/pack-firmware.sh      # out/update.img
-```
-
-分区表见 `vendor/firmware/parameter.txt`（泰山派 RK3576 GPT）。
-
-### 一键全编译
-
-```bash
-sudo ./scripts/init-env.sh
-./scripts/build-all.sh
-```
-
-无 sudo 且缺 flex/bison 时：`./scripts/fetch-host-tools.sh`；可 `SKIP_ROOTFS=y ./scripts/build-all.sh` 仅编引导链。
-
-| 对比 | rockchip-bsp | 泰山派 SDK debian |
-|------|--------------|-------------------|
-| 基线 | 官方 debootstrap minbase | live-build + linaro 基线 |
-| 桌面 | 无 | desktop/xfce/gnome 等 |
-| Rockchip 多媒体 | 不含（可自行加 deb） | mpp/gstreamer/chromium 等 |
-| overlay | 分区 fstab + by-name | 完整 overlay-firmware 等 |
-
-从 SDK 刷新设备树后再 sync（可选）：
-
-```bash
-# config.env 中设置：
-# TSPI_DTS_SOURCE="/path/to/TaishanPi-3-Linux/kernel/arch/arm64/boot/dts/rockchip"
-./scripts/sync-kernel-dts.sh
-./scripts/build-kernel.sh
+# TSPI_DTS_SOURCE="/path/to/.../dts/rockchip"
+./bsp sync dts
+./bsp kernel
 ```
 
 ## 编译产物
 
-| 脚本 | 产物 |
+| 命令 | 产物 |
 |------|------|
-| `build-uboot.sh` | `sources/u-boot/uboot.img`、`trust.img`、loader 等 |
-| `build-kernel.sh` | `out/kernel/Image`、`out/kernel/tspi-3m-rk3576.dtb` |
-| `build-bootimg.sh` | `out/kernel/resource.img`、`out/boot.img`（FIT） |
-| `build-debian-rootfs.sh` | `out/rootfs/`、`out/rootfs.ext4`（含内核模块） |
-| `stage-firmware.sh` | `out/firmware/` 分区镜像集合 |
-| `pack-firmware.sh` | `out/update.img` |
-| `build-all.sh` | 上述全流程 |
+| `./bsp uboot` | `sources/u-boot/uboot.img`、loader 等 |
+| `./bsp kernel` | `out/kernel/Image`、`out/kernel/tspi-3m-rk3576.dtb` |
+| `./bsp bootimg` | `out/kernel/resource.img`、`out/boot.img` |
+| `./bsp rootfs` | `out/rootfs/`、`out/rootfs.ext4` |
+| `./bsp pack --stage-only` | `out/firmware/` |
+| `./bsp pack` | `out/update.img` |
+| `./bsp all` | 上述全流程 |
+
+分区表见 `vendor/firmware/parameter.txt`。
 
 ## 与 SDK 的关系
 
 | 组件 | rockchip-bsp | 泰山派 SDK |
 |------|--------------|------------|
-| kernel 源码 | GitHub `develop-6.1` | Gitea `rk.kernel-stable`（6.1.99 快照） |
+| 构建入口 | `./bsp` | `./build.sh` |
+| kernel 源码 | GitHub `develop-6.1` | Gitea `rk.kernel-stable` |
 | 设备树 | `vendor/dts` → 复制进 kernel | 已在 SDK kernel 内 |
-| defconfig | 官方 `rockchip_linux_defconfig` + `rk3576.config` | 同基线 + 可选 `tspi-vendor.config` |
-| 厂商 GPU 配置 | `TSPI_VENDOR_KERNEL_CONFIG=y` 可选 | SDK 默认含 PANFROST 等 |
-| boot.img / recovery | `build-bootimg.sh` → FIT `boot.img` | `./build.sh` |
-| rootfs | 官方 debootstrap 无桌面 | SDK live-build + 桌面/多媒体栈 |
-
-GitHub 内核 + 泰山派 DTS **能编出 Image/dtb**，但与 SDK 官方镜像在 **驱动/defconfig 版本** 上可能仍有差异，上板前请自行验证。
+| rootfs | 官方 debootstrap 无桌面 | live-build + 桌面/多媒体 |
 
 ## 分支
 
-- `main`：仓库骨架
-- `rk3576`：RK3576 脚本与 vendor 设备树
+- `main`：仓库骨架  
+- `rk3576`：RK3576 脚本与 vendor 设备树  
 
 ## 远程仓库
 

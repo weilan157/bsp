@@ -1,0 +1,205 @@
+#!/bin/bash
+# rockchip-bsp 唯一构建入口
+# 用法: ./bsp <command> [options]
+
+set -euo pipefail
+
+BSP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${BSP_ROOT}/scripts"
+CONFIG_FILE="${BSP_ROOT}/config.env"
+CONFIG_EXAMPLE="${BSP_ROOT}/config.env.example"
+
+usage() {
+	cat <<'EOF'
+用法: ./bsp <command> [options]
+
+命令:
+  env [--host-tools]     安装主机依赖；--host-tools 无 sudo 时拉 flex/bison
+  config [KEY[=VALUE]]   查看/读取/写入 config.env（无文件时从 example 创建）
+  setup [uboot|kernel|all] [--update]
+                         克隆源码（已有则跳过；--update 再拉取）
+  sync dts|config        同步设备树或 kernel config fragment
+  uboot [--clean]        编译 U-Boot（已有产物则跳过）
+  kernel [--clean]       编译内核 Image + dtb（已有则跳过）
+  bootimg [--clean]      打包 FIT boot.img（已有则跳过）
+  rootfs [--clean]       构建 Debian rootfs + ext4（已有则跳过）
+  modules [ROOTFS]       安装内核模块到 rootfs（默认 out/rootfs）
+  pack [--stage-only] [--clean]
+                         打包 update.img（已有则跳过）
+  all [选项]             全流程（各步有缓存则跳过）
+  clean [目标]           清除缓存：uboot|kernel|bootimg|rootfs|pack|out|sources|all
+  help                   显示本帮助
+
+all / 编译选项:
+  --skip-rootfs          跳过 rootfs
+  --skip-pack            跳过 update.img
+  --clean, --force       忽略编译缓存，强制重编
+  --update               强制 git fetch/pull 源码
+
+全局选项（写在 command 前或后均可）:
+  -j N                   并行编译任务数（MAKE_JOBS）
+  --board NAME           UBOOT_BOARD
+  --cross-compile PREFIX CROSS_COMPILE_PREFIX（如 aarch64-linux-gnu-）
+
+示例:
+  ./bsp all                    # 增量：有缓存跳过
+  ./bsp all --clean            # 强制重编全部
+  ./bsp all --update           # 更新源码后再编（仍可用缓存产物）
+  ./bsp all --clean --update   # 更新源码并强制重编
+  ./bsp clean out              # 只清 out/
+  ./bsp clean all              # 清编译产物（保留 sources/）
+  ./bsp uboot --clean
+EOF
+}
+
+cmd_config() {
+	if [[ ! -f "${CONFIG_FILE}" ]]; then
+		[[ -f "${CONFIG_EXAMPLE}" ]] || die "缺少 ${CONFIG_EXAMPLE}"
+		cp "${CONFIG_EXAMPLE}" "${CONFIG_FILE}"
+		info "已创建 ${CONFIG_FILE}（自 config.env.example）"
+	fi
+
+	if [[ $# -eq 0 ]]; then
+		grep -vE '^\s*(#|$)' "${CONFIG_FILE}" || true
+		return
+	fi
+
+	local spec="$1"
+	if [[ "${spec}" == *"="* ]]; then
+		local key="${spec%%=*}"
+		local val="${spec#*=}"
+		[[ -n "${key}" ]] || die "无效: ${spec}"
+		if grep -qE "^[# ]*${key}=" "${CONFIG_FILE}"; then
+			sed -i -E "s|^[# ]*${key}=.*|${key}=${val}|" "${CONFIG_FILE}"
+		else
+			printf '\n%s=%s\n' "${key}" "${val}" >> "${CONFIG_FILE}"
+		fi
+		info "已设置 ${key}=${val}"
+	else
+		grep -E "^[# ]*${spec}=" "${CONFIG_FILE}" || die "未找到配置项: ${spec}"
+	fi
+}
+
+# 预解析：分离全局选项与子命令参数
+ARGS=()
+COMMAND=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-h|--help|help)
+			usage
+			exit 0
+			;;
+		-j)
+			[[ $# -ge 2 ]] || { echo "需要 -j N" >&2; exit 1; }
+			export MAKE_JOBS="$2"
+			shift 2
+			;;
+		-j*)
+			export MAKE_JOBS="${1#-j}"
+			shift
+			;;
+		--board)
+			[[ $# -ge 2 ]] || { echo "需要 --board NAME" >&2; exit 1; }
+			export UBOOT_BOARD="$2"
+			shift 2
+			;;
+		--board=*)
+			export UBOOT_BOARD="${1#--board=}"
+			shift
+			;;
+		--cross-compile)
+			[[ $# -ge 2 ]] || { echo "需要 --cross-compile PREFIX" >&2; exit 1; }
+			export CROSS_COMPILE_PREFIX="$2"
+			shift 2
+			;;
+		--cross-compile=*)
+			export CROSS_COMPILE_PREFIX="${1#--cross-compile=}"
+			shift
+			;;
+		--clean|--force)
+			export BSP_FORCE=1
+			ARGS+=("$1")
+			shift
+			;;
+		--update)
+			export BSP_UPDATE=1
+			ARGS+=("$1")
+			shift
+			;;
+		-*)
+			# 子命令选项（如 --skip-rootfs），可出现在命令前后
+			ARGS+=("$1")
+			shift
+			;;
+		*)
+			if [[ -z "${COMMAND}" ]]; then
+				COMMAND="$1"
+			else
+				ARGS+=("$1")
+			fi
+			shift
+			;;
+	esac
+done
+
+if [[ -z "${COMMAND}" ]]; then
+	usage
+	exit 1
+fi
+
+# help / config 允许尚无 config.env
+case "${COMMAND}" in
+	help)
+		usage
+		exit 0
+		;;
+	config)
+		# shellcheck source=scripts/lib.sh
+		BSP_ALLOW_MISSING_CONFIG=1
+		# shellcheck source=/dev/null
+		source "${SCRIPT_DIR}/lib.sh"
+		cmd_config "${ARGS[@]+"${ARGS[@]}"}"
+		exit 0
+		;;
+esac
+
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-env.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-sources.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-uboot.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-kernel.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-rootfs.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-pack.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/mod-clean.sh"
+
+case "${COMMAND}" in
+	env) cmd_env "${ARGS[@]+"${ARGS[@]}"}" ;;
+	setup) cmd_setup "${ARGS[@]+"${ARGS[@]}"}" ;;
+	sync) cmd_sync "${ARGS[@]+"${ARGS[@]}"}" ;;
+	uboot|u-boot) cmd_uboot "${ARGS[@]+"${ARGS[@]}"}" ;;
+	kernel) cmd_kernel "${ARGS[@]+"${ARGS[@]}"}" ;;
+	bootimg) cmd_bootimg "${ARGS[@]+"${ARGS[@]}"}" ;;
+	rootfs) cmd_rootfs "${ARGS[@]+"${ARGS[@]}"}" ;;
+	modules) cmd_modules "${ARGS[@]+"${ARGS[@]}"}" ;;
+	pack) cmd_pack "${ARGS[@]+"${ARGS[@]}"}" ;;
+	all) cmd_all "${ARGS[@]+"${ARGS[@]}"}" ;;
+	clean) cmd_clean "${ARGS[@]+"${ARGS[@]}"}" ;;
+	tools)
+		case "${ARGS[0]:-pack}" in
+			pack) cmd_tools_pack ;;
+			host) cmd_env_host_tools ;;
+			*) die "tools 用法: ./bsp tools [pack|host]" ;;
+		esac
+		;;
+	*)
+		die "未知命令: ${COMMAND}（./bsp help）"
+		;;
+esac

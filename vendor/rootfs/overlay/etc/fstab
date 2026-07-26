@@ -1,5 +1,4 @@
-# /etc/fstab: 泰山派 RK3576 典型 GPT（rootfs 分区 grow）
-# 实际 UUID 以板端 blkid 为准，首次启动后可用 tune2fs/ blkid 核对
-
-UUID=614e0000-0000-4b53-8000-1d28000054a9  /          ext4  defaults,noatime  0 1
-tmpfs                                         /tmp       tmpfs defaults,noatime,mode=1777  0 0
+# root 用 GPT PARTUUID（与 parameter.txt uuid:rootfs / 内核 root=PARTUUID 一致）
+# 勿用 UUID=：那是 ext4 文件系统 UUID，mkfs 后与分区 UUID 不同，会导致 systemd-remount-fs 失败
+PARTUUID=614e0000-0000-4b53-8000-1d28000054a9  /  ext4  defaults,noatime,x-systemd.growfs  0 1
+# /tmp 由 systemd tmp.mount 管理，勿在此重复挂载

@@ -1,6 +1,6 @@
 # rockchip-bsp 官方 Debian 无桌面 rootfs
 
-使用 `debootstrap --variant=minbase`，不依赖 SDK `live-build` / 桌面栈。
+使用 `debootstrap --variant=minbase`，不依赖 SDK `live-build` / 桌面栈。构建：`./bsp rootfs`。
 
 ## 默认
 
@@ -13,8 +13,10 @@
 
 ## overlay
 
-- `overlay/etc/fstab` — RK3576 典型 rootfs UUID（与 SDK parameter.txt 一致）
-- `overlay/etc/init.d/S02rockchip-partnames` — GPT 分区符号链接
+- `overlay/etc/fstab` — 根分区用 **PARTUUID**（与 `parameter.txt` / 内核 `root=PARTUUID` 一致），并启用 `x-systemd.growfs`
+- `overlay/etc/systemd/system/fiq-getty.service` — 调试串口 login（ttyFIQ0）
+- `overlay/etc/systemd/system/rockchip-partnames.service` — `/dev/block/by-name` 符号链接
+- `overlay/etc/modprobe.d/autofs4-compat.conf` — systemd `autofs4` → 内核 `autofs`
 
 ## 额外软件包
 

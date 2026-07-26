@@ -6,4 +6,4 @@
 - `rk3576-linux.dtsi`（tspi 引用）
 - `device-tree-overlays/`（dtbo 与 `ubootEnv.txt`）
 
-由 `./scripts/sync-kernel-dts.sh` 同步到 `sources/kernel/`。若 `config.env` 中设置了 `TSPI_DTS_SOURCE`，则优先从该 SDK 路径刷新。
+由 `./bsp sync dts` 同步到 `sources/kernel/`。若 `config.env` 中设置了 `TSPI_DTS_SOURCE`，则优先从该 SDK 路径刷新。

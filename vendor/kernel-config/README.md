@@ -13,5 +13,5 @@
 ```bash
 # config.env
 TSPI_KERNEL_CONFIG_SOURCE="/path/to/SDK/kernel/arch/arm64/configs"
-./scripts/sync-kernel-config.sh
+./bsp sync config
 ```
