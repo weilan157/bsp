@@ -2,14 +2,11 @@
 config.env
 .local/
 
-# 克隆的源码与编译产物
+# 克隆的源码、工具链与编译产物
 sources/
+toolchains/
 backup/
 out/
-
-# Rockchip 打包工具（由 ./bsp pack / tools pack 安装）
-vendor/tools/pack-firmware/afptool
-vendor/tools/pack-firmware/rkImageMaker
 
 # 构建日志
 logs/
@@ -20,9 +17,8 @@ logs/
 *.img
 *.itb
 *.dtb
-# 允许入库的 WiFi/BT 固件
-!vendor/firmware/ap6256/*.bin
-!vendor/firmware/ap6256/*.hcd
+# 允许入库的固件
+!vendor/firmware/ky/esos.elf
 
 # 编辑器
 .vscode/

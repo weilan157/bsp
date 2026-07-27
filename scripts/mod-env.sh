@@ -1,12 +1,51 @@
 #!/bin/bash
-# 主机环境：apt 依赖、无 sudo 时的 host-tools
+# 主机环境：apt 依赖、Ky riscv64 交叉工具链
+
+cmd_env_ky_toolchain() {
+	local name="${TOOLCHAIN_NAME}"
+	local url="${TOOLCHAIN_URL}"
+	local dest="${BSP_ROOT}/toolchains/${name}"
+	local tarball="${BSP_ROOT}/toolchains/${name}.tar.xz"
+	local marker="${dest}/.download-complete"
+
+	mkdir -p "${BSP_ROOT}/toolchains"
+
+	if [[ -f "${marker}" ]] && [[ -x "${dest}/bin/${CROSS_COMPILE_PREFIX}gcc" ]]; then
+		info "Ky toolchain 已就绪: ${dest}"
+		return 0
+	fi
+
+	if [[ ! -f "${tarball}" ]]; then
+		info "下载 Ky toolchain (~610MB): ${url}"
+		if command -v curl >/dev/null 2>&1; then
+			curl -fL --retry 3 --connect-timeout 30 -o "${tarball}.partial" "${url}"
+			mv -f "${tarball}.partial" "${tarball}"
+		elif command -v wget >/dev/null 2>&1; then
+			wget -O "${tarball}.partial" "${url}"
+			mv -f "${tarball}.partial" "${tarball}"
+		else
+			die "需要 curl 或 wget 以下载 toolchain"
+		fi
+	fi
+
+	info "解压 ${tarball} -> ${BSP_ROOT}/toolchains/"
+	rm -rf "${dest}"
+	tar -C "${BSP_ROOT}/toolchains" -xf "${tarball}"
+	[[ -x "${dest}/bin/${CROSS_COMPILE_PREFIX}gcc" ]] || \
+		die "解压后未找到 ${dest}/bin/${CROSS_COMPILE_PREFIX}gcc"
+	touch "${marker}"
+	info "Ky toolchain 安装完成: ${dest}/bin"
+	"${dest}/bin/${CROSS_COMPILE_PREFIX}gcc" --version | head -1
+}
 
 cmd_env() {
 	local host_tools=0
+	local skip_toolchain=0
 	local arg
 	for arg in "$@"; do
 		case "${arg}" in
 			--host-tools) host_tools=1 ;;
+			--skip-toolchain) skip_toolchain=1 ;;
 			*) die "env 未知选项: ${arg}" ;;
 		esac
 	done
@@ -22,8 +61,9 @@ cmd_env() {
 	local packages=(
 		build-essential bc bison flex device-tree-compiler
 		python3 python3-pip libssl-dev git rsync curl pkg-config
-		gcc-aarch64-linux-gnu debootstrap qemu-user-static binfmt-support
-		debian-archive-keyring e2fsprogs
+		u-boot-tools debootstrap qemu-user-static binfmt-support
+		debian-archive-keyring e2fsprogs dosfstools fdisk gdisk parted
+		xz-utils mtools
 	)
 
 	info "安装 apt 依赖（需要 sudo）..."
@@ -42,12 +82,25 @@ cmd_env() {
 		ensure_python2_wrapper
 	fi
 
-	command -v dtc >/dev/null 2>&1 || die "dtc 未安装成功"
-	command -v "${CROSS_COMPILE_PREFIX}gcc" >/dev/null 2>&1 || \
-		die "交叉编译器 ${CROSS_COMPILE_PREFIX}gcc 未安装成功"
-	command -v debootstrap >/dev/null 2>&1 || die "debootstrap 未安装成功"
+	# 启用 qemu-riscv64 binfmt（debootstrap chroot）
+	if [[ -x /usr/sbin/update-binfmts ]]; then
+		run_root update-binfmts --enable qemu-riscv64 2>/dev/null || true
+	fi
 
-	info "主机环境就绪"
+	command -v dtc >/dev/null 2>&1 || die "dtc 未安装成功"
+	command -v mkimage >/dev/null 2>&1 || die "mkimage (u-boot-tools) 未安装成功"
+	command -v debootstrap >/dev/null 2>&1 || die "debootstrap 未安装成功"
+	command -v mkfs.vfat >/dev/null 2>&1 || die "dosfstools 未安装成功"
+
+	if [[ "${skip_toolchain}" -eq 0 ]]; then
+		cmd_env_ky_toolchain
+	fi
+
+	setup_cross_compile
+	command -v "${CROSS_COMPILE_PREFIX}gcc" >/dev/null 2>&1 || \
+		die "交叉编译器 ${CROSS_COMPILE_PREFIX}gcc 不可用"
+
+	info "主机环境就绪（ARCH=${KERNEL_ARCH}, CROSS=${CROSS_COMPILE_PREFIX}）"
 }
 
 cmd_env_host_tools() {

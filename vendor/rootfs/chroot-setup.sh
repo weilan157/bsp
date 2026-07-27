@@ -6,11 +6,11 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export APT_INSTALL="apt-get install -y --no-install-recommends"
 
-HOSTNAME="${ROOTFS_HOSTNAME:-rockchip}"
+HOSTNAME="${ROOTFS_HOSTNAME:-orangepi}"
 LOCALE="${ROOTFS_LOCALE:-en_US.UTF-8}"
 ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD:-root}"
-USER_NAME="${ROOTFS_USER:-debian}"
-USER_PASSWORD="${ROOTFS_USER_PASSWORD:-debian}"
+USER_NAME="${ROOTFS_USER:-orangepi}"
+USER_PASSWORD="${ROOTFS_USER_PASSWORD:-orangepi}"
 
 echo ">>> 配置 sources.list（仅 main，默认清华源）"
 cat > /etc/apt/sources.list <<EOF
@@ -26,8 +26,7 @@ echo ">>> 安装基础包"
 # shellcheck disable=SC2086
 ${APT_INSTALL} systemd systemd-sysv systemd-timesyncd dbus sudo openssh-server \
 	locales ca-certificates net-tools iproute2 iputils-ping \
-	ifupdown isc-dhcp-client wget curl nano less kmod \
-	wpasupplicant iw rfkill wireless-regdb
+	ifupdown isc-dhcp-client wget curl nano less kmod
 
 if [[ -f /tmp/extra-packages.list ]]; then
 	mapfile -t EXTRA_PKGS < <(grep -vE '^\s*(#|$)' /tmp/extra-packages.list || true)
@@ -60,31 +59,16 @@ fi
 
 echo ">>> 启用 ssh / timesyncd"
 systemctl enable ssh 2>/dev/null || true
-# 板子无有效 RTC 时常停在错误日期，apt/sqv 会报 Not live until
 systemctl enable systemd-timesyncd.service 2>/dev/null || true
 
-echo ">>> 启用 rockchip-partnames（原生 systemd，替代 SysV）"
-chmod 755 /usr/local/sbin/rockchip-partnames 2>/dev/null || true
-rm -f /etc/init.d/S02rockchip-partnames
-if [[ -f /etc/systemd/system/rockchip-partnames.service ]]; then
-	systemctl enable rockchip-partnames.service 2>/dev/null || true
-fi
-
-echo ">>> 启用 FIQ 调试串口 getty (ttyFIQ0)"
-# kernel cmdline 的 console=ttyFIQ0 会触发生成 serial-getty@ttyFIQ0，
-# 但 FIQ 口不产生 udev unit，会卡 1.5min 后失败；改用自备 unit。
-systemctl mask serial-getty@ttyFIQ0.service 2>/dev/null || true
-if [[ -f /etc/systemd/system/fiq-getty.service ]]; then
-	systemctl enable fiq-getty.service 2>/dev/null || true
-fi
-# 允许 root 在调试串口登录
+echo ">>> 串口 getty (ttyS0)"
+systemctl enable serial-getty@ttyS0.service 2>/dev/null || true
 touch /etc/securetty
-if ! grep -qx 'ttyFIQ0' /etc/securetty; then
-	echo 'ttyFIQ0' >> /etc/securetty
+grep -qxF 'ttyS0' /etc/securetty || echo 'ttyS0' >> /etc/securetty
+
+# 允许 root SSH 登录（调试用）
+if [[ -f /etc/ssh/sshd_config ]]; then
+	sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 fi
 
-echo ">>> 清理"
-apt-get clean
-rm -rf /var/lib/apt/lists/* /tmp/*
-
-echo ">>> rootfs 配置完成"
+echo ">>> chroot 配置完成"

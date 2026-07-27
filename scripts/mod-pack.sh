@@ -1,151 +1,170 @@
 #!/bin/bash
-# 固件收集与 update.img 打包、afptool 下载
+# Ky X1 SD / eMMC 打包与安装（参考 orangepi-build write_uboot_platform）
 
-_PACK_DEFAULT_MIRRORS=(
-	"https://cdn.jsdelivr.net/gh/vicharak-in/rockchip-linux-tools@master/linux/Linux_Pack_Firmware/rockdev"
-	"https://ghproxy.net/https://raw.githubusercontent.com/vicharak-in/rockchip-linux-tools/master/linux/Linux_Pack_Firmware/rockdev"
-	"https://raw.githubusercontent.com/vicharak-in/rockchip-linux-tools/master/linux/Linux_Pack_Firmware/rockdev"
-)
+# dd bootloader 到 SD/镜像用户区（扇区单位，bs=512）
+# bootinfo_sd @0, FSBL @256, env @768, u-boot-opensbi.itb @1664
+write_uboot_to_device() {
+	local src_dir="$1" dest="$2"
+	[[ -f "${src_dir}/bootinfo_sd.bin" ]] || die "缺少 bootinfo_sd.bin"
+	[[ -f "${src_dir}/FSBL.bin" ]] || die "缺少 FSBL.bin"
+	[[ -f "${src_dir}/u-boot-env-default.bin" ]] || die "缺少 u-boot-env-default.bin"
+	[[ -f "${src_dir}/u-boot-opensbi.itb" ]] || die "缺少 u-boot-opensbi.itb"
 
-pack_is_elf() {
-	[[ -f "$1" ]] && [[ "$(od -An -N4 -tx1 "$1" 2>/dev/null | tr -d ' \n')" == "7f454c46" ]]
+	info "写入 U-Boot 用户区 -> ${dest}"
+	run_root dd if="${src_dir}/bootinfo_sd.bin" of="${dest}" seek=0 conv=notrunc status=none
+	run_root dd if="${src_dir}/FSBL.bin" of="${dest}" seek=256 conv=notrunc status=none
+	run_root dd if="${src_dir}/u-boot-env-default.bin" of="${dest}" seek=768 conv=notrunc status=none
+	run_root dd if="${src_dir}/u-boot-opensbi.itb" of="${dest}" seek=1664 conv=notrunc status=none
+	sync
 }
 
-pack_tools_ready() {
-	local dest="${PACK_TOOLS_DIR:-${BSP_ROOT}/vendor/tools/pack-firmware}"
-	[[ -x "${dest}/afptool" ]] && [[ -x "${dest}/rkImageMaker" ]] && \
-		pack_is_elf "${dest}/afptool" && pack_is_elf "${dest}/rkImageMaker"
+# eMMC：先写 boot0（bootinfo_emmc + FSBL），再写用户区（与 SD 相同扇区布局）
+# 对齐 orangepi-build ky.conf write_uboot_platform
+write_uboot_to_emmc() {
+	local src_dir="$1" mmc="$2"
+	local boot0="${mmc}boot0"
+	local sys_boot0
+
+	[[ -b "${mmc}" ]] || die "不是块设备: ${mmc}"
+	[[ -b "${boot0}" ]] || die "缺少 ${boot0}（该设备不像带 boot 分区的 eMMC）"
+	[[ -f "${src_dir}/bootinfo_emmc.bin" ]] || die "缺少 bootinfo_emmc.bin，请先 ./bsp uboot"
+	[[ -f "${src_dir}/FSBL.bin" ]] || die "缺少 FSBL.bin"
+
+	sys_boot0="/sys/block/$(basename "${mmc}")/$(basename "${boot0}")/force_ro"
+	[[ -e "${sys_boot0}" ]] || die "缺少 ${sys_boot0}"
+
+	info "写入 eMMC boot0 -> ${boot0}"
+	run_root bash -c "echo 0 > '${sys_boot0}'"
+	run_root dd if="${src_dir}/bootinfo_emmc.bin" of="${boot0}" status=none
+	# 官方：seek=512 bs=1（字节偏移）
+	run_root dd if="${src_dir}/FSBL.bin" of="${boot0}" seek=512 bs=1 conv=notrunc status=none
+	sync
+	run_root bash -c "echo 1 > '${sys_boot0}'"
+
+	write_uboot_to_device "${src_dir}" "${mmc}"
 }
 
-pack_mirror_list() {
-	local -a m
-	if [[ -n "${PACK_TOOLS_DOWNLOAD_MIRRORS:-}" ]]; then
-		# shellcheck disable=SC2206
-		m=(${PACK_TOOLS_DOWNLOAD_MIRRORS})
-	elif [[ -n "${PACK_TOOLS_DOWNLOAD_BASE:-}" ]]; then
-		m=("${PACK_TOOLS_DOWNLOAD_BASE}" "${_PACK_DEFAULT_MIRRORS[@]}")
+emmc_resolve_parts() {
+	local mmc="$1"
+	if [[ -b "${mmc}p1" ]]; then
+		EMMC_BOOT_PART="${mmc}p1"
+		EMMC_ROOT_PART="${mmc}p2"
+	elif [[ -b "${mmc}1" ]]; then
+		EMMC_BOOT_PART="${mmc}1"
+		EMMC_ROOT_PART="${mmc}2"
 	else
-		m=("${_PACK_DEFAULT_MIRRORS[@]}")
+		EMMC_BOOT_PART="${mmc}p1"
+		EMMC_ROOT_PART="${mmc}p2"
 	fi
-	local -A seen=()
-	local x
-	for x in "${m[@]}"; do
-		[[ -n "${x}" ]] || continue
-		[[ -n "${seen[$x]:-}" ]] && continue
-		seen[$x]=1
-		echo "${x}"
+}
+
+emmc_wait_parts() {
+	local i
+	for i in $(seq 1 30); do
+		emmc_resolve_parts "$1"
+		[[ -b "${EMMC_BOOT_PART}" && -b "${EMMC_ROOT_PART}" ]] && return 0
+		run_root partprobe "$1" 2>/dev/null || true
+		sleep 0.3
 	done
+	die "分区节点未出现（期望 ${1}p1 / ${1}p2）"
 }
 
-pack_http_get() {
-	local url="$1" out="$2"
-	if command -v curl >/dev/null 2>&1; then
-		curl -fL --retry 2 --connect-timeout 20 --max-time 180 -o "${out}" "${url}"
-	elif command -v wget >/dev/null 2>&1; then
-		wget -q --tries=2 --timeout=20 -O "${out}" "${url}"
-	else
-		die "需要 curl 或 wget 以下载打包工具"
-	fi
+partition_gpt_boot_root() {
+	local dest="$1"
+	local offset_mib="${SD_OFFSET_MIB}"
+	local boot_mib="${SD_BOOT_MIB}"
+
+	info "分区 ${dest}: GPT offset=${offset_mib}MiB boot=${boot_mib}MiB root=剩余"
+	run_root sfdisk "${dest}" <<EOF
+label: gpt
+unit: sectors
+first-lba: 34
+
+1 : start=${offset_mib}MiB, size=${boot_mib}MiB, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="bootfs"
+2 : start=$((offset_mib + boot_mib))MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="rootfs"
+EOF
+	run_root partprobe "${dest}" 2>/dev/null || true
+	sync
 }
 
-pack_download_one() {
-	local dest="$1" name="$2"
-	local tmp="${dest}/${name}.tmp" base url
-	rm -f "${tmp}"
-	while IFS= read -r base; do
-		url="${base%/}/${name}"
-		info "下载 ${name} <- ${url}"
-		if pack_http_get "${url}" "${tmp}" && pack_is_elf "${tmp}"; then
-			chmod 755 "${tmp}"
-			mv -f "${tmp}" "${dest}/${name}"
-			return 0
-		fi
-		warn "失败，尝试下一镜像: ${name}"
-		rm -f "${tmp}"
-	done < <(pack_mirror_list)
-	die "无法下载 ${name}，请设置 PACK_TOOLS_SRC 或检查网络"
-}
+flash_boot_root_parts() {
+	local boot_dev="$1" root_dev="$2"
+	local mnt
 
-cmd_tools_pack() {
-	local dest="${PACK_TOOLS_DIR:-${BSP_ROOT}/vendor/tools/pack-firmware}"
-	mkdir -p "${dest}"
+	[[ -f "${OUT_DIR}/boot.img" ]] || die "缺少 out/boot.img，请先 ./bsp bootimg"
+	[[ -f "${OUT_DIR}/rootfs.ext4" ]] || die "缺少 out/rootfs.ext4，请先 ./bsp rootfs"
 
-	if pack_tools_ready; then
-		info "打包工具已存在: ${dest}"
-		return 0
+	info "写入 boot 分区 ${boot_dev}..."
+	run_root dd if="${OUT_DIR}/boot.img" of="${boot_dev}" bs=1M status=progress conv=fsync
+	sync
+
+	info "写入 rootfs 分区 ${root_dev}..."
+	run_root dd if="${OUT_DIR}/rootfs.ext4" of="${root_dev}" bs=1M status=progress conv=fsync
+	run_root e2fsck -fy "${root_dev}" >/dev/null 2>&1 || true
+	run_root resize2fs "${root_dev}" >/dev/null 2>&1 || true
+	sync
+
+	mnt="$(mktemp -d)"
+	cleanup_flash_mnt() {
+		run_root umount "${mnt}/boot" 2>/dev/null || true
+		run_root umount "${mnt}" 2>/dev/null || true
+		rmdir "${mnt}" 2>/dev/null || true
+	}
+	trap cleanup_flash_mnt EXIT
+
+	run_root mount "${root_dev}" "${mnt}"
+	mkdir -p "${mnt}/boot"
+	run_root mount "${boot_dev}" "${mnt}/boot"
+
+	local boot_uuid root_uuid
+	boot_uuid="$(blkid -s UUID -o value "${boot_dev}")"
+	root_uuid="$(blkid -s UUID -o value "${root_dev}")"
+	run_root tee "${mnt}/etc/fstab" >/dev/null <<EOF
+UUID=${root_uuid} / ext4 defaults,noatime 0 1
+UUID=${boot_uuid} /boot vfat defaults,sync 0 2
+EOF
+	if [[ -f "${mnt}/boot/orangepiEnv.txt" ]]; then
+		run_root sed -i "s|^rootdev=.*|rootdev=UUID=${root_uuid}|" "${mnt}/boot/orangepiEnv.txt" || true
 	fi
 
-	local src="${PACK_TOOLS_SRC:-}"
-	if [[ -z "${src}" ]]; then
-		while IFS= read -r d; do
-			if [[ -x "${d}/afptool" ]] && [[ -x "${d}/rkImageMaker" ]]; then
-				src="${d}"
-				break
-			fi
-		done < <(find "${BSP_ROOT}/.." /opt -path '*/Linux_Pack_Firmware/rockdev' -type d 2>/dev/null | head -20)
-	fi
-
-	if [[ -n "${src}" ]]; then
-		info "从本机复制: ${src}"
-		install -m 755 "${src}/afptool" "${src}/rkImageMaker" "${dest}/"
-	else
-		info "本机未找到 SDK 打包工具，从网络下载..."
-		pack_download_one "${dest}" afptool
-		pack_download_one "${dest}" rkImageMaker
-	fi
-
-	pack_tools_ready || die "打包工具安装失败: ${dest}"
-	info "已安装打包工具到 ${dest}"
-	ls -lh "${dest}/afptool" "${dest}/rkImageMaker"
-}
-
-mk_misc_img() {
-	local misc_img="${OUT_DIR}/firmware/misc.img"
-	mkdir -p "${OUT_DIR}/firmware"
-	truncate -s 48k "${misc_img}"
-	info "已生成空白 misc.img: ${misc_img}"
-}
-
-fw_link_or_copy() {
-	local src="$1" dst="$2"
-	if [[ "$(readlink -f "${src}")" == "$(readlink -f "${dst}" 2>/dev/null || true)" ]]; then
-		return 0
-	fi
-	rm -f "${dst}"
-	ln -rsf "${src}" "${dst}"
+	sync
+	cleanup_flash_mnt
+	trap - EXIT
 }
 
 cmd_stage() {
-	local fw_dir parameter_src loader
+	local fw_dir uboot_src
 	fw_dir="${OUT_DIR}/firmware"
-	parameter_src="${FIRMWARE_PARAMETER:-${BSP_ROOT}/vendor/firmware/parameter.txt}"
 	mkdir -p "${fw_dir}"
 
 	[[ -d "${UBOOT_DIR}" ]] || die "请先 ./bsp setup uboot && ./bsp uboot"
+	have_uboot_artifacts || die "缺少 U-Boot 产物，请先 ./bsp uboot"
 
-	loader="$(find "${UBOOT_DIR}" -maxdepth 1 -name 'rk3576_spl_loader_*.bin' | head -1)"
-	[[ -n "${loader}" ]] || die "未找到 rk3576_spl_loader_*.bin，请先 ./bsp uboot"
-	[[ -f "${UBOOT_DIR}/uboot.img" ]] || die "未找到 uboot.img"
-
-	info "收集固件到 ${fw_dir}/"
-	fw_link_or_copy "${loader}" "${fw_dir}/MiniLoaderAll.bin"
-	fw_link_or_copy "${UBOOT_DIR}/uboot.img" "${fw_dir}/uboot.img"
-	install -m 644 "${parameter_src}" "${fw_dir}/parameter.txt"
-
-	if [[ ! -f "${fw_dir}/misc.img" ]]; then
-		mk_misc_img
+	uboot_src="${OUT_DIR}/uboot"
+	if [[ ! -f "${uboot_src}/u-boot-opensbi.itb" ]]; then
+		uboot_src="${UBOOT_DIR}"
 	fi
 
+	info "收集固件到 ${fw_dir}/"
+	local f
+	for f in bootinfo_sd.bin bootinfo_emmc.bin bootinfo_spinor.bin \
+		FSBL.bin u-boot-env-default.bin u-boot-opensbi.itb; do
+		[[ -f "${uboot_src}/${f}" ]] || continue
+		install -m 644 "${uboot_src}/${f}" "${fw_dir}/${f}"
+	done
+
 	if [[ -f "${OUT_DIR}/boot.img" ]]; then
-		fw_link_or_copy "${OUT_DIR}/boot.img" "${fw_dir}/boot.img"
+		install -m 644 "${OUT_DIR}/boot.img" "${fw_dir}/boot.img"
 	else
 		warn "缺少 out/boot.img，请先 ./bsp bootimg"
 	fi
+	if [[ -d "${OUT_DIR}/boot" ]]; then
+		rm -rf "${fw_dir}/boot"
+		cp -a "${OUT_DIR}/boot" "${fw_dir}/boot"
+	fi
 
 	if [[ -f "${OUT_DIR}/rootfs.ext4" ]]; then
-		fw_link_or_copy "${OUT_DIR}/rootfs.ext4" "${fw_dir}/rootfs.img"
-	elif [[ -f "${OUT_DIR}/rootfs/rootfs.img" ]]; then
-		fw_link_or_copy "${OUT_DIR}/rootfs/rootfs.img" "${fw_dir}/rootfs.img"
+		install -m 644 "${OUT_DIR}/rootfs.ext4" "${fw_dir}/rootfs.ext4"
 	else
 		warn "缺少 rootfs.ext4，请先 ./bsp rootfs"
 	fi
@@ -171,76 +190,198 @@ cmd_pack() {
 		return
 	fi
 
-	local pack_dir package_file work update_img
-	pack_dir="${PACK_TOOLS_DIR:-${BSP_ROOT}/vendor/tools/pack-firmware}"
-	package_file="${FIRMWARE_PACKAGE_FILE:-${BSP_ROOT}/vendor/firmware/package-file}"
-	work="${OUT_DIR}/firmware-pack"
-	update_img="${OUT_DIR}/update.img"
+	local sd_img
+	sd_img="$(sd_image_path)"
 
 	if ! bsp_want_force && have_pack_artifacts; then
-		info "已有 update.img，跳过打包（加 --clean 强制重做）"
-		ls -lh "${update_img}"
+		info "已有 SD 镜像，跳过打包（加 --clean 强制重做）"
+		ls -lh "${sd_img}"
 		return 0
 	fi
 
-	cmd_tools_pack
-	[[ -x "${pack_dir}/afptool" ]] || die "缺少 ${pack_dir}/afptool"
-	[[ -x "${pack_dir}/rkImageMaker" ]] || die "缺少 ${pack_dir}/rkImageMaker"
-
 	cmd_stage
 
-	[[ -f "${OUT_DIR}/firmware/MiniLoaderAll.bin" ]] || die "缺少 MiniLoaderAll.bin"
-	[[ -f "${OUT_DIR}/firmware/parameter.txt" ]] || die "缺少 parameter.txt"
-	[[ -f "${OUT_DIR}/firmware/uboot.img" ]] || die "缺少 uboot.img"
-	[[ -f "${OUT_DIR}/firmware/boot.img" ]] || die "缺少 boot.img"
+	[[ -f "${OUT_DIR}/boot.img" ]] || die "缺少 out/boot.img"
+	[[ -f "${OUT_DIR}/rootfs.ext4" ]] || die "缺少 out/rootfs.ext4"
+	[[ -f "${OUT_DIR}/firmware/bootinfo_sd.bin" ]] || die "缺少 bootloader 产物"
 
-	rm -rf "${work}"
-	mkdir -p "${work}/Image"
+	local offset_mib boot_mib root_mib total_mib root_bytes
+	offset_mib="${SD_OFFSET_MIB}"
+	boot_mib="${SD_BOOT_MIB}"
+	root_bytes="$(stat -c%s "${OUT_DIR}/rootfs.ext4")"
+	root_mib=$(( (root_bytes + 1024*1024 - 1) / (1024*1024) + SD_ROOTFS_EXTRA_MIB ))
+	total_mib=$(( offset_mib + boot_mib + root_mib + 16 ))
 
-	local _oldpwd name line pkg_name img_path tag
-	_oldpwd="$(pwd)"
-	cd "${work}"
+	info "创建 SD 镜像 ${sd_img} (${total_mib}MiB: offset=${offset_mib} boot=${boot_mib} root≈${root_mib})"
+	rm -f "${sd_img}"
+	truncate -s "${total_mib}M" "${sd_img}"
 
-	install -m 644 "${package_file}" package-file
-	for name in MiniLoaderAll.bin parameter.txt uboot.img misc.img boot.img rootfs.img; do
-		[[ -f "${OUT_DIR}/firmware/${name}" ]] || continue
-		ln -rsf "${OUT_DIR}/firmware/${name}" "Image/${name}"
+	# 镜像文件：直接 sfdisk（不必 sudo）
+	sfdisk "${sd_img}" <<EOF
+label: gpt
+unit: sectors
+first-lba: 34
+
+1 : start=${offset_mib}MiB, size=${boot_mib}MiB, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="bootfs"
+2 : start=$((offset_mib + boot_mib))MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="rootfs"
+EOF
+
+	write_uboot_to_device "${OUT_DIR}/firmware" "${sd_img}"
+
+	local loop boot_dev root_dev
+	loop="$(run_root losetup -f --show -P "${sd_img}")"
+	boot_dev="${loop}p1"
+	root_dev="${loop}p2"
+	local i
+	for i in $(seq 1 20); do
+		[[ -b "${boot_dev}" && -b "${root_dev}" ]] && break
+		sleep 0.2
+	done
+	[[ -b "${boot_dev}" ]] || die "未出现 ${boot_dev}"
+	[[ -b "${root_dev}" ]] || die "未出现 ${root_dev}"
+
+	flash_boot_root_parts "${boot_dev}" "${root_dev}"
+	run_root losetup -d "${loop}" 2>/dev/null || true
+
+	install_emmc_helper_script
+
+	info "完成: ${sd_img}"
+	info "烧录 SD: sudo dd if=${sd_img} of=/dev/sdX bs=4M status=progress conv=fsync"
+	info "安装 eMMC: ./bsp emmc /dev/mmcblkX --yes  或板上 out/firmware/install-emmc.sh"
+	ls -lh "${sd_img}"
+}
+
+install_emmc_helper_script() {
+	local helper="${OUT_DIR}/install-emmc.sh"
+	cat > "${helper}" <<'HELPER'
+#!/bin/bash
+# 在已启动的 Orange Pi R2S 上，把当前目录固件写入 eMMC
+# 用法: sudo ./install-emmc.sh /dev/mmcblk1 [--yes]
+# 同目录需有: bootinfo_emmc.bin FSBL.bin bootinfo_sd.bin
+#   u-boot-env-default.bin u-boot-opensbi.itb boot.img rootfs.ext4
+set -euo pipefail
+MMC="${1:-}"
+YES="${2:-}"
+[[ -n "${MMC}" ]] || { echo "用法: $0 /dev/mmcblkX [--yes]"; exit 1; }
+[[ -b "${MMC}" ]] || { echo "不是块设备: ${MMC}"; exit 1; }
+BOOT0="${MMC}boot0"
+[[ -b "${BOOT0}" ]] || { echo "缺少 ${BOOT0}"; exit 1; }
+DIR="$(cd "$(dirname "$0")" && pwd)"
+for f in bootinfo_emmc.bin FSBL.bin bootinfo_sd.bin u-boot-env-default.bin u-boot-opensbi.itb boot.img rootfs.ext4; do
+	[[ -f "${DIR}/${f}" ]] || { echo "缺少 ${DIR}/${f}"; exit 1; }
+done
+if [[ "${YES}" != "--yes" ]]; then
+	echo "将清空并安装系统到 ${MMC}（含 boot0）"
+	read -r -p "输入 YES 继续: " ans
+	[[ "${ans}" == "YES" ]] || exit 1
+fi
+OFFSET_MIB="${OFFSET_MIB:-30}"
+BOOT_MIB="${BOOT_MIB:-256}"
+SYS_BOOT0="/sys/block/$(basename "${MMC}")/$(basename "${BOOT0}")/force_ro"
+echo 0 > "${SYS_BOOT0}"
+dd if="${DIR}/bootinfo_emmc.bin" of="${BOOT0}" status=none
+dd if="${DIR}/FSBL.bin" of="${BOOT0}" seek=512 bs=1 conv=notrunc status=none
+sync
+echo 1 > "${SYS_BOOT0}"
+sfdisk "${MMC}" <<EOF
+label: gpt
+unit: sectors
+first-lba: 34
+
+1 : start=${OFFSET_MIB}MiB, size=${BOOT_MIB}MiB, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, name="bootfs"
+2 : start=$((OFFSET_MIB + BOOT_MIB))MiB, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="rootfs"
+EOF
+partprobe "${MMC}" || true
+dd if="${DIR}/bootinfo_sd.bin" of="${MMC}" seek=0 conv=notrunc status=none
+dd if="${DIR}/FSBL.bin" of="${MMC}" seek=256 conv=notrunc status=none
+dd if="${DIR}/u-boot-env-default.bin" of="${MMC}" seek=768 conv=notrunc status=none
+dd if="${DIR}/u-boot-opensbi.itb" of="${MMC}" seek=1664 conv=notrunc status=none
+sync
+BOOT_PART="${MMC}p1"; ROOT_PART="${MMC}p2"
+[[ -b "${BOOT_PART}" ]] || BOOT_PART="${MMC}1"
+[[ -b "${ROOT_PART}" ]] || ROOT_PART="${MMC}2"
+dd if="${DIR}/boot.img" of="${BOOT_PART}" bs=1M status=progress conv=fsync
+dd if="${DIR}/rootfs.ext4" of="${ROOT_PART}" bs=1M status=progress conv=fsync
+e2fsck -fy "${ROOT_PART}" || true
+resize2fs "${ROOT_PART}" || true
+MNT="$(mktemp -d)"
+mount "${ROOT_PART}" "${MNT}"
+mkdir -p "${MNT}/boot"
+mount "${BOOT_PART}" "${MNT}/boot"
+BUUID="$(blkid -s UUID -o value "${BOOT_PART}")"
+RUUID="$(blkid -s UUID -o value "${ROOT_PART}")"
+cat > "${MNT}/etc/fstab" <<EOF
+UUID=${RUUID} / ext4 defaults,noatime 0 1
+UUID=${BUUID} /boot vfat defaults,sync 0 2
+EOF
+sed -i "s|^rootdev=.*|rootdev=UUID=${RUUID}|" "${MNT}/boot/orangepiEnv.txt" || true
+sync
+umount "${MNT}/boot" || true
+umount "${MNT}" || true
+rmdir "${MNT}" || true
+echo "eMMC 安装完成。拔掉 SD 后从 eMMC 启动。"
+HELPER
+	chmod +x "${helper}"
+	local fw="${OUT_DIR}/firmware"
+	if [[ -d "${fw}" ]]; then
+		install -m 755 "${helper}" "${fw}/install-emmc.sh"
+	fi
+	info "已生成 eMMC 安装脚本: ${helper}"
+}
+
+# 用法: ./bsp emmc /dev/mmcblk1 [--yes] [--uboot-only]
+cmd_emmc() {
+	local mmc="" uboot_only=0 yes=0
+	local arg
+	for arg in "$@"; do
+		case "${arg}" in
+			--uboot-only) uboot_only=1 ;;
+			--yes|-y) yes=1 ;;
+			--clean|--force) export BSP_FORCE=1 ;;
+			/dev/mmcblk[0-9]*) mmc="${arg}" ;;
+			*)
+				die "emmc 未知选项: ${arg}（用法: ./bsp emmc /dev/mmcblkX [--yes] [--uboot-only]）"
+				;;
+		esac
 	done
 
-	{
-		while IFS= read -r line || [[ -n "${line}" ]]; do
-			[[ "${line}" =~ ^[[:space:]]*# ]] && continue
-			[[ -z "${line//[[:space:]]/}" ]] && continue
-			pkg_name="${line%%[[:space:]]*}"
-			img_path="${line##*[[:space:]]}"
-			case "${pkg_name}" in
-				package-file|backup|RESERVED)
-					echo -e "${pkg_name}\t${img_path}"
-					;;
-				*)
-					if [[ -f "${img_path}" ]]; then
-						echo -e "${pkg_name}\t${img_path}"
-					else
-						warn "package-file 跳过缺失镜像: ${pkg_name} -> ${img_path}"
-					fi
-					;;
-			esac
-		done
-	} < package-file > package-file.filtered
-	mv package-file.filtered package-file
+	[[ -n "${mmc}" ]] || die "请指定 eMMC 设备，例如: ./bsp emmc /dev/mmcblk1 --yes"
+	[[ "${mmc}" =~ ^/dev/mmcblk[0-9]+$ ]] || die "设备名无效（仅允许 /dev/mmcblkN）: ${mmc}"
+	[[ -b "${mmc}" ]] || die "设备不存在: ${mmc}"
+	[[ -b "${mmc}boot0" ]] || die "缺少 ${mmc}boot0，确认是 eMMC 且已插入"
 
-	info "package-file:"
-	cat package-file
+	local root_src
+	root_src="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+	if [[ -n "${root_src}" && "${root_src}" == "${mmc}"* ]]; then
+		die "拒绝：当前根文件系统在 ${mmc} 上（${root_src}）。请从 SD 启动后再装 eMMC。"
+	fi
 
-	"${pack_dir}/afptool" -pack ./ "${work}/update.raw.img"
-	tag="RK$(dd if=Image/MiniLoaderAll.bin bs=1 count=4 skip=21 status=none | rev)"
-	"${pack_dir}/rkImageMaker" "-${tag}" Image/MiniLoaderAll.bin \
-		"${work}/update.raw.img" "${update_img}" -os_type:androidos
+	if [[ "${yes}" -ne 1 ]]; then
+		warn "即将写入 ${mmc}（含 ${mmc}boot0），原数据会丢失"
+		read -r -p "输入 YES 继续: " ans
+		[[ "${ans}" == "YES" ]] || die "已取消"
+	fi
 
-	cd "${_oldpwd}"
+	cmd_stage
+	[[ -f "${OUT_DIR}/firmware/bootinfo_emmc.bin" ]] || die "缺少 bootinfo_emmc.bin"
 
-	info "完成: ${update_img}"
-	ls -lh "${update_img}"
+	if [[ "${uboot_only}" -eq 1 ]]; then
+		write_uboot_to_emmc "${OUT_DIR}/firmware" "${mmc}"
+		info "仅 bootloader 已写入 ${mmc}"
+		return 0
+	fi
+
+	[[ -f "${OUT_DIR}/boot.img" ]] || die "缺少 out/boot.img"
+	[[ -f "${OUT_DIR}/rootfs.ext4" ]] || die "缺少 out/rootfs.ext4"
+
+	partition_gpt_boot_root "${mmc}"
+	write_uboot_to_emmc "${OUT_DIR}/firmware" "${mmc}"
+	emmc_wait_parts "${mmc}"
+	flash_boot_root_parts "${EMMC_BOOT_PART}" "${EMMC_ROOT_PART}"
+	install_emmc_helper_script
+
+	info "eMMC 安装完成: ${mmc}"
+	info "拔掉 SD 卡后上电，应从 eMMC 启动"
 }
 
 cmd_all() {
@@ -264,7 +405,7 @@ cmd_all() {
 		fi
 	fi
 
-	info "全量编译（缓存：有则跳过；--clean 强制重编；--update 拉取源码）"
+	info "全量编译 BOARD=${BOARD}（缓存：有则跳过；--clean 强制重编；--update 拉取源码）"
 	cmd_setup_uboot_sources
 	cmd_uboot
 	cmd_setup_kernel_sources
@@ -276,11 +417,7 @@ cmd_all() {
 	fi
 
 	if [[ "${skip_pack}" != "y" ]]; then
-		if cmd_tools_pack 2>/dev/null; then
-			cmd_pack || warn "pack 失败（可能缺少 rootfs 或打包工具）"
-		else
-			warn "跳过 update.img 打包（./bsp pack 可重试）"
-		fi
+		cmd_pack || warn "pack 失败（可能缺少 rootfs）"
 	fi
 
 	info "全量编译完成。产物: out/ 与 sources/u-boot/"

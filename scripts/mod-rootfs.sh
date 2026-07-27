@@ -1,5 +1,5 @@
 #!/bin/bash
-# Debian rootfs：chroot 挂载、debootstrap、ext4
+# Debian rootfs：chroot 挂载、debootstrap、ext4（riscv64）
 
 rootfs_mount() {
 	local root="$1"
@@ -18,49 +18,24 @@ rootfs_umount() {
 	done
 }
 
-# AP6256：bcmdhd 需要 fw_bcm43456c5_ag.bin + nvram_ap6256.txt
-fetch_ap6256_firmware() {
-	local dir="${BSP_ROOT}/vendor/firmware/ap6256"
-	local base="https://raw.githubusercontent.com/armbian/firmware/master"
-	local f
-	mkdir -p "${dir}"
-	for f in fw_bcm43456c5_ag.bin nvram_ap6256.txt BCM4345C5.hcd; do
-		if [[ -s "${dir}/${f}" ]]; then
-			continue
-		fi
-		info "下载 AP6256 固件: ${f}"
-		if command -v curl >/dev/null 2>&1; then
-			curl -fsSL -o "${dir}/${f}" "${base}/${f}" || die "下载失败: ${f}"
-		elif command -v wget >/dev/null 2>&1; then
-			wget -q -O "${dir}/${f}" "${base}/${f}" || die "下载失败: ${f}"
-		else
-			die "需要 curl 或 wget 以下载 AP6256 固件"
-		fi
-	done
+install_ky_firmware() {
+	local root="$1"
+	local src="${BSP_ROOT}/vendor/firmware/ky/esos.elf"
+	if [[ -s "${src}" ]]; then
+		info "安装 Ky 固件 esos.elf"
+		run_root mkdir -p "${root}/lib/firmware"
+		run_root cp -a "${src}" "${root}/lib/firmware/esos.elf"
+	else
+		warn "缺少 ${src}（部分 Ky 功能可能不可用）"
+	fi
 }
 
-install_ap6256_firmware() {
-	local root="$1"
-	local src="${BSP_ROOT}/vendor/firmware/ap6256"
-	fetch_ap6256_firmware
-	[[ -s "${src}/fw_bcm43456c5_ag.bin" ]] || die "缺少 ${src}/fw_bcm43456c5_ag.bin"
-	[[ -s "${src}/nvram_ap6256.txt" ]] || die "缺少 ${src}/nvram_ap6256.txt"
-
-	info "安装 AP6256 固件到 rootfs (/vendor/etc/firmware 与 /lib/firmware)"
-	run_root mkdir -p "${root}/vendor/etc/firmware" "${root}/lib/firmware/brcm"
-	run_root cp -a "${src}/fw_bcm43456c5_ag.bin" "${src}/nvram_ap6256.txt" \
-		"${root}/vendor/etc/firmware/"
-	run_root cp -a "${src}/fw_bcm43456c5_ag.bin" "${src}/nvram_ap6256.txt" \
-		"${root}/lib/firmware/"
-	# 兼容内核默认占位文件名（实际加载时会按芯片改写为上面的名字）
-	run_root ln -sf fw_bcm43456c5_ag.bin "${root}/vendor/etc/firmware/fw_bcmdhd.bin"
-	run_root ln -sf nvram_ap6256.txt "${root}/vendor/etc/firmware/nvram.txt"
-	run_root ln -sf fw_bcm43456c5_ag.bin "${root}/lib/firmware/fw_bcmdhd.bin"
-	run_root ln -sf nvram_ap6256.txt "${root}/lib/firmware/nvram.txt"
-	if [[ -s "${src}/BCM4345C5.hcd" ]]; then
-		run_root cp -a "${src}/BCM4345C5.hcd" "${root}/lib/firmware/brcm/"
-		run_root cp -a "${src}/BCM4345C5.hcd" "${root}/vendor/etc/firmware/"
-	fi
+qemu_static_for_arch() {
+	case "${DEBIAN_ARCH}" in
+		riscv64) echo "/usr/bin/qemu-riscv64-static" ;;
+		arm64|aarch64) echo "/usr/bin/qemu-aarch64-static" ;;
+		*) echo "/usr/bin/qemu-${DEBIAN_ARCH}-static" ;;
+	esac
 }
 
 cmd_rootfs() {
@@ -72,13 +47,14 @@ cmd_rootfs() {
 		die "本机 debootstrap 不支持 ${DEBIAN_RELEASE}，请升级 debootstrap 或 ./bsp config DEBIAN_RELEASE=bookworm"
 	fi
 
-	local rootfs image mirror overlay chroot_setup extra_list
+	local rootfs image mirror overlay chroot_setup extra_list qemu_static
 	rootfs="${OUT_DIR}/rootfs"
 	image="${OUT_DIR}/rootfs.ext4"
 	mirror="http://${DEBIAN_MIRROR}/debian"
 	overlay="${BSP_ROOT}/vendor/rootfs/overlay"
 	chroot_setup="${BSP_ROOT}/vendor/rootfs/chroot-setup.sh"
 	extra_list="${BSP_ROOT}/vendor/rootfs/extra-packages.list"
+	qemu_static="$(qemu_static_for_arch)"
 
 	if ! bsp_want_force && have_rootfs_artifacts; then
 		info "已有 rootfs.ext4，跳过构建（加 --clean 强制重做）"
@@ -95,22 +71,27 @@ cmd_rootfs() {
 	fi
 	mkdir -p "${OUT_DIR}"
 
-	info "debootstrap 第一阶段..."
-	run_root debootstrap --arch="${DEBIAN_ARCH}" --variant="${DEBIAN_VARIANT}" \
+	# 交叉架构：foreign + second-stage（配合 qemu-user-static）
+	info "debootstrap --foreign (${DEBIAN_ARCH})..."
+	run_root debootstrap --foreign --arch="${DEBIAN_ARCH}" --variant="${DEBIAN_VARIANT}" \
 		"${DEBIAN_RELEASE}" "${rootfs}" "${mirror}"
 	run_root chown root:root "${rootfs}"
 
-	local qemu_static="/usr/bin/qemu-aarch64-static"
 	if [[ -x "${qemu_static}" ]]; then
 		run_root cp "${qemu_static}" "${rootfs}/usr/bin/"
+	else
+		die "未找到 ${qemu_static}，请 ./bsp env 安装 qemu-user-static"
 	fi
+
+	info "debootstrap --second-stage..."
+	run_root chroot "${rootfs}" /debootstrap/debootstrap --second-stage
+	run_root chown root:root "${rootfs}"
 
 	if [[ -d "${overlay}" ]]; then
 		info "应用 overlay: ${overlay}"
 		run_root rsync -a "${overlay}/" "${rootfs}/"
-		run_root chmod 755 "${rootfs}/usr/local/sbin/rockchip-partnames" 2>/dev/null || true
 	fi
-	install_ap6256_firmware "${rootfs}"
+	install_ky_firmware "${rootfs}"
 
 	rootfs_mount "${rootfs}"
 	cleanup_rootfs() { rootfs_umount "${rootfs}"; }
@@ -149,7 +130,7 @@ cmd_rootfs() {
 	fi
 
 	run_root rm -f "${rootfs}/tmp/chroot-setup.sh" "${rootfs}/tmp/extra-packages.list"
-	run_root rm -f "${rootfs}/usr/bin/qemu-aarch64-static"
+	run_root rm -f "${rootfs}/usr/bin/$(basename "${qemu_static}")"
 
 	cleanup_rootfs
 	trap - EXIT

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 内核编译、FIT boot.img、模块安装
+# 内核编译、boot 分区镜像、模块安装（Ky X1 / RISC-V）
 
 cmd_kernel() {
 	parse_build_flags "$@"
@@ -14,30 +14,49 @@ cmd_kernel() {
 	setup_cross_compile
 	local jobs arch fragments dts_target
 	jobs="$(job_count)"
-	arch=arm64
+	arch="${KERNEL_ARCH}"
 	local -a kmake
 	kmake=(make -C "${KERNEL_DIR}" -j"${jobs}" ARCH="${arch}" CROSS_COMPILE="${CROSS_COMPILE}")
 	fragments="$(kernel_defconfig_fragments)"
 
-	# 始终同步 vendor/kernel-config（含 bsp-boot.config、rk3576.config 等）
 	cmd_sync_config
+	cmd_sync_dts
 
-	info "配置内核: ${KERNEL_DEFCONFIG} ${fragments}"
-	if [[ "${TSPI_VENDOR_KERNEL_CONFIG}" == "y" ]]; then
-		info "已启用 TSPI_VENDOR_KERNEL_CONFIG（PANFROST / Mali Bifrost 等）"
+	local dotconfig="${KERNEL_DOTCONFIG}"
+	if [[ -z "${dotconfig}" ]] && [[ -z "${KERNEL_DEFCONFIG}" ]]; then
+		dotconfig="${BSP_ROOT}/vendor/kernel-config/linux-ky-current.config"
 	fi
-	# shellcheck disable=SC2086
-	"${kmake[@]}" "${KERNEL_DEFCONFIG}" ${fragments}
 
-	dts_target="rockchip/${KERNEL_DTS_NAME}.dtb"
+	if [[ -n "${dotconfig}" ]]; then
+		[[ -f "${dotconfig}" ]] || die "KERNEL_DOTCONFIG 不存在: ${dotconfig}"
+		info "使用完整内核配置: ${dotconfig}"
+		cp "${dotconfig}" "${KERNEL_DIR}/.config"
+		"${kmake[@]}" olddefconfig
+	else
+		info "配置内核: ${KERNEL_DEFCONFIG} ${fragments}"
+		# shellcheck disable=SC2086
+		"${kmake[@]}" "${KERNEL_DEFCONFIG}" ${fragments}
+	fi
+
+	dts_target="${KERNEL_DTS_SUBDIR}/${KERNEL_DTS_NAME}.dtb"
 	info "编译 Image 与 ${dts_target} (jobs=${jobs})..."
 	"${kmake[@]}" Image
 	"${kmake[@]}" "${dts_target}"
 
 	mkdir -p "${OUT_DIR}/kernel"
-	install -m 644 "${KERNEL_DIR}/arch/arm64/boot/Image" "${OUT_DIR}/kernel/Image"
-	install -m 644 "${KERNEL_DIR}/arch/arm64/boot/dts/rockchip/${KERNEL_DTS_NAME}.dtb" \
+	install -m 644 "${KERNEL_DIR}/arch/${arch}/boot/Image" "${OUT_DIR}/kernel/Image"
+	install -m 644 \
+		"${KERNEL_DIR}/arch/${arch}/boot/dts/${KERNEL_DTS_SUBDIR}/${KERNEL_DTS_NAME}.dtb" \
 		"${OUT_DIR}/kernel/${KERNEL_DTS_NAME}.dtb"
+
+	# 复制 overlay dtbo（若有）
+	local overlay_src overlay_dst
+	overlay_src="${KERNEL_DIR}/arch/${arch}/boot/dts/${KERNEL_DTS_SUBDIR}/overlay"
+	overlay_dst="${OUT_DIR}/kernel/overlay"
+	if [[ -d "${overlay_src}" ]]; then
+		mkdir -p "${overlay_dst}"
+		find "${overlay_src}" -name '*.dtbo' -exec install -m 644 {} "${overlay_dst}/" \;
+	fi
 
 	info "编译完成:"
 	info "  ${OUT_DIR}/kernel/Image"
@@ -53,36 +72,16 @@ find_mkimage() {
 		echo "${UBOOT_DIR}/tools/mkimage"
 		return
 	fi
-	if [[ -x "${RKBIN_DIR}/tools/mkimage" ]]; then
-		echo "${RKBIN_DIR}/tools/mkimage"
+	if command -v mkimage >/dev/null 2>&1; then
+		command -v mkimage
 		return
 	fi
-	die "未找到 mkimage，请先 ./bsp setup uboot 并 ./bsp uboot"
+	die "未找到 mkimage，请 ./bsp env 安装 u-boot-tools 或先 ./bsp uboot"
 }
 
-mk_fitimage() {
-	local target_img="$1" its="$2" kernel_img="$3" kernel_dtb="$4" resource_img="$5"
-	local tmp_its mkimage_bin
-	[[ -f "${its}" ]] || die "ITS 不存在: ${its}"
-	local f
-	for f in "${kernel_img}" "${kernel_dtb}" "${resource_img}"; do
-		[[ -f "${f}" ]] || die "缺少文件: ${f}"
-	done
-	mkimage_bin="${MKIMAGE:?}"
-	tmp_its="$(mktemp)"
-	cp "${its}" "${tmp_its}"
-	sed -i \
-		-e "s~@KERNEL_DTB@~$(realpath -q "${kernel_dtb}")~" \
-		-e "s~@KERNEL_IMG@~$(realpath -q "${kernel_img}")~" \
-		-e "s~@RESOURCE_IMG@~$(realpath -q "${resource_img}")~" \
-		"${tmp_its}"
-	"${mkimage_bin}" -f "${tmp_its}" -E -p 0x800 "${target_img}"
-	rm -f "${tmp_its}"
-}
-
+# 生成 /boot 内容目录 + FAT boot.img（非 Rockchip FIT）
 cmd_bootimg() {
 	parse_build_flags "$@"
-	[[ -d "${KERNEL_DIR}" ]] || die "请先运行 ./bsp setup kernel"
 
 	if ! bsp_want_force && have_bootimg_artifacts; then
 		info "已有 boot.img，跳过打包（加 --clean 强制重做）"
@@ -90,56 +89,84 @@ cmd_bootimg() {
 		return 0
 	fi
 
-	local kernel_image kernel_dtb resource_img boot_img fit_its resource_tool
+	local kernel_image kernel_dtb boot_dir boot_img mkimage_bin
 	kernel_image="${OUT_DIR}/kernel/Image"
 	kernel_dtb="${OUT_DIR}/kernel/${KERNEL_DTS_NAME}.dtb"
-	resource_img="${OUT_DIR}/kernel/resource.img"
+	boot_dir="${OUT_DIR}/boot"
 	boot_img="${OUT_DIR}/boot.img"
-	fit_its="${BOOT_FIT_ITS:-${BSP_ROOT}/vendor/fit/boot.its}"
 
 	if [[ ! -f "${kernel_image}" ]] || [[ ! -f "${kernel_dtb}" ]]; then
 		info "未找到内核产物，先执行 ./bsp kernel"
 		cmd_kernel
 	fi
 
-	export MKIMAGE
-	MKIMAGE="$(find_mkimage)"
-	info "mkimage: ${MKIMAGE}"
+	mkimage_bin="$(find_mkimage)"
+	info "mkimage: ${mkimage_bin}"
 
-	resource_tool="${KERNEL_DIR}/scripts/resource_tool"
-	if [[ ! -x "${resource_tool}" ]]; then
-		info "编译 kernel resource_tool..."
-		make -C "${KERNEL_DIR}/scripts" resource_tool
+	rm -rf "${boot_dir}"
+	mkdir -p "${boot_dir}/dtb/${KERNEL_DTS_SUBDIR}/overlay"
+
+	install -m 644 "${kernel_image}" "${boot_dir}/Image"
+	install -m 644 "${kernel_dtb}" \
+		"${boot_dir}/dtb/${KERNEL_DTS_SUBDIR}/${KERNEL_DTS_NAME}.dtb"
+
+	if [[ -d "${OUT_DIR}/kernel/overlay" ]]; then
+		find "${OUT_DIR}/kernel/overlay" -name '*.dtbo' \
+			-exec install -m 644 {} "${boot_dir}/dtb/${KERNEL_DTS_SUBDIR}/overlay/" \;
 	fi
 
-	local logo_args=()
-	[[ -f "${KERNEL_DIR}/logo.bmp" ]] && logo_args+=( "${KERNEL_DIR}/logo.bmp" )
-	[[ -f "${KERNEL_DIR}/logo_kernel.bmp" ]] && logo_args+=( "${KERNEL_DIR}/logo_kernel.bmp" )
+	# orangepiEnv.txt
+	local env_src="${BOOT_ENV_SRC}"
+	[[ -f "${env_src}" ]] || die "缺少 ${env_src}"
+	{
+		cat "${env_src}"
+		echo "fdtfile=${KERNEL_DTS_SUBDIR}/${KERNEL_DTS_NAME}.dtb"
+		echo "overlay_prefix=x1"
+		echo "rootdev=/dev/mmcblk0p2"
+		echo "rootfstype=ext4"
+		echo "console=both"
+		echo "earlycon=on"
+	} > "${boot_dir}/orangepiEnv.txt"
 
-	info "生成 resource.img ..."
-	rm -f "${resource_img}"
-	if [[ ${#logo_args[@]} -gt 0 ]]; then
-		( cd "${KERNEL_DIR}" && ./scripts/resource_tool "${kernel_dtb}" "${logo_args[@]}" )
+	# boot.cmd → boot.scr（无 initrd）
+	local cmd_src="${BOOT_CMD_SRC}"
+	[[ -f "${cmd_src}" ]] || die "缺少 ${cmd_src}"
+	install -m 644 "${cmd_src}" "${boot_dir}/boot.cmd"
+	"${mkimage_bin}" -C none -A riscv -T script \
+		-d "${boot_dir}/boot.cmd" "${boot_dir}/boot.scr"
+
+	# 生成 FAT boot.img
+	local boot_mib="${SD_BOOT_MIB}"
+	info "打包 FAT boot.img (${boot_mib}MiB)..."
+	rm -f "${boot_img}"
+	truncate -s "${boot_mib}M" "${boot_img}"
+	mkfs.vfat -F 32 -n BOOT "${boot_img}" >/dev/null
+
+	if command -v mcopy >/dev/null 2>&1; then
+		# mtools
+		mcopy -i "${boot_img}" -s "${boot_dir}/Image" ::/Image
+		mcopy -i "${boot_img}" -s "${boot_dir}/boot.cmd" ::/boot.cmd
+		mcopy -i "${boot_img}" -s "${boot_dir}/boot.scr" ::/boot.scr
+		mcopy -i "${boot_img}" -s "${boot_dir}/orangepiEnv.txt" ::/orangepiEnv.txt
+		mcopy -i "${boot_img}" -s "${boot_dir}/dtb" ::/dtb
 	else
-		( cd "${KERNEL_DIR}" && ./scripts/resource_tool "${kernel_dtb}" )
+		local mnt
+		mnt="$(mktemp -d)"
+		run_root mount -o loop "${boot_img}" "${mnt}"
+		run_root cp -a "${boot_dir}/." "${mnt}/"
+		run_root umount "${mnt}"
+		rmdir "${mnt}"
 	fi
-	mv -f "${KERNEL_DIR}/resource.img" "${resource_img}"
-
-	[[ -f "${fit_its}" ]] || die "FIT ITS 不存在: ${fit_its}"
-	info "打包 FIT -> ${boot_img}"
-	mk_fitimage "${boot_img}" "${fit_its}" "${kernel_image}" "${kernel_dtb}" "${resource_img}"
 
 	info "完成:"
-	info "  ${resource_img}"
+	info "  ${boot_dir}/"
 	info "  ${boot_img}"
 }
 
-# stdout 仅一行 kernelrelease（供 rootfs 捕获）；日志走 stderr
 install_kernel_modules() {
 	local rootfs="${1:-${OUT_DIR}/rootfs}"
-	local _info _warn
+	local _info
 	_info() { echo "[INFO] $*" >&2; }
-	_warn() { echo "[WARN] $*" >&2; }
 
 	[[ -d "${KERNEL_DIR}" ]] || die "请先运行 ./bsp setup kernel"
 	[[ -d "${rootfs}" ]] || die "rootfs 不存在: ${rootfs}（先 ./bsp rootfs）"
@@ -148,7 +175,7 @@ install_kernel_modules() {
 	setup_cross_compile
 	local jobs arch kernel_release mod_count
 	jobs="$(job_count)"
-	arch=arm64
+	arch="${KERNEL_ARCH}"
 	local -a kmake
 	kmake=(make -C "${KERNEL_DIR}" -j"${jobs}" ARCH="${arch}" CROSS_COMPILE="${CROSS_COMPILE}" --no-print-directory)
 
