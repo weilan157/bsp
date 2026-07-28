@@ -7,6 +7,7 @@ sources/
 toolchains/
 backup/
 out/
+dl/
 
 # 构建日志
 logs/

@@ -14,6 +14,8 @@ clone_or_update() {
 			return 0
 		fi
 		info "更新 ${name} (${branch})..."
+		# 更新后需重新打 RT 补丁
+		rm -f "${dir}/.bsp-rt-applied"
 		git -C "${dir}" fetch origin
 		git -C "${dir}" checkout "${branch}"
 		git -C "${dir}" pull --ff-only origin "${branch}" || true
@@ -34,7 +36,119 @@ cmd_setup_kernel_sources() {
 	mkdir -p "${SOURCES_DIR}"
 	clone_or_update "${KERNEL_REPO}" "${KERNEL_BRANCH}" "${KERNEL_DIR}"
 	cmd_sync_dts
+	apply_kernel_rt_patches
 	info "内核源码就绪: ${KERNEL_DIR}"
+}
+
+# 过滤官方 RT 补丁中与 Ky 树冲突的 riscv 文件，写出可直接 patch 的文本
+filter_rt_patch_for_ky() {
+	local src_patch="$1"
+	local dst_patch="$2"
+	python3 - "$src_patch" "$dst_patch" <<'PY'
+import re, sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src, "rb").read().decode("utf-8", "replace")
+parts = re.split(r"(?=^diff --git )", text, flags=re.M)
+skip = {
+	"a/arch/riscv/Kconfig",
+	"a/arch/riscv/include/asm/cpufeature.h",
+	"a/arch/riscv/include/asm/thread_info.h",
+	"a/arch/riscv/kernel/cpufeature.c",
+	"a/arch/riscv/kernel/smpboot.c",
+}
+out = []
+for p in parts:
+	if not p.strip():
+		continue
+	m = re.match(r"diff --git (a/\S+)", p)
+	if m and m.group(1) in skip:
+		continue
+	out.append(p)
+open(dst, "w", encoding="utf-8").write("".join(out))
+PY
+}
+
+download_kernel_rt_patch() {
+	local dest="${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME}"
+	mkdir -p "${BSP_ROOT}/dl"
+	if [[ -f "${dest}" ]]; then
+		echo "${dest}"
+		return 0
+	fi
+	info "下载 PREEMPT_RT 补丁: ${KERNEL_RT_PATCH_URL}"
+	if ! curl -fsSL --connect-timeout 30 -o "${dest}.partial" "${KERNEL_RT_PATCH_URL}"; then
+		rm -f "${dest}.partial"
+		die "下载 RT 补丁失败，可手动放到 ${dest}"
+	fi
+	mv "${dest}.partial" "${dest}"
+	echo "${dest}"
+}
+
+# 应用官方 6.6.63-rt46（过滤冲突文件）+ vendor riscv 适配
+apply_kernel_rt_patches() {
+	[[ -d "${KERNEL_DIR}" ]] || die "请先运行 ./bsp setup kernel"
+	if [[ "${KERNEL_RT}" != "y" && "${KERNEL_RT}" != "1" ]]; then
+		info "KERNEL_RT=${KERNEL_RT}，跳过 PREEMPT_RT 补丁"
+		return 0
+	fi
+
+	local marker="${KERNEL_DIR}/.bsp-rt-applied"
+	local localver="${KERNEL_DIR}/localversion-rt"
+	if [[ -f "${marker}" ]] && [[ -f "${localver}" ]]; then
+		info "PREEMPT_RT 补丁已应用 ($(cat "${marker}"))，检查增量适配补丁..."
+		local p
+		shopt -s nullglob
+		for p in "${BSP_ROOT}/vendor/patches/kernel"/0002-*.patch \
+			"${BSP_ROOT}/vendor/patches/kernel"/000[3-9]-*.patch; do
+			# --forward：已打过则跳过；新补丁则补上
+			if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch --dry-run < "${p}" >/dev/null 2>&1; then
+				continue
+			fi
+			info "应用增量 $(basename "${p}")"
+			patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${p}" || \
+				die "应用 ${p} 失败"
+		done
+		shopt -u nullglob
+		return 0
+	fi
+
+	command -v patch >/dev/null 2>&1 || die "需要 patch 命令（apt install patch）"
+	command -v xz >/dev/null 2>&1 || die "需要 xz（apt install xz-utils）"
+	command -v python3 >/dev/null 2>&1 || die "需要 python3"
+
+	local xz_path filtered adapt
+	xz_path="$(download_kernel_rt_patch)"
+	filtered="${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME%.xz}-ky-filtered.patch"
+	info "过滤 Ky 冲突的 riscv 文件并打补丁..."
+	xz -dc "${xz_path}" > "${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME%.xz}"
+	filter_rt_patch_for_ky "${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME%.xz}" "${filtered}"
+
+	if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${filtered}"; then
+		die "应用官方 RT 补丁失败（见上方 patch 输出）"
+	fi
+
+	adapt="${BSP_ROOT}/vendor/patches/kernel/0001-riscv-enable-PREEMPT_RT-ky.patch"
+	[[ -f "${adapt}" ]] || die "缺少 ${adapt}"
+	info "应用 Ky riscv RT 适配: $(basename "${adapt}")"
+	if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${adapt}"; then
+		die "应用 ${adapt} 失败"
+	fi
+
+	# 其余按序应用（如 softirq ifdef 修复）
+	local p
+	shopt -s nullglob
+	for p in "${BSP_ROOT}/vendor/patches/kernel"/0002-*.patch \
+		"${BSP_ROOT}/vendor/patches/kernel"/000[3-9]-*.patch; do
+		info "应用 $(basename "${p}")"
+		if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${p}"; then
+			die "应用 ${p} 失败"
+		fi
+	done
+	shopt -u nullglob
+
+	[[ -f "${localver}" ]] || die "打补丁后缺少 localversion-rt，补丁可能不完整"
+	printf '%s\n' "${KERNEL_RT_PATCH_NAME}" > "${marker}"
+	info "PREEMPT_RT 就绪: $(tr -d '\n' < "${localver}") ($(cat "${marker}"))"
 }
 
 cmd_setup() {
@@ -91,7 +205,7 @@ cmd_sync_config() {
 		info "  $(basename "${src}")"
 	}
 
-	info "安装 kernel config -> ${kernel_configs_dir}"
+	info "安装 kernel config fragment -> ${kernel_configs_dir}"
 
 	local local_frags=()
 	shopt -s nullglob
@@ -103,8 +217,11 @@ cmd_sync_config() {
 		return 0
 	fi
 
-	local f
+	local f base
 	for f in "${local_frags[@]}"; do
+		base="$(basename "${f}")"
+		# 完整 .config 副本不当作 arch/*/configs fragment（体积大且非 merge 用途）
+		[[ "${base}" == linux-*-current.config ]] && continue
 		install_fragment "${f}"
 	done
 }

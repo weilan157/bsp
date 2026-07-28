@@ -87,27 +87,52 @@ EOF
 	sync
 }
 
-# 对齐 orangepi-build：镜像/设备上的 orangepiEnv.txt 必须带 rootdev=UUID=...
+# 写入 orangepiEnv 的 rootdev（可为 UUID=... 或 PARTUUID=...）
 set_orangepi_env_rootdev() {
-	local env_file="$1" root_uuid="$2"
+	local env_file="$1" rootdev_val="$2"
 	[[ -f "${env_file}" ]] || die "缺少 ${env_file}，无法写入 rootdev"
-	[[ -n "${root_uuid}" ]] || die "rootfs UUID 为空"
+	[[ -n "${rootdev_val}" ]] || die "rootdev 为空"
+	# 允许传入裸 UUID（兼容旧调用）或已带前缀的值
+	if [[ "${rootdev_val}" != UUID=* && "${rootdev_val}" != PARTUUID=* && "${rootdev_val}" != /dev/* ]]; then
+		rootdev_val="UUID=${rootdev_val}"
+	fi
 	if grep -q '^rootdev=' "${env_file}"; then
-		run_root sed -i "s|^rootdev=.*|rootdev=UUID=${root_uuid}|" "${env_file}"
+		run_root sed -i "s|^rootdev=.*|rootdev=${rootdev_val}|" "${env_file}"
 	else
-		run_root bash -c "echo 'rootdev=UUID=${root_uuid}' >> '${env_file}'"
+		run_root bash -c "echo 'rootdev=${rootdev_val}' >> '${env_file}'"
 	fi
 	if grep -q '^rootfstype=' "${env_file}"; then
 		run_root sed -i "s|^rootfstype=.*|rootfstype=ext4|" "${env_file}"
 	else
 		run_root bash -c "echo 'rootfstype=ext4' >> '${env_file}'"
 	fi
-	info "orangepiEnv rootdev=UUID=${root_uuid}"
+	info "orangepiEnv rootdev=${rootdev_val}"
+}
+
+# 从镜像文件或块设备读取文件系统 UUID
+blkid_uuid() {
+	local dev="$1"
+	local uuid=""
+	uuid="$(blkid -c /dev/null -s UUID -o value "${dev}" 2>/dev/null || true)"
+	[[ -n "${uuid}" ]] || uuid="$(run_root blkid -c /dev/null -s UUID -o value "${dev}" 2>/dev/null || true)"
+	if [[ -z "${uuid}" ]] && command -v tune2fs >/dev/null 2>&1; then
+		uuid="$(tune2fs -l "${dev}" 2>/dev/null | awk -F': *' '/Filesystem UUID/ {print $2; exit}' || true)"
+		[[ -n "${uuid}" ]] || uuid="$(run_root tune2fs -l "${dev}" 2>/dev/null | awk -F': *' '/Filesystem UUID/ {print $2; exit}' || true)"
+	fi
+	printf '%s' "${uuid}"
+}
+
+blkid_partuuid() {
+	local dev="$1"
+	local id=""
+	id="$(blkid -c /dev/null -s PARTUUID -o value "${dev}" 2>/dev/null || true)"
+	[[ -n "${id}" ]] || id="$(run_root blkid -c /dev/null -s PARTUUID -o value "${dev}" 2>/dev/null || true)"
+	printf '%s' "${id}"
 }
 
 flash_boot_root_parts() {
 	local boot_dev="$1" root_dev="$2"
-	local mnt
+	local mnt root_partuuid boot_partuuid
 
 	[[ -f "${OUT_DIR}/boot.img" ]] || die "缺少 out/boot.img，请先 ./bsp bootimg"
 	[[ -f "${OUT_DIR}/rootfs.ext4" ]] || die "缺少 out/rootfs.ext4，请先 ./bsp rootfs"
@@ -121,6 +146,14 @@ flash_boot_root_parts() {
 	run_root e2fsck -fy "${root_dev}" >/dev/null 2>&1 || true
 	run_root resize2fs "${root_dev}" >/dev/null 2>&1 || true
 	sync
+	run_root blkid -c /dev/null "${root_dev}" >/dev/null 2>&1 || true
+	run_root blkid -c /dev/null "${boot_dev}" >/dev/null 2>&1 || true
+
+	# 内核 early root 与 fstab 均用 GPT PARTUUID（避免 FAT/ext4 文件系统 UUID 与烧录介质不一致）
+	root_partuuid="$(blkid_partuuid "${root_dev}")"
+	boot_partuuid="$(blkid_partuuid "${boot_dev}")"
+	[[ -n "${root_partuuid}" ]] || die "无法读取 ${root_dev} 的 PARTUUID"
+	[[ -n "${boot_partuuid}" ]] || die "无法读取 ${boot_dev} 的 PARTUUID"
 
 	mnt="$(mktemp -d)"
 	cleanup_flash_mnt() {
@@ -134,24 +167,29 @@ flash_boot_root_parts() {
 	mkdir -p "${mnt}/boot"
 	run_root mount "${boot_dev}" "${mnt}/boot"
 
-	local boot_uuid root_uuid
-	boot_uuid="$(blkid -s UUID -o value "${boot_dev}")"
-	root_uuid="$(blkid -s UUID -o value "${root_dev}")"
-	[[ -n "${root_uuid}" ]] || die "无法读取 ${root_dev} 的 UUID"
-	[[ -n "${boot_uuid}" ]] || die "无法读取 ${boot_dev} 的 UUID"
-	info "写入 fstab: root=${root_uuid} boot=${boot_uuid}"
+	# /boot 加 nofail：U-Boot 已从该分区加载内核，挂不上也不应进 emergency
+	info "写入 fstab: root PARTUUID=${root_partuuid} boot PARTUUID=${boot_partuuid}"
 	run_root tee "${mnt}/etc/fstab" >/dev/null <<EOF
-UUID=${root_uuid} / ext4 defaults,noatime 0 1
-UUID=${boot_uuid} /boot vfat defaults,sync,utf8,flush 0 2
+PARTUUID=${root_partuuid} / ext4 defaults,noatime 0 1
+PARTUUID=${boot_partuuid} /boot vfat defaults,sync,utf8,flush,nofail 0 2
 EOF
-	# 禁止把占位符带进镜像
 	if grep -qE 'BOOTFS|ROOTFS|mmcblk0p' "${mnt}/etc/fstab"; then
 		die "fstab 仍含占位符/mmcblk0，请检查 pack 逻辑"
 	fi
-	set_orangepi_env_rootdev "${mnt}/boot/orangepiEnv.txt" "${root_uuid}"
-	# 同步写入 rootfs.ext4 源树旁注：下次直接 dd 也应用本镜像内已改的 fstab
-	info "fstab 与 orangepiEnv 已按 UUID 更新"
+	set_orangepi_env_rootdev "${mnt}/boot/orangepiEnv.txt" "PARTUUID=${root_partuuid}"
+	info "fstab 与 orangepiEnv 已按 PARTUUID 更新"
 	sync
+
+	# 回写 boot.img，避免单独烧 boot.img / firmware/boot.img 时仍是旧 rootdev
+	info "回写已更新的 boot 分区 -> out/boot.img"
+	run_root dd if="${boot_dev}" of="${OUT_DIR}/boot.img" bs=1M status=none conv=fsync
+	if [[ -d "${OUT_DIR}/firmware" ]]; then
+		install -m 644 "${OUT_DIR}/boot.img" "${OUT_DIR}/firmware/boot.img"
+	fi
+	if [[ -d "${OUT_DIR}/boot" ]]; then
+		run_root cp -a "${mnt}/boot/orangepiEnv.txt" "${OUT_DIR}/boot/orangepiEnv.txt"
+	fi
+
 	cleanup_flash_mnt
 	trap - EXIT
 }
@@ -256,6 +294,10 @@ EOF
 	loop="$(run_root losetup -f --show -P "${sd_img}")"
 	boot_dev="${loop}p1"
 	root_dev="${loop}p2"
+	cleanup_pack_loop() {
+		run_root losetup -d "${loop}" 2>/dev/null || true
+	}
+	trap cleanup_pack_loop EXIT
 	local i
 	for i in $(seq 1 20); do
 		[[ -b "${boot_dev}" && -b "${root_dev}" ]] && break
@@ -265,7 +307,8 @@ EOF
 	[[ -b "${root_dev}" ]] || die "未出现 ${root_dev}"
 
 	flash_boot_root_parts "${boot_dev}" "${root_dev}"
-	run_root losetup -d "${loop}" 2>/dev/null || true
+	cleanup_pack_loop
+	trap - EXIT
 
 	install_emmc_helper_script
 
@@ -328,33 +371,34 @@ dd if="${DIR}/boot.img" of="${BOOT_PART}" bs=1M status=progress conv=fsync
 dd if="${DIR}/rootfs.ext4" of="${ROOT_PART}" bs=1M status=progress conv=fsync
 e2fsck -fy "${ROOT_PART}" || true
 resize2fs "${ROOT_PART}" || true
+# 优先从源镜像读 FS UUID；rootdev 用分区 PARTUUID（与内核分区表一致）
+RPARTUUID="$(blkid -c /dev/null -s PARTUUID -o value "${ROOT_PART}" 2>/dev/null || true)"
+BPARTUUID="$(blkid -c /dev/null -s PARTUUID -o value "${BOOT_PART}" 2>/dev/null || true)"
+[[ -n "${RPARTUUID}" ]] || { echo "无法读取 rootfs PARTUUID"; exit 1; }
+[[ -n "${BPARTUUID}" ]] || { echo "无法读取 boot PARTUUID"; exit 1; }
 MNT="$(mktemp -d)"
 mount "${ROOT_PART}" "${MNT}"
 mkdir -p "${MNT}/boot"
 mount "${BOOT_PART}" "${MNT}/boot"
-BUUID="$(blkid -s UUID -o value "${BOOT_PART}")"
-RUUID="$(blkid -s UUID -o value "${ROOT_PART}")"
-[[ -n "${RUUID}" ]] || { echo "无法读取 rootfs UUID"; exit 1; }
-[[ -n "${BUUID}" ]] || { echo "无法读取 boot UUID"; exit 1; }
 cat > "${MNT}/etc/fstab" <<EOF
-UUID=${RUUID} / ext4 defaults,noatime 0 1
-UUID=${BUUID} /boot vfat defaults,sync,utf8,flush 0 2
+PARTUUID=${RPARTUUID} / ext4 defaults,noatime 0 1
+PARTUUID=${BPARTUUID} /boot vfat defaults,sync,utf8,flush,nofail 0 2
 EOF
 grep -qE 'BOOTFS|ROOTFS|mmcblk0p' "${MNT}/etc/fstab" && { echo "fstab 仍含占位符"; exit 1; }
 ENV="${MNT}/boot/orangepiEnv.txt"
 [[ -f "${ENV}" ]] || { echo "缺少 ${ENV}"; exit 1; }
 if grep -q '^rootdev=' "${ENV}"; then
-	sed -i "s|^rootdev=.*|rootdev=UUID=${RUUID}|" "${ENV}"
+	sed -i "s|^rootdev=.*|rootdev=PARTUUID=${RPARTUUID}|" "${ENV}"
 else
-	echo "rootdev=UUID=${RUUID}" >> "${ENV}"
+	echo "rootdev=PARTUUID=${RPARTUUID}" >> "${ENV}"
 fi
 if grep -q '^rootfstype=' "${ENV}"; then
 	sed -i "s|^rootfstype=.*|rootfstype=ext4|" "${ENV}"
 else
 	echo "rootfstype=ext4" >> "${ENV}"
 fi
-echo "orangepiEnv rootdev=UUID=${RUUID}"
-echo "fstab root=${RUUID} boot=${BUUID}"
+echo "orangepiEnv rootdev=PARTUUID=${RPARTUUID}"
+echo "fstab root=${RPARTUUID} boot=${BPARTUUID}"
 sync
 umount "${MNT}/boot" || true
 umount "${MNT}" || true

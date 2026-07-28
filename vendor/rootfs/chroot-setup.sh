@@ -61,10 +61,8 @@ echo ">>> 启用 ssh / timesyncd"
 systemctl enable ssh 2>/dev/null || true
 systemctl enable systemd-timesyncd.service 2>/dev/null || true
 
-echo ">>> 串口登录：mask serial-getty@ttyS0，启用 console-getty"
-# Ky UART 作 console 时 udev 常不产生 dev-ttyS0.device，模板 getty 会空等 ~90s
-ln -sfn /dev/null /etc/systemd/system/serial-getty@ttyS0.service
-systemctl enable console-getty.service 2>/dev/null || true
+echo ">>> 串口登录（overlay 已 mask serial-getty@ttyS0、启用 console-getty）"
+# Ky UART 作 console 时 udev 常不产生 dev-ttyS0.device；见 vendor/rootfs/overlay/.../systemd
 systemctl set-default multi-user.target 2>/dev/null || true
 touch /etc/securetty
 grep -qxF 'ttyS0' /etc/securetty || echo 'ttyS0' >> /etc/securetty

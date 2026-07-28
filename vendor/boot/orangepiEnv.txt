@@ -1,2 +1,4 @@
-verbosity=7
+# Headless 基线（./bsp bootimg 还会追加 fdtfile / console=serial 等）
+verbosity=1
 bootlogo=false
+docker_optimizations=off

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0
+# PREEMPT_RT 下 SOFTIRQ_ON_OWN_STACK 关闭（软中断线程化），但 Ky 树
+# irq.c 误用 HAVE_SOFTIRQ_ON_OWN_STACK，会与 asm-generic 内联定义冲突。
+
+--- a/arch/riscv/kernel/irq.c
++++ b/arch/riscv/kernel/irq.c
+@@ -79,7 +79,7 @@ static void init_irq_stacks(void)
+ }
+ #endif /* CONFIG_VMAP_STACK */
+ 
+-#ifdef CONFIG_HAVE_SOFTIRQ_ON_OWN_STACK
++#ifdef CONFIG_SOFTIRQ_ON_OWN_STACK
+ static void ___do_softirq(struct pt_regs *regs)
+ {
+ 	__do_softirq();

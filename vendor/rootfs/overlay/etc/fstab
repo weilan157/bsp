@@ -1,3 +1,3 @@
-# /etc/fstab — 占位；./bsp pack / emmc 必须改成真实 UUID
-# 若仍看到 BOOTFS/ROOTFS，说明镜像未跑完 pack 的 fstab 重写
+# /etc/fstab — 占位；./bsp pack / emmc 会改成 PARTUUID=...（勿用 mmcblk）
+# /boot 带 nofail，避免 FAT UUID 对不上时掉进 emergency
 /dev/root  /  ext4  defaults,noatime  0  1

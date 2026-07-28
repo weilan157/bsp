@@ -19,7 +19,7 @@ rockchip-bsp/
 ├── config.env.example
 ├── vendor/
 │   ├── boot/                # boot-ky.cmd / orangepiEnv.txt
-│   ├── kernel-config/       # linux-ky-current.config（orangepi-build）
+│   ├── kernel-config/       # 官方 linux-ky-current.config + slim.config（R2S 精简）
 │   ├── firmware/ky/         # esos.elf
 │   └── rootfs/              # debootstrap overlay + chroot 配置
 ├── scripts/

@@ -3,12 +3,13 @@
 # Please edit /boot/orangepiEnv.txt to set supported parameters
 #
 # Aligned with orangepi-build external/config/bootscripts/boot-ky.cmd
-# Difference: no uInitrd — booti Image - fdt (Debian rootfs, rootdev=UUID from pack/emmc)
+# Difference vs upstream: no uInitrd — booti Image - fdt (Debian minbase)
+# Fallback: if rootdev unset, use PARTUUID of boot media partition 2
 
 setenv load_addr "0x9000000"
 setenv overlay_error "false"
-# default values
-setenv verbosity "7"
+# default values (overridden by orangepiEnv.txt)
+setenv verbosity "1"
 setenv console "both"
 setenv bootlogo "false"
 setenv rootfstype "ext4"
@@ -17,10 +18,10 @@ setenv earlycon "on"
 
 echo "Boot script loaded from ${devtype} ${devnum}"
 
-#if test -e ${devtype} ${devnum} ${prefix}orangepiEnv.txt; then
+if test -e ${devtype} ${devnum} ${prefix}orangepiEnv.txt; then
 	load ${devtype} ${devnum} ${load_addr} ${prefix}orangepiEnv.txt
 	env import -t ${load_addr} ${filesize}
-#fi
+fi
 
 if test "${logo}" = "disabled"; then setenv logo "logo.nologo"; fi
 
@@ -29,8 +30,7 @@ if test "${console}" = "serial" || test "${console}" = "both"; then setenv conso
 if test "${earlycon}" = "on"; then setenv consoleargs "earlycon=sbi ${consoleargs}"; fi
 if test "${bootlogo}" = "true"; then setenv consoleargs "bootsplash.bootfile=bootsplash.orangepi ${consoleargs}"; fi
 
-# rootdev：优先 orangepiEnv 的 UUID=...（pack/emmc 写入）；未设置时用启动介质 p2 的 PARTUUID
-# （只更新 boot.img、未跑 pack 时也能从 eMMC/SD 正确挂根，避免空 rootdev → unknown-block(0,0)）
+# Prefer rootdev from orangepiEnv (pack writes PARTUUID=...); else PARTUUID of ${devtype} ${devnum}:2
 if test -z "${rootdev}"; then
 	part uuid ${devtype} ${devnum}:2 uuid
 	setenv rootdev "PARTUUID=${uuid}"
@@ -60,7 +60,7 @@ for overlay_file in ${user_overlays}; do
 	fi
 done
 
-# 无 uInitrd（官方为 booti Image uInitrd fdt）
+# No uInitrd (upstream: booti Image uInitrd fdt)
 booti ${kernel_addr_r} - ${fdt_addr_r}
 
 # Recompile with:

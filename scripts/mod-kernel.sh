@@ -11,13 +11,15 @@ cmd_kernel() {
 		return 0
 	fi
 
+	# 确保 RT 补丁已打（仅 setup 过旧树时也可在编译前补上）
+	apply_kernel_rt_patches
+
 	setup_cross_compile
-	local jobs arch fragments dts_target
+	local jobs arch dts_target
 	jobs="$(job_count)"
 	arch="${KERNEL_ARCH}"
 	local -a kmake
 	kmake=(make -C "${KERNEL_DIR}" -j"${jobs}" ARCH="${arch}" CROSS_COMPILE="${CROSS_COMPILE}")
-	fragments="$(kernel_defconfig_fragments)"
 
 	cmd_sync_config
 	cmd_sync_dts
@@ -31,12 +33,14 @@ cmd_kernel() {
 		[[ -f "${dotconfig}" ]] || die "KERNEL_DOTCONFIG 不存在: ${dotconfig}"
 		info "使用完整内核配置: ${dotconfig}"
 		cp "${dotconfig}" "${KERNEL_DIR}/.config"
-		"${kmake[@]}" olddefconfig
 	else
-		info "配置内核: ${KERNEL_DEFCONFIG} ${fragments}"
+		info "配置内核: ${KERNEL_DEFCONFIG}"
 		# shellcheck disable=SC2086
-		"${kmake[@]}" "${KERNEL_DEFCONFIG}" ${fragments}
+		"${kmake[@]}" "${KERNEL_DEFCONFIG}"
 	fi
+	# 合并 KERNEL_EXTRA_FRAGMENTS（默认 slim.config），再 olddefconfig
+	apply_kernel_config_fragments
+	"${kmake[@]}" olddefconfig
 
 	dts_target="${KERNEL_DTS_SUBDIR}/${KERNEL_DTS_NAME}.dtb"
 	info "编译 Image 与 ${dts_target} (jobs=${jobs})..."
@@ -184,7 +188,12 @@ install_kernel_modules() {
 
 	"${kmake[@]}" modules >&2
 	run_root rm -rf "${rootfs}/lib/modules"
-	run_root env INSTALL_MOD_STRIP=1 ARCH="${arch}" CROSS_COMPILE="${CROSS_COMPILE}" \
+	# 显式传入 PATH/STRIP：sudo 下 make 调用 $(CROSS_COMPILE)strip 否则 Error 127
+	local strip_bin="${STRIP:-}"
+	[[ -n "${strip_bin}" ]] || strip_bin="$(command -v "${CROSS_COMPILE}strip" || true)"
+	[[ -x "${strip_bin}" ]] || die "未找到 ${CROSS_COMPILE}strip（当前 PATH 无交叉工具链），请 ./bsp env"
+	run_root env PATH="${PATH}" STRIP="${strip_bin}" \
+		INSTALL_MOD_STRIP=1 ARCH="${arch}" CROSS_COMPILE="${CROSS_COMPILE}" \
 		make -C "${KERNEL_DIR}" -j"${jobs}" --no-print-directory \
 		INSTALL_MOD_PATH="${rootfs}" modules_install >&2
 

@@ -31,8 +31,17 @@ fi
 : "${KERNEL_DTS_NAME:=x1_orangepi-r2s}"
 : "${KERNEL_DTS_SUBDIR:=ky}"
 : "${VENDOR_DTS_SOURCE:=}"
-# FAT /boot 默认要 iso8859-1；打成内置避免模块未装时挂不上
-: "${KERNEL_EXTRA_FRAGMENTS:=${BSP_ROOT}/vendor/kernel-config/fat-nls.config}"
+# PREEMPT_RT：默认开启（下载并打 6.6.63-rt46 + Ky riscv 适配）
+: "${KERNEL_RT:=y}"
+: "${KERNEL_RT_PATCH_URL:=https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/patch-6.6.63-rt46.patch.xz}"
+: "${KERNEL_RT_PATCH_NAME:=patch-6.6.63-rt46.patch.xz}"
+# 默认 fragment：slim +（KERNEL_RT=y 时）rt
+_kernel_default_frags="${BSP_ROOT}/vendor/kernel-config/slim.config"
+if [[ "${KERNEL_RT}" == "y" || "${KERNEL_RT}" == "1" ]]; then
+	_kernel_default_frags="${_kernel_default_frags} ${BSP_ROOT}/vendor/kernel-config/rt.config"
+fi
+: "${KERNEL_EXTRA_FRAGMENTS:=${_kernel_default_frags}}"
+unset _kernel_default_frags
 : "${DEBIAN_RELEASE:=trixie}"
 : "${DEBIAN_ARCH:=riscv64}"
 : "${DEBIAN_MIRROR:=mirrors.tuna.tsinghua.edu.cn}"
@@ -71,10 +80,11 @@ warn() { echo "[WARN] $*" >&2; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
 run_root() {
+	# sudo 默认 secure_path 不含交叉工具链；保留调用方 PATH（strip/gcc 等）
 	if [[ "$(id -u)" -eq 0 ]]; then
 		"$@"
 	else
-		sudo "$@"
+		sudo env "PATH=${PATH}" "$@"
 	fi
 }
 
@@ -124,6 +134,12 @@ setup_cross_compile() {
 		die "未找到 ${cc}，请运行 ./bsp env（会下载 Ky toolchain）或设置 TOOLCHAIN_BIN"
 	export CROSS_COMPILE="${CROSS_COMPILE_PREFIX}"
 	export ARCH="${KERNEL_ARCH}"
+	# modules_install INSTALL_MOD_STRIP 需要；绝对路径避免 sudo/make 子进程丢 PATH
+	if command -v "${CROSS_COMPILE_PREFIX}strip" >/dev/null 2>&1; then
+		export STRIP="$(command -v "${CROSS_COMPILE_PREFIX}strip")"
+	else
+		warn "未找到 ${CROSS_COMPILE_PREFIX}strip，modules_install 将无法 strip 模块"
+	fi
 	info "CROSS_COMPILE=${CROSS_COMPILE} ARCH=${ARCH}"
 }
 
@@ -140,7 +156,37 @@ kernel_defconfig_fragments() {
 	if [[ -n "${KERNEL_EXTRA_FRAGMENTS}" ]]; then
 		frags="${frags} ${KERNEL_EXTRA_FRAGMENTS//,/ }"
 	fi
-	echo "${frags}"
+	# 压缩空白，避免 make/merge 吃到空参数
+	echo "${frags}" | xargs
+}
+
+# 将 fragment 合并进 KERNEL_DIR/.config（完整 .config 与 defconfig 路径均适用）
+apply_kernel_config_fragments() {
+	local merge_script frag
+	local -a frag_list=()
+	local frags
+	frags="$(kernel_defconfig_fragments)"
+	[[ -n "${frags}" ]] || return 0
+
+	# shellcheck disable=SC2086
+	for frag in ${frags}; do
+		[[ -f "${frag}" ]] || die "内核配置片段不存在: ${frag}"
+		# 完整 config 不当作 fragment 再合并（避免自引用）
+		[[ "$(basename "${frag}")" == "linux-ky-current.config" ]] && continue
+		frag_list+=("${frag}")
+	done
+	((${#frag_list[@]} > 0)) || return 0
+
+	info "合并内核配置片段: ${frag_list[*]}"
+	merge_script="${KERNEL_DIR}/scripts/kconfig/merge_config.sh"
+	if [[ -f "${merge_script}" ]]; then
+		# -m：只合并不 olddefconfig；随后由调用方 olddefconfig
+		ARCH="${KERNEL_ARCH}" bash "${merge_script}" -m -O "${KERNEL_DIR}" \
+			"${KERNEL_DIR}/.config" "${frag_list[@]}"
+	else
+		warn "无 merge_config.sh，追加 fragment 到 .config"
+		cat "${frag_list[@]}" >> "${KERNEL_DIR}/.config"
+	fi
 }
 
 sd_image_path() {

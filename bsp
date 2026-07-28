@@ -20,12 +20,12 @@ Orange Pi R2S（Ky X1）BSP。交叉工具链: riscv64-unknown-linux-gnu-
                          安装主机依赖并下载 Ky toolchain
   config [KEY[=VALUE]]   查看/读取/写入 config.env（无文件时从 example 创建）
   setup [uboot|kernel|all] [--update]
-                         克隆源码（已有则跳过；--update 再拉取）
+                         克隆源码；KERNEL_RT=y 时打 PREEMPT_RT 补丁
   sync dts|config        同步设备树覆盖或 kernel config
   uboot [--clean]        编译 U-Boot + OpenSBI（已有产物则跳过）
-  kernel [--clean]       编译内核 Image + dtb（已有则跳过）
+  kernel [--clean]       编译内核 Image + dtb（默认 PREEMPT_RT + slim）
   bootimg [--clean]      打包 FAT boot.img + boot.scr（已有则跳过）
-  rootfs [--clean]       构建 Debian riscv64 rootfs + ext4（已有则跳过）
+  rootfs [--clean]       构建 Debian riscv64 rootfs（含 rt-tests）
   modules [ROOTFS]       安装内核模块到 rootfs（默认 out/rootfs）
   pack [--stage-only] [--clean]
                          打包可 dd 的 SD 镜像 out/${BOARD}.img

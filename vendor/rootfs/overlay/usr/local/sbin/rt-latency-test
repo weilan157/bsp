@@ -1,0 +1,26 @@
+#!/bin/bash
+# 在板子上跑实时延迟摸底（需 rt-tests；建议 root）
+set -euo pipefail
+
+LOOPS="${1:-100000}"
+INTERVAL_US="${2:-1000}"
+
+echo "=== uname ==="
+uname -a
+echo
+echo "=== preempt / HZ (if readable) ==="
+zcat /proc/config.gz 2>/dev/null | grep -E 'CONFIG_(PREEMPT|HZ)=' || \
+	grep -E 'CONFIG_(PREEMPT|HZ)=' /boot/config-$(uname -r) 2>/dev/null || \
+	echo "(no config.gz; check dmesg for PREEMPT_RT)"
+echo
+grep -E 'PREEMPT' /proc/version || true
+echo
+
+if ! command -v cyclictest >/dev/null 2>&1; then
+	echo "cyclictest 未安装。Debian: apt-get install -y rt-tests" >&2
+	exit 1
+fi
+
+echo "=== cyclictest: loops=${LOOPS} interval=${INTERVAL_US}us, SCHED_FIFO 99, mlock ==="
+# -S SMP；-p 99；-i 周期；-l 次数；-m 锁内存；-q 汇总
+exec cyclictest -S -p 99 -i "${INTERVAL_US}" -l "${LOOPS}" -m -q --policy=fifo
