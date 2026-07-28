@@ -87,6 +87,24 @@ EOF
 	sync
 }
 
+# 对齐 orangepi-build：镜像/设备上的 orangepiEnv.txt 必须带 rootdev=UUID=...
+set_orangepi_env_rootdev() {
+	local env_file="$1" root_uuid="$2"
+	[[ -f "${env_file}" ]] || die "缺少 ${env_file}，无法写入 rootdev"
+	[[ -n "${root_uuid}" ]] || die "rootfs UUID 为空"
+	if grep -q '^rootdev=' "${env_file}"; then
+		run_root sed -i "s|^rootdev=.*|rootdev=UUID=${root_uuid}|" "${env_file}"
+	else
+		run_root bash -c "echo 'rootdev=UUID=${root_uuid}' >> '${env_file}'"
+	fi
+	if grep -q '^rootfstype=' "${env_file}"; then
+		run_root sed -i "s|^rootfstype=.*|rootfstype=ext4|" "${env_file}"
+	else
+		run_root bash -c "echo 'rootfstype=ext4' >> '${env_file}'"
+	fi
+	info "orangepiEnv rootdev=UUID=${root_uuid}"
+}
+
 flash_boot_root_parts() {
 	local boot_dev="$1" root_dev="$2"
 	local mnt
@@ -119,14 +137,20 @@ flash_boot_root_parts() {
 	local boot_uuid root_uuid
 	boot_uuid="$(blkid -s UUID -o value "${boot_dev}")"
 	root_uuid="$(blkid -s UUID -o value "${root_dev}")"
+	[[ -n "${root_uuid}" ]] || die "无法读取 ${root_dev} 的 UUID"
+	[[ -n "${boot_uuid}" ]] || die "无法读取 ${boot_dev} 的 UUID"
+	info "写入 fstab: root=${root_uuid} boot=${boot_uuid}"
 	run_root tee "${mnt}/etc/fstab" >/dev/null <<EOF
 UUID=${root_uuid} / ext4 defaults,noatime 0 1
-UUID=${boot_uuid} /boot vfat defaults,sync 0 2
+UUID=${boot_uuid} /boot vfat defaults,sync,utf8,flush 0 2
 EOF
-	if [[ -f "${mnt}/boot/orangepiEnv.txt" ]]; then
-		run_root sed -i "s|^rootdev=.*|rootdev=UUID=${root_uuid}|" "${mnt}/boot/orangepiEnv.txt" || true
+	# 禁止把占位符带进镜像
+	if grep -qE 'BOOTFS|ROOTFS|mmcblk0p' "${mnt}/etc/fstab"; then
+		die "fstab 仍含占位符/mmcblk0，请检查 pack 逻辑"
 	fi
-
+	set_orangepi_env_rootdev "${mnt}/boot/orangepiEnv.txt" "${root_uuid}"
+	# 同步写入 rootfs.ext4 源树旁注：下次直接 dd 也应用本镜像内已改的 fstab
+	info "fstab 与 orangepiEnv 已按 UUID 更新"
 	sync
 	cleanup_flash_mnt
 	trap - EXIT
@@ -310,11 +334,27 @@ mkdir -p "${MNT}/boot"
 mount "${BOOT_PART}" "${MNT}/boot"
 BUUID="$(blkid -s UUID -o value "${BOOT_PART}")"
 RUUID="$(blkid -s UUID -o value "${ROOT_PART}")"
+[[ -n "${RUUID}" ]] || { echo "无法读取 rootfs UUID"; exit 1; }
+[[ -n "${BUUID}" ]] || { echo "无法读取 boot UUID"; exit 1; }
 cat > "${MNT}/etc/fstab" <<EOF
 UUID=${RUUID} / ext4 defaults,noatime 0 1
-UUID=${BUUID} /boot vfat defaults,sync 0 2
+UUID=${BUUID} /boot vfat defaults,sync,utf8,flush 0 2
 EOF
-sed -i "s|^rootdev=.*|rootdev=UUID=${RUUID}|" "${MNT}/boot/orangepiEnv.txt" || true
+grep -qE 'BOOTFS|ROOTFS|mmcblk0p' "${MNT}/etc/fstab" && { echo "fstab 仍含占位符"; exit 1; }
+ENV="${MNT}/boot/orangepiEnv.txt"
+[[ -f "${ENV}" ]] || { echo "缺少 ${ENV}"; exit 1; }
+if grep -q '^rootdev=' "${ENV}"; then
+	sed -i "s|^rootdev=.*|rootdev=UUID=${RUUID}|" "${ENV}"
+else
+	echo "rootdev=UUID=${RUUID}" >> "${ENV}"
+fi
+if grep -q '^rootfstype=' "${ENV}"; then
+	sed -i "s|^rootfstype=.*|rootfstype=ext4|" "${ENV}"
+else
+	echo "rootfstype=ext4" >> "${ENV}"
+fi
+echo "orangepiEnv rootdev=UUID=${RUUID}"
+echo "fstab root=${RUUID} boot=${BUUID}"
 sync
 umount "${MNT}/boot" || true
 umount "${MNT}" || true

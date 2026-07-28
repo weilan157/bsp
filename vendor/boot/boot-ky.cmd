@@ -2,12 +2,13 @@
 #
 # Please edit /boot/orangepiEnv.txt to set supported parameters
 #
-# Orange Pi Ky X1 boot script (no initrd, for rockchip-bsp Debian rootfs)
+# Aligned with orangepi-build external/config/bootscripts/boot-ky.cmd
+# Difference: no uInitrd — booti Image - fdt (Debian rootfs, rootdev=UUID from pack/emmc)
 
 setenv load_addr "0x9000000"
 setenv overlay_error "false"
 # default values
-setenv verbosity "1"
+setenv verbosity "7"
 setenv console "both"
 setenv bootlogo "false"
 setenv rootfstype "ext4"
@@ -16,10 +17,10 @@ setenv earlycon "on"
 
 echo "Boot script loaded from ${devtype} ${devnum}"
 
-if test -e ${devtype} ${devnum} ${prefix}orangepiEnv.txt; then
+#if test -e ${devtype} ${devnum} ${prefix}orangepiEnv.txt; then
 	load ${devtype} ${devnum} ${load_addr} ${prefix}orangepiEnv.txt
 	env import -t ${load_addr} ${filesize}
-fi
+#fi
 
 if test "${logo}" = "disabled"; then setenv logo "logo.nologo"; fi
 
@@ -28,16 +29,23 @@ if test "${console}" = "serial" || test "${console}" = "both"; then setenv conso
 if test "${earlycon}" = "on"; then setenv consoleargs "earlycon=sbi ${consoleargs}"; fi
 if test "${bootlogo}" = "true"; then setenv consoleargs "bootsplash.bootfile=bootsplash.orangepi ${consoleargs}"; fi
 
-# rootdev 默认 mmcblk0p2（SD：p1=boot FAT，p2=rootfs）
-if test -z "${rootdev}"; then setenv rootdev "/dev/mmcblk0p2"; fi
+# rootdev：优先 orangepiEnv 的 UUID=...（pack/emmc 写入）；未设置时用启动介质 p2 的 PARTUUID
+# （只更新 boot.img、未跑 pack 时也能从 eMMC/SD 正确挂根，避免空 rootdev → unknown-block(0,0)）
+if test -z "${rootdev}"; then
+	part uuid ${devtype} ${devnum}:2 uuid
+	setenv rootdev "PARTUUID=${uuid}"
+	echo "rootdev unset, using ${rootdev} (${devtype} ${devnum}:2)"
+fi
+echo "root=${rootdev}"
 
-setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs} consoleblank=0 loglevel=${verbosity} clk_ignore_unused swiotlb=65536 workqueue.default_affinity_scope=system usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
+setenv bootargs "mtdparts=${mtdparts} root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs} consoleblank=0 loglevel=${verbosity} ubootpart=${partuuid} clk_ignore_unused swiotlb=65536 workqueue.default_affinity_scope=system usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
 
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1"; fi
 
 load ${devtype} ${devnum} ${kernel_addr_r} ${prefix}Image
 load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
+fdt rm /soc/lcd_backlight phandle
 fdt resize 65536
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum} ${load_addr} ${prefix}dtb/ky/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
@@ -52,7 +60,7 @@ for overlay_file in ${user_overlays}; do
 	fi
 done
 
-# 无 initrd
+# 无 uInitrd（官方为 booti Image uInitrd fdt）
 booti ${kernel_addr_r} - ${fdt_addr_r}
 
 # Recompile with:

@@ -115,16 +115,15 @@ cmd_bootimg() {
 			-exec install -m 644 {} "${boot_dir}/dtb/${KERNEL_DTS_SUBDIR}/overlay/" \;
 	fi
 
-	# orangepiEnv.txt
+	# orangepiEnv.txt（对齐 orangepi-build：rootdev=UUID 在 pack/emmc 时写入，此处不写死 mmcblk）
 	local env_src="${BOOT_ENV_SRC}"
 	[[ -f "${env_src}" ]] || die "缺少 ${env_src}"
 	{
 		cat "${env_src}"
 		echo "fdtfile=${KERNEL_DTS_SUBDIR}/${KERNEL_DTS_NAME}.dtb"
 		echo "overlay_prefix=x1"
-		echo "rootdev=/dev/mmcblk0p2"
 		echo "rootfstype=ext4"
-		echo "console=both"
+		echo "console=serial"
 		echo "earlycon=on"
 	} > "${boot_dir}/orangepiEnv.txt"
 

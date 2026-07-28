@@ -1,7 +1,9 @@
 auto lo
 iface lo inet loopback
 
-# Orange Pi R2S 有线网口（2.5GbE）
-auto eth0
+# Orange Pi R2S：双 RGMII（eth0 / eth1），网线插哪个就起哪个
 allow-hotplug eth0
 iface eth0 inet dhcp
+
+allow-hotplug eth1
+iface eth1 inet dhcp

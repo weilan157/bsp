@@ -111,7 +111,7 @@ eMMC 引导对齐官方 orangepi-build：`bootinfo_emmc` + `FSBL` 写入 **`mmcb
 
 官方 **debootstrap minbase**（无桌面），架构 **riscv64**。
 
-默认用户：`orangepi` / `orangepi`，root：`root` / `root`。
+默认用户：`weiqi` / `321`，root：`root` / `root`。
 
 ## 分支
 

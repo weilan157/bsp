@@ -1,3 +1,3 @@
-# /etc/fstab — pack 时会按分区 UUID 重写
-/dev/mmcblk0p2  /      ext4  defaults,noatime  0  1
-/dev/mmcblk0p1  /boot  vfat  defaults,sync     0  2
+# /etc/fstab — 占位；./bsp pack / emmc 必须改成真实 UUID
+# 若仍看到 BOOTFS/ROOTFS，说明镜像未跑完 pack 的 fstab 重写
+/dev/root  /  ext4  defaults,noatime  0  1

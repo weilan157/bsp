@@ -7,6 +7,6 @@
 | 发行版 | `trixie` |
 | 架构 | `riscv64` |
 | 主机名 | `orangepi` |
-| 用户 | `orangepi` / `orangepi` |
+| 用户 | `weiqi` / `321` |
 
 Ky 固件 `esos.elf` 安装到 `/lib/firmware/`。

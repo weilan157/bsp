@@ -9,8 +9,8 @@ export APT_INSTALL="apt-get install -y --no-install-recommends"
 HOSTNAME="${ROOTFS_HOSTNAME:-orangepi}"
 LOCALE="${ROOTFS_LOCALE:-en_US.UTF-8}"
 ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD:-root}"
-USER_NAME="${ROOTFS_USER:-orangepi}"
-USER_PASSWORD="${ROOTFS_USER_PASSWORD:-orangepi}"
+USER_NAME="${ROOTFS_USER:-weiqi}"
+USER_PASSWORD="${ROOTFS_USER_PASSWORD:-321}"
 
 echo ">>> 配置 sources.list（仅 main，默认清华源）"
 cat > /etc/apt/sources.list <<EOF
@@ -61,10 +61,14 @@ echo ">>> 启用 ssh / timesyncd"
 systemctl enable ssh 2>/dev/null || true
 systemctl enable systemd-timesyncd.service 2>/dev/null || true
 
-echo ">>> 串口 getty (ttyS0)"
-systemctl enable serial-getty@ttyS0.service 2>/dev/null || true
+echo ">>> 串口登录：mask serial-getty@ttyS0，启用 console-getty"
+# Ky UART 作 console 时 udev 常不产生 dev-ttyS0.device，模板 getty 会空等 ~90s
+ln -sfn /dev/null /etc/systemd/system/serial-getty@ttyS0.service
+systemctl enable console-getty.service 2>/dev/null || true
+systemctl set-default multi-user.target 2>/dev/null || true
 touch /etc/securetty
 grep -qxF 'ttyS0' /etc/securetty || echo 'ttyS0' >> /etc/securetty
+grep -qxF 'console' /etc/securetty || echo 'console' >> /etc/securetty
 
 # 允许 root SSH 登录（调试用）
 if [[ -f /etc/ssh/sshd_config ]]; then
