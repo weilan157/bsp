@@ -10,6 +10,12 @@ cmd_env_ky_toolchain() {
 
 	mkdir -p "${BSP_ROOT}/toolchains"
 
+	# --update：重新下载并解压工具链
+	if bsp_want_update; then
+		bsp_refresh_download "${tarball}"
+		rm -rf "${dest}"
+	fi
+
 	if [[ -f "${marker}" ]] && [[ -x "${dest}/bin/${CROSS_COMPILE_PREFIX}gcc" ]]; then
 		info "Ky toolchain 已就绪: ${dest}"
 		return 0
@@ -46,6 +52,8 @@ cmd_env() {
 		case "${arg}" in
 			--host-tools) host_tools=1 ;;
 			--skip-toolchain) skip_toolchain=1 ;;
+			--clean|--force) export BSP_FORCE=1 ;;
+			--update) export BSP_UPDATE=1 ;;
 			*) die "env 未知选项: ${arg}" ;;
 		esac
 	done
@@ -61,10 +69,20 @@ cmd_env() {
 	local packages=(
 		build-essential bc bison flex device-tree-compiler
 		python3 python3-pip libssl-dev git rsync curl pkg-config
-		u-boot-tools debootstrap qemu-user-static binfmt-support
+		u-boot-tools debootstrap
 		debian-archive-keyring e2fsprogs dosfstools fdisk gdisk parted
 		xz-utils mtools
 	)
+
+	# Ubuntu Resolute+：qemu-user-static 变为虚包，改装 qemu-user + qemu-user-binfmt
+	# 旧版仍用 qemu-user-static（二进制带 -static 后缀）
+	local qemu_candidate
+	qemu_candidate="$(apt-cache policy qemu-user-static 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+	if [[ -n "${qemu_candidate}" && "${qemu_candidate}" != "(none)" ]]; then
+		packages+=(qemu-user-static binfmt-support)
+	else
+		packages+=(qemu-user qemu-user-binfmt)
+	fi
 
 	info "安装 apt 依赖（需要 sudo）..."
 	if command -v sudo >/dev/null 2>&1; then
@@ -86,11 +104,17 @@ cmd_env() {
 	if [[ -x /usr/sbin/update-binfmts ]]; then
 		run_root update-binfmts --enable qemu-riscv64 2>/dev/null || true
 	fi
+	# systemd-binfmt：加载 /usr/lib/binfmt.d/qemu-riscv64.conf
+	if [[ -x /usr/lib/systemd/systemd-binfmt ]]; then
+		run_root /usr/lib/systemd/systemd-binfmt qemu-riscv64.conf 2>/dev/null || true
+	fi
 
 	command -v dtc >/dev/null 2>&1 || die "dtc 未安装成功"
 	command -v mkimage >/dev/null 2>&1 || die "mkimage (u-boot-tools) 未安装成功"
 	command -v debootstrap >/dev/null 2>&1 || die "debootstrap 未安装成功"
 	command -v mkfs.vfat >/dev/null 2>&1 || die "dosfstools 未安装成功"
+	[[ -x /usr/bin/qemu-riscv64-static || -x /usr/bin/qemu-riscv64 ]] || \
+		die "未找到 qemu-riscv64（请检查 qemu-user / qemu-user-static 是否安装成功）"
 
 	if [[ "${skip_toolchain}" -eq 0 ]]; then
 		cmd_env_ky_toolchain

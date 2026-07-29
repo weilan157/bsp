@@ -255,8 +255,8 @@ cmd_pack() {
 	local sd_img
 	sd_img="$(sd_image_path)"
 
-	if ! bsp_want_force && have_pack_artifacts; then
-		info "已有 SD 镜像，跳过打包（加 --clean 强制重做）"
+	if ! bsp_want_rebuild && have_pack_artifacts; then
+		info "已有 SD 镜像，跳过打包（加 --clean/--update 强制重做）"
 		ls -lh "${sd_img}"
 		return 0
 	fi
@@ -489,7 +489,13 @@ cmd_all() {
 		fi
 	fi
 
-	info "全量编译 BOARD=${BOARD}（缓存：有则跳过；--clean 强制重编；--update 拉取源码）"
+	info "全量编译 BOARD=${BOARD}"
+	info "  --clean：强制重编全部构建缓存（uboot/kernel/bootimg/rootfs/pack）"
+	info "  --update：刷新下载（toolchain/源码/RT补丁）并重建衍生产物"
+	if bsp_want_update; then
+		info "刷新 Ky toolchain（如已缓存则重新下载）..."
+		cmd_env_ky_toolchain
+	fi
 	cmd_setup_uboot_sources
 	cmd_uboot
 	cmd_setup_kernel_sources

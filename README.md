@@ -53,10 +53,19 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 ```bash
 ./bsp env
 ./bsp all                  # 有源码/产物缓存则跳过
-./bsp all --clean          # 强制重编
-./bsp all --update         # 拉取最新源码
+./bsp all --clean          # 强制重编全部构建缓存（不重新下载）
+./bsp all --update         # 刷新 toolchain/源码/RT补丁，并重建
 ./bsp all --skip-rootfs -j 8
 ```
+
+缓存语义：
+
+| 选项 | 作用 |
+|------|------|
+| （默认） | 有下载/产物则复用 |
+| `--clean` | 强制重做 uboot/kernel/bootimg/rootfs/pack |
+| `--update` | 重下 toolchain、git 源码、RT 补丁，并重建衍生产物 |
+| `./bsp clean all` | 清 out/、构建产物、`dl/`（保留 sources、toolchain） |
 
 固定板型：`BOARD=orangepir2s`，`KERNEL_DTS_NAME=x1_orangepi-r2s`。
 

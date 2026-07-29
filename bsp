@@ -16,30 +16,36 @@ usage() {
 Orange Pi R2S（Ky X1）BSP。交叉工具链: riscv64-unknown-linux-gnu-
 
 命令:
-  env [--host-tools] [--skip-toolchain]
+  env [--host-tools] [--skip-toolchain] [--update]
                          安装主机依赖并下载 Ky toolchain
   config [KEY[=VALUE]]   查看/读取/写入 config.env（无文件时从 example 创建）
   setup [uboot|kernel|all] [--update]
-                         克隆源码；KERNEL_RT=y 时打 PREEMPT_RT 补丁
+                         克隆/刷新源码；KERNEL_RT=y 时打 PREEMPT_RT 补丁
   sync dts|config        同步设备树覆盖或 kernel config
-  uboot [--clean]        编译 U-Boot + OpenSBI（已有产物则跳过）
-  kernel [--clean]       编译内核 Image + dtb（默认 PREEMPT_RT + slim）
-  bootimg [--clean]      打包 FAT boot.img + boot.scr（已有则跳过）
-  rootfs [--clean]       构建 Debian riscv64 rootfs（含 rt-tests）
+  uboot [--clean|--update]
+                         编译 U-Boot + OpenSBI（已有产物则跳过）
+  kernel [--clean|--update]
+                         编译内核 Image + dtb（默认 PREEMPT_RT + slim）
+  bootimg [--clean|--update]
+                         打包 FAT boot.img + boot.scr（已有则跳过）
+  rootfs [--clean|--update]
+                         构建 Debian riscv64 rootfs（含 rt-tests）
   modules [ROOTFS]       安装内核模块到 rootfs（默认 out/rootfs）
-  pack [--stage-only] [--clean]
+  pack [--stage-only] [--clean|--update]
                          打包可 dd 的 SD 镜像 out/${BOARD}.img
   emmc /dev/mmcblkN [--yes] [--uboot-only]
                          安装到板载 eMMC（写 boot0 + 分区 + 系统）
   all [选项]             全流程（各步有缓存则跳过）
-  clean [目标]           清除缓存：uboot|kernel|bootimg|rootfs|pack|out|sources|toolchain|all
+  clean [目标]           清除缓存：uboot|kernel|bootimg|rootfs|pack|dl|out|sources|toolchain|all
   help                   显示本帮助
 
 all / 编译选项:
   --skip-rootfs          跳过 rootfs
   --skip-pack            跳过 SD 镜像
-  --clean, --force       忽略编译缓存，强制重编
-  --update               强制 git fetch/pull 源码
+  --clean, --force       忽略全部构建缓存，强制重编
+                         （uboot / kernel / bootimg / rootfs / pack）
+  --update               刷新全部下载并重建衍生产物：
+                         toolchain、u-boot/kernel 源码、RT 补丁、rootfs
 
 全局选项（写在 command 前或后均可）:
   -j N                   并行编译任务数（MAKE_JOBS）
@@ -49,10 +55,12 @@ all / 编译选项:
 示例:
   ./bsp env                    # 依赖 + Ky toolchain
   ./bsp all                    # 增量：有缓存跳过
-  ./bsp all --clean            # 强制重编全部
+  ./bsp all --clean            # 强制重编全部构建缓存
+  ./bsp all --update           # 刷新下载 + 重建
+  ./bsp env --update           # 重新下载 toolchain
+  ./bsp clean all              # 清 out/构建产物/dl（保留 sources、toolchain）
   ./bsp emmc /dev/mmcblk1 --yes   # SD 启动后装入 eMMC
   ./bsp emmc /dev/mmcblk1 --yes --uboot-only
-  ./bsp clean out
   ./bsp uboot --clean
 EOF
 }

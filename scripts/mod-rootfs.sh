@@ -31,11 +31,21 @@ install_ky_firmware() {
 }
 
 qemu_static_for_arch() {
+	# 旧包 qemu-user-static：qemu-<arch>-static；新包 qemu-user：qemu-<arch>
+	local candidates=()
 	case "${DEBIAN_ARCH}" in
-		riscv64) echo "/usr/bin/qemu-riscv64-static" ;;
-		arm64|aarch64) echo "/usr/bin/qemu-aarch64-static" ;;
-		*) echo "/usr/bin/qemu-${DEBIAN_ARCH}-static" ;;
+		riscv64) candidates=(qemu-riscv64-static qemu-riscv64) ;;
+		arm64|aarch64) candidates=(qemu-aarch64-static qemu-aarch64) ;;
+		*) candidates=("qemu-${DEBIAN_ARCH}-static" "qemu-${DEBIAN_ARCH}") ;;
 	esac
+	local name
+	for name in "${candidates[@]}"; do
+		if [[ -x "/usr/bin/${name}" ]]; then
+			echo "/usr/bin/${name}"
+			return 0
+		fi
+	done
+	echo "/usr/bin/${candidates[0]}"
 }
 
 cmd_rootfs() {
@@ -56,10 +66,18 @@ cmd_rootfs() {
 	extra_list="${BSP_ROOT}/vendor/rootfs/extra-packages.list"
 	qemu_static="$(qemu_static_for_arch)"
 
-	if ! bsp_want_force && have_rootfs_artifacts; then
-		info "已有 rootfs.ext4，跳过构建（加 --clean 强制重做）"
+	if ! bsp_want_rebuild && have_rootfs_artifacts; then
+		info "已有 rootfs.ext4，跳过构建（加 --clean/--update 强制重做）"
 		ls -lh "${image}"
 		return 0
+	fi
+
+	# --clean/--update：清掉旧 rootfs 树与镜像后再构建
+	if bsp_want_rebuild; then
+		if [[ -d "${rootfs}" ]] || [[ -f "${image}" ]]; then
+			info "清除 rootfs 缓存..."
+			run_root rm -rf "${rootfs}" "${image}"
+		fi
 	fi
 
 	info "构建 Debian ${DEBIAN_RELEASE} (${DEBIAN_ARCH}, variant=${DEBIAN_VARIANT})"
@@ -80,7 +98,7 @@ cmd_rootfs() {
 	if [[ -x "${qemu_static}" ]]; then
 		run_root cp "${qemu_static}" "${rootfs}/usr/bin/"
 	else
-		die "未找到 ${qemu_static}，请 ./bsp env 安装 qemu-user-static"
+		die "未找到 ${qemu_static}，请 ./bsp env 安装 qemu-user 或 qemu-user-static"
 	fi
 
 	info "debootstrap --second-stage..."

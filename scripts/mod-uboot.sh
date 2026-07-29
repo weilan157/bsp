@@ -3,10 +3,14 @@
 
 cmd_uboot() {
 	parse_build_flags "$@"
+	# --update：先刷新 u-boot 源码（all 里已 setup 则跳过）
+	if bsp_want_update && [[ "${BSP_SETUP_UBOOT_DONE:-}" != "1" ]]; then
+		cmd_setup_uboot_sources
+	fi
 	[[ -d "${UBOOT_DIR}" ]] || die "请先运行 ./bsp setup uboot"
 
-	if ! bsp_want_force && have_uboot_artifacts; then
-		info "已有 U-Boot 产物，跳过编译（加 --clean 强制重编）"
+	if ! bsp_want_rebuild && have_uboot_artifacts; then
+		info "已有 U-Boot 产物，跳过编译（加 --clean/--update 强制重编）"
 		ls -la "${UBOOT_DIR}/u-boot-opensbi.itb" "${UBOOT_DIR}/FSBL.bin" \
 			"${UBOOT_DIR}/bootinfo_sd.bin" 2>/dev/null || true
 		return 0

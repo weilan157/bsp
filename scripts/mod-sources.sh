@@ -14,11 +14,12 @@ clone_or_update() {
 			return 0
 		fi
 		info "更新 ${name} (${branch})..."
-		# 更新后需重新打 RT 补丁
+		# 丢弃本地 RT 补丁/rejects，再拉远端；否则会重复打补丁
 		rm -f "${dir}/.bsp-rt-applied"
 		git -C "${dir}" fetch origin
-		git -C "${dir}" checkout "${branch}"
-		git -C "${dir}" pull --ff-only origin "${branch}" || true
+		git -C "${dir}" checkout -f "${branch}"
+		git -C "${dir}" reset --hard "origin/${branch}"
+		git -C "${dir}" clean -fd
 	else
 		info "克隆 ${name} (${branch})..."
 		git clone --depth 1 -b "${branch}" "${url}" "${dir}"
@@ -28,6 +29,7 @@ clone_or_update() {
 cmd_setup_uboot_sources() {
 	mkdir -p "${SOURCES_DIR}" "${BACKUP_DIR}"
 	clone_or_update "${UBOOT_REPO}" "${UBOOT_BRANCH}" "${UBOOT_DIR}"
+	BSP_SETUP_UBOOT_DONE=1
 	info "源码就绪:"
 	info "  u-boot: ${UBOOT_DIR}"
 }
@@ -37,6 +39,7 @@ cmd_setup_kernel_sources() {
 	clone_or_update "${KERNEL_REPO}" "${KERNEL_BRANCH}" "${KERNEL_DIR}"
 	cmd_sync_dts
 	apply_kernel_rt_patches
+	BSP_SETUP_KERNEL_DONE=1
 	info "内核源码就绪: ${KERNEL_DIR}"
 }
 
@@ -69,8 +72,13 @@ PY
 }
 
 download_kernel_rt_patch() {
-	local dest="${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME}"
-	mkdir -p "${BSP_ROOT}/dl"
+	local dest="${DL_DIR}/${KERNEL_RT_PATCH_NAME}"
+	mkdir -p "${DL_DIR}"
+	# --update：强制重新下载官方 RT 补丁
+	bsp_refresh_download "${dest}"
+	bsp_refresh_download "${DL_DIR}/${KERNEL_RT_PATCH_NAME%.xz}"
+	bsp_refresh_download "${DL_DIR}/${KERNEL_RT_PATCH_NAME%.xz}-ky-filtered.patch"
+
 	if [[ -f "${dest}" ]]; then
 		echo "${dest}"
 		return 0
@@ -84,6 +92,40 @@ download_kernel_rt_patch() {
 	echo "${dest}"
 }
 
+# 向前打补丁；已应用则跳过。返回 0=已在树中或打成功，1=失败
+patch_forward_or_skip() {
+	local patchfile="$1"
+	local label="${2:-$(basename "${patchfile}")}"
+	local out rc=0
+	out="$(patch -d "${KERNEL_DIR}" -p1 --forward --batch --dry-run < "${patchfile}" 2>&1)" || rc=$?
+	if [[ "${rc}" -eq 0 ]]; then
+		info "应用 ${label}"
+		patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${patchfile}" || return 1
+		return 0
+	fi
+	# dry-run 失败：若反向 dry-run 成功，说明内容已在树中
+	if patch -d "${KERNEL_DIR}" -p1 -R --batch --dry-run < "${patchfile}" >/dev/null 2>&1; then
+		info "跳过 ${label}（已在树中）"
+		return 0
+	fi
+	echo "${out}" >&2
+	return 1
+}
+
+apply_kernel_rt_vendor_patches() {
+	local p
+	local adapt="${BSP_ROOT}/vendor/patches/kernel/0001-riscv-enable-PREEMPT_RT-ky.patch"
+	[[ -f "${adapt}" ]] || die "缺少 ${adapt}"
+	patch_forward_or_skip "${adapt}" "$(basename "${adapt}")" || die "应用 ${adapt} 失败"
+
+	shopt -s nullglob
+	for p in "${BSP_ROOT}/vendor/patches/kernel"/0002-*.patch \
+		"${BSP_ROOT}/vendor/patches/kernel"/000[3-9]-*.patch; do
+		patch_forward_or_skip "${p}" "$(basename "${p}")" || die "应用 ${p} 失败"
+	done
+	shopt -u nullglob
+}
+
 # 应用官方 6.6.63-rt46（过滤冲突文件）+ vendor riscv 适配
 apply_kernel_rt_patches() {
 	[[ -d "${KERNEL_DIR}" ]] || die "请先运行 ./bsp setup kernel"
@@ -94,21 +136,20 @@ apply_kernel_rt_patches() {
 
 	local marker="${KERNEL_DIR}/.bsp-rt-applied"
 	local localver="${KERNEL_DIR}/localversion-rt"
+
+	# 已完整打过：只检查增量 vendor 补丁
 	if [[ -f "${marker}" ]] && [[ -f "${localver}" ]]; then
 		info "PREEMPT_RT 补丁已应用 ($(cat "${marker}"))，检查增量适配补丁..."
-		local p
-		shopt -s nullglob
-		for p in "${BSP_ROOT}/vendor/patches/kernel"/0002-*.patch \
-			"${BSP_ROOT}/vendor/patches/kernel"/000[3-9]-*.patch; do
-			# --forward：已打过则跳过；新补丁则补上
-			if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch --dry-run < "${p}" >/dev/null 2>&1; then
-				continue
-			fi
-			info "应用增量 $(basename "${p}")"
-			patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${p}" || \
-				die "应用 ${p} 失败"
-		done
-		shopt -u nullglob
+		apply_kernel_rt_vendor_patches
+		return 0
+	fi
+
+	# 无 marker 但树里已有官方 RT 产物（例如上次成功后 marker 被删）：勿重复打
+	if [[ -f "${localver}" ]] && [[ -f "${KERNEL_DIR}/kernel/printk/nbcon.c" ]]; then
+		info "检测到树中已有 PREEMPT_RT ($(tr -d '\n' < "${localver}"))，跳过官方补丁"
+		apply_kernel_rt_vendor_patches
+		printf '%s\n' "${KERNEL_RT_PATCH_NAME}" > "${marker}"
+		info "PREEMPT_RT 就绪: $(tr -d '\n' < "${localver}") ($(cat "${marker}"))"
 		return 0
 	fi
 
@@ -116,35 +157,21 @@ apply_kernel_rt_patches() {
 	command -v xz >/dev/null 2>&1 || die "需要 xz（apt install xz-utils）"
 	command -v python3 >/dev/null 2>&1 || die "需要 python3"
 
-	local xz_path filtered adapt
+	local xz_path filtered
 	xz_path="$(download_kernel_rt_patch)"
-	filtered="${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME%.xz}-ky-filtered.patch"
+	filtered="${DL_DIR}/${KERNEL_RT_PATCH_NAME%.xz}-ky-filtered.patch"
 	info "过滤 Ky 冲突的 riscv 文件并打补丁..."
-	xz -dc "${xz_path}" > "${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME%.xz}"
-	filter_rt_patch_for_ky "${BSP_ROOT}/dl/${KERNEL_RT_PATCH_NAME%.xz}" "${filtered}"
+	xz -dc "${xz_path}" > "${DL_DIR}/${KERNEL_RT_PATCH_NAME%.xz}"
+	filter_rt_patch_for_ky "${DL_DIR}/${KERNEL_RT_PATCH_NAME%.xz}" "${filtered}"
 
-	if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${filtered}"; then
-		die "应用官方 RT 补丁失败（见上方 patch 输出）"
-	fi
+	patch_forward_or_skip "${filtered}" "官方 ${KERNEL_RT_PATCH_NAME}" || \
+		die "应用官方 RT 补丁失败（见上方 patch 输出；可 ./bsp setup kernel --update 重置后重试）"
 
-	adapt="${BSP_ROOT}/vendor/patches/kernel/0001-riscv-enable-PREEMPT_RT-ky.patch"
-	[[ -f "${adapt}" ]] || die "缺少 ${adapt}"
-	info "应用 Ky riscv RT 适配: $(basename "${adapt}")"
-	if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${adapt}"; then
-		die "应用 ${adapt} 失败"
-	fi
+	# 清理可能残留的 rejects
+	find "${KERNEL_DIR}" -name '*.rej' -delete 2>/dev/null || true
+	find "${KERNEL_DIR}" -name '*.orig' -delete 2>/dev/null || true
 
-	# 其余按序应用（如 softirq ifdef 修复）
-	local p
-	shopt -s nullglob
-	for p in "${BSP_ROOT}/vendor/patches/kernel"/0002-*.patch \
-		"${BSP_ROOT}/vendor/patches/kernel"/000[3-9]-*.patch; do
-		info "应用 $(basename "${p}")"
-		if ! patch -d "${KERNEL_DIR}" -p1 --forward --batch < "${p}"; then
-			die "应用 ${p} 失败"
-		fi
-	done
-	shopt -u nullglob
+	apply_kernel_rt_vendor_patches
 
 	[[ -f "${localver}" ]] || die "打补丁后缺少 localversion-rt，补丁可能不完整"
 	printf '%s\n' "${KERNEL_RT_PATCH_NAME}" > "${marker}"

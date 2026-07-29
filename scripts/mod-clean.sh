@@ -15,8 +15,9 @@ cmd_clean() {
 			rm -rf "${OUT_DIR}/uboot"
 			;;
 		kernel)
-			info "清除内核产物..."
+			info "清除内核产物与 RT 补丁应用标记..."
 			rm -rf "${OUT_DIR}/kernel"
+			rm -f "${KERNEL_DIR}/.bsp-rt-applied"
 			if [[ -d "${KERNEL_DIR}" ]]; then
 				make -C "${KERNEL_DIR}" ARCH="${KERNEL_ARCH}" distclean >/dev/null 2>&1 || true
 			fi
@@ -33,6 +34,10 @@ cmd_clean() {
 			info "清除固件打包产物..."
 			rm -rf "${OUT_DIR}/firmware" "${OUT_DIR}/firmware-pack"
 			rm -f "$(sd_image_path)" "${OUT_DIR}/update.img"
+			;;
+		dl|patches)
+			info "清除下载缓存 dl/（含 RT 补丁）..."
+			rm -rf "${DL_DIR}"
 			;;
 		out)
 			info "清除 out/ ..."
@@ -51,10 +56,16 @@ cmd_clean() {
 			cmd_clean out
 			cmd_clean uboot
 			cmd_clean kernel
-			info "已清除全部编译缓存（源码 sources/ 保留；清除源码用 ./bsp clean sources）"
+			cmd_clean bootimg
+			cmd_clean rootfs
+			cmd_clean pack
+			cmd_clean dl
+			info "已清除全部构建/下载缓存（源码 sources/、toolchain 保留）"
+			info "  清源码: ./bsp clean sources"
+			info "  清工具链: ./bsp clean toolchain"
 			;;
 		*)
-			die "clean 用法: ./bsp clean [uboot|kernel|bootimg|rootfs|pack|out|sources|toolchain|all]"
+			die "clean 用法: ./bsp clean [uboot|kernel|bootimg|rootfs|pack|dl|out|sources|toolchain|all]"
 			;;
 	esac
 	info "清除完成: ${target}"

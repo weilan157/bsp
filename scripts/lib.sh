@@ -75,7 +75,8 @@ OUT_DIR="${BSP_ROOT}/out"
 LOCAL_BIN="${BSP_ROOT}/.local/bin"
 TOOLCHAIN_DIR="${BSP_ROOT}/toolchains/${TOOLCHAIN_NAME}"
 
-info() { echo "[INFO] $*"; }
+# 日志一律走 stderr，避免 $(func) 捕获 echo 返回值时混入 [INFO]
+info() { echo "[INFO] $*" >&2; }
 warn() { echo "[WARN] $*" >&2; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
@@ -202,6 +203,19 @@ sd_image_path() {
 
 bsp_want_force() { [[ "${BSP_FORCE}" == "1" || "${BSP_FORCE}" == "y" ]]; }
 bsp_want_update() { [[ "${BSP_UPDATE}" == "1" || "${BSP_UPDATE}" == "y" ]]; }
+# 构建产物是否强制重做：--clean 或 --update（源码/下载已变，产物视为过期）
+bsp_want_rebuild() { bsp_want_force || bsp_want_update; }
+
+DL_DIR="${BSP_ROOT}/dl"
+
+# --update 时删除已有下载物，迫使重新拉取
+bsp_refresh_download() {
+	local path="$1"
+	if bsp_want_update && [[ -e "${path}" ]]; then
+		info "刷新下载: ${path#"${BSP_ROOT}/"}"
+		rm -rf "${path}"
+	fi
+}
 
 have_uboot_artifacts() {
 	[[ -f "${UBOOT_DIR}/u-boot-opensbi.itb" ]] && \

@@ -3,10 +3,14 @@
 
 cmd_kernel() {
 	parse_build_flags "$@"
+	# --update：刷新内核源码 + RT 补丁（all 里已 setup 则跳过）
+	if bsp_want_update && [[ "${BSP_SETUP_KERNEL_DONE:-}" != "1" ]]; then
+		cmd_setup_kernel_sources
+	fi
 	[[ -d "${KERNEL_DIR}" ]] || die "请先运行 ./bsp setup kernel"
 
-	if ! bsp_want_force && have_kernel_artifacts; then
-		info "已有内核产物，跳过编译（加 --clean 强制重编）"
+	if ! bsp_want_rebuild && have_kernel_artifacts; then
+		info "已有内核产物，跳过编译（加 --clean/--update 强制重编）"
 		ls -lh "${OUT_DIR}/kernel/Image" "${OUT_DIR}/kernel/${KERNEL_DTS_NAME}.dtb"
 		return 0
 	fi
@@ -87,8 +91,8 @@ find_mkimage() {
 cmd_bootimg() {
 	parse_build_flags "$@"
 
-	if ! bsp_want_force && have_bootimg_artifacts; then
-		info "已有 boot.img，跳过打包（加 --clean 强制重做）"
+	if ! bsp_want_rebuild && have_bootimg_artifacts; then
+		info "已有 boot.img，跳过打包（加 --clean/--update 强制重做）"
 		ls -lh "${OUT_DIR}/boot.img"
 		return 0
 	fi
