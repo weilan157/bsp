@@ -1,0 +1,5 @@
+# USB 以太网固定为 usb0 / usb1（按发现顺序占用空闲名，最多两个）
+# 板载 eth0/eth1 给 IgH；USB 口作普通 DHCP 上网
+SUBSYSTEM=="net", ACTION=="add", ENV{ID_BUS}=="usb", ATTR{type}=="1", KERNEL!="usb[0-9]*", \
+  PROGRAM="/bin/sh -c 'for i in 0 1; do [ ! -e /sys/class/net/usb$$i ] && echo usb$$i && exit 0; done; exit 1'", \
+  NAME="%c"

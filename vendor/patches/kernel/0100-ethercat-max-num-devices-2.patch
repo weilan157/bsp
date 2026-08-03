@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0
+# Ky 默认 EC_MAX_NUM_DEVICES=1，会忽略 backup MAC；双口主备需要 2。
+
+--- a/drivers/net/ethercat/include/config.h
++++ b/drivers/net/ethercat/include/config.h
+@@ -17,7 +17,7 @@
+ /* #undef EC_IDENT_WILDCARDS */
+ 
+ /* Max. number of Ethernet devices per master */
+-#define EC_MAX_NUM_DEVICES 1
++#define EC_MAX_NUM_DEVICES 2
+ 
+ /* Read alias adresses from register */
+ /* #undef EC_REGALIAS */

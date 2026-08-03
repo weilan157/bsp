@@ -1,0 +1,196 @@
+# SPDX-License-Identifier: GPL-2.0
+# Orange Pi R2S: EC_GENERIC only bind RTL8125 (r8125/enp*), late probe via notifier
+
+diff --git a/drivers/net/ethercat/device/ec_generic.c b/drivers/net/ethercat/device/ec_generic.c
+index a07e26e92..89f6ac940 100755
+--- a/drivers/net/ethercat/device/ec_generic.c
++++ b/drivers/net/ethercat/device/ec_generic.c
+@@ -31,6 +31,8 @@
+ #include <linux/version.h>
+ #include <linux/if_arp.h> /* ARPHRD_ETHER */
+ #include <linux/etherdevice.h>
++#include <linux/string.h>
++#include <linux/rtnetlink.h>
+ 
+ #include "../include/globals.h"
+ #include "ecdev.h"
+@@ -358,6 +360,109 @@ void ec_gen_device_poll(
+ 
+ /****************************************************************************/
+ 
++static char *if_drivers = "r8125";
++module_param(if_drivers, charp, 0444);
++MODULE_PARM_DESC(if_drivers,
++	"Comma-separated netdev driver names for EtherCAT (default: r8125)");
++
++static char *if_prefix = "enp";
++module_param(if_prefix, charp, 0444);
++MODULE_PARM_DESC(if_prefix,
++	"Optional netdev name prefix to bind (default: enp); empty to disable");
++
++static struct notifier_block ec_gen_netdev_notifier;
++
++/****************************************************************************/
++
++static int ec_gen_driver_match(const char *drv)
++{
++	char buf[128];
++	char *p, *tok;
++
++	if (!drv || !if_drivers || !if_drivers[0])
++		return 0;
++
++	if (strlen(if_drivers) >= sizeof(buf))
++		return 0;
++	strcpy(buf, if_drivers);
++	for (p = buf; (tok = strsep(&p, ",")); ) {
++		while (*tok == ' ')
++			tok++;
++		if (*tok && strcmp(tok, drv) == 0)
++			return 1;
++	}
++	return 0;
++}
++
++static int ec_gen_match_netdev(struct net_device *netdev)
++{
++	const char *drv;
++
++	if (!netdev || netdev->type != ARPHRD_ETHER)
++		return 0;
++	if (!strcmp(netdev->name, "lo"))
++		return 0;
++	/* Never steal SoC GMAC used for normal IP (YT8531C). */
++	if (!strncmp(netdev->name, "eth", 3))
++		return 0;
++
++	drv = netdev_drivername(netdev);
++	if (ec_gen_driver_match(drv))
++		return 1;
++	if (if_prefix && if_prefix[0] &&
++	    !strncmp(netdev->name, if_prefix, strlen(if_prefix)))
++		return 1;
++	return 0;
++}
++
++static int ec_gen_already_offered(struct net_device *netdev)
++{
++	ec_gen_device_t *gendev;
++
++	list_for_each_entry(gendev, &generic_devices, list) {
++		if (gendev->used_netdev == netdev)
++			return 1;
++	}
++	return 0;
++}
++
++static int ec_gen_try_offer_netdev(struct net_device *netdev)
++{
++	ec_gen_interface_desc_t desc;
++
++	if (!ec_gen_match_netdev(netdev) || ec_gen_already_offered(netdev))
++		return 0;
++
++	memset(&desc, 0, sizeof(desc));
++	strncpy(desc.name, netdev->name, IFNAMSIZ - 1);
++	desc.netdev = netdev;
++	desc.ifindex = netdev->ifindex;
++	memcpy(desc.dev_addr, netdev->dev_addr, ETH_ALEN);
++
++	printk(KERN_INFO PFX "Offering %s (driver=%s) to master\n",
++	       netdev->name, netdev_drivername(netdev));
++	return offer_device(&desc);
++}
++
++static int ec_gen_netdev_event(struct notifier_block *nb,
++			       unsigned long event, void *ptr)
++{
++	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
++
++	(void)nb;
++	if (event != NETDEV_REGISTER && event != NETDEV_UP)
++		return NOTIFY_DONE;
++
++	ec_gen_try_offer_netdev(netdev);
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block ec_gen_netdev_notifier = {
++	.notifier_call = ec_gen_netdev_event,
++};
++
++/****************************************************************************/
++
+ /** Offer device.
+  */
+ int offer_device(
+@@ -413,50 +518,26 @@ void clear_devices(void)
+ int __init ec_gen_init_module(void)
+ {
+     int ret = 0;
+-    struct list_head descs;
+     struct net_device *netdev;
+-    ec_gen_interface_desc_t *desc, *next;
+ 
+     printk(KERN_INFO PFX "EtherCAT master generic Ethernet device module %s\n",
+             EC_MASTER_VERSION);
++    printk(KERN_INFO PFX "Binding drivers=[%s] prefix=[%s]\n",
++	   if_drivers ? if_drivers : "", if_prefix ? if_prefix : "");
+ 
+     INIT_LIST_HEAD(&generic_devices);
+-    INIT_LIST_HEAD(&descs);
+-
+-    rcu_read_lock();
+-    for_each_netdev_rcu(&init_net, netdev) {
+-        if (netdev->type != ARPHRD_ETHER)
+-            continue;
+-        desc = kmalloc(sizeof(ec_gen_interface_desc_t), GFP_ATOMIC);
+-        if (!desc) {
+-            ret = -ENOMEM;
+-            rcu_read_unlock();
+-            goto out_err;
+-        }
+-        strncpy(desc->name, netdev->name, IFNAMSIZ);
+-        desc->netdev = netdev;
+-        desc->ifindex = netdev->ifindex;
+-        memcpy(desc->dev_addr, netdev->dev_addr, ETH_ALEN);
+-        list_add_tail(&desc->list, &descs);
+-    }
+-    rcu_read_unlock();
+ 
+-    list_for_each_entry_safe(desc, next, &descs, list) {
+-        ret = offer_device(desc);
+-        if (ret) {
+-            goto out_err;
+-        }
+-        kfree(desc);
+-    }
+-    return ret;
++    rtnl_lock();
++    for_each_netdev(&init_net, netdev)
++	    ec_gen_try_offer_netdev(netdev);
++    rtnl_unlock();
+ 
+-out_err:
+-    list_for_each_entry_safe(desc, next, &descs, list) {
+-        list_del(&desc->list);
+-        kfree(desc);
++    ret = register_netdevice_notifier(&ec_gen_netdev_notifier);
++    if (ret) {
++	    clear_devices();
++	    return ret;
+     }
+-    clear_devices();
+-    return ret;
++    return 0;
+ }
+ 
+ /****************************************************************************/
+@@ -467,6 +548,7 @@ int __init ec_gen_init_module(void)
+  */
+ void __exit ec_gen_cleanup_module(void)
+ {
++    unregister_netdevice_notifier(&ec_gen_netdev_notifier);
+     clear_devices();
+     printk(KERN_INFO PFX "Unloading.\n");
+ }

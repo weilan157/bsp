@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0
+# Orange Pi R2S: EtherCAT on PCIe RTL8125 via EC_GENERIC
+# SoC GMAC eth0/eth1 (YT8531C) remain normal IP netdevs (ky,x1-emac)
+
+--- a/arch/riscv/boot/dts/ky/x1_orangepi-r2s.dts
++++ b/arch/riscv/boot/dts/ky/x1_orangepi-r2s.dts
+@@ -848,3 +848,24 @@
+ 	memory-region = <&rcpu_mem_0>, <&vdev0vring0>, <&vdev0vring1>, <&vdev0buffer>, <&rsc_table>, <&rcpu_mem_snapshots>;
+ 	status = "okay";
+ };
++
++/*
++ * IgH EtherCAT on PCIe RTL8125 (2.5G); SoC GMAC eth0/eth1 (YT8531C 1G) stay
++ * as normal IP. ec_master MACs are broadcast so ec_generic accepts r8125 NICs.
++ */
++/ {
++	ec_mac_main: ec-mac-main {
++		mac-address = [ ff ff ff ff ff ff ];
++	};
++
++	ec_mac_backup: ec-mac-backup {
++		mac-address = [ ff ff ff ff ff ff ];
++	};
++};
++
++&ec_master {
++	ec-devices = <&ec_mac_main>, <&ec_mac_backup>;
++	master-indexes = <0>, <0>;
++	modes = "ec_main", "ec_backup";
++	status = "okay";
++};

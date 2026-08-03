@@ -15,8 +15,9 @@ cmd_kernel() {
 		return 0
 	fi
 
-	# 确保 RT 补丁已打（仅 setup 过旧树时也可在编译前补上）
+	# 确保 RT / EtherCAT 补丁已打（仅 setup 过旧树时也可在编译前补上）
 	apply_kernel_rt_patches
+	apply_kernel_ethercat_patches
 
 	setup_cross_compile
 	local jobs arch dts_target
@@ -91,10 +92,13 @@ find_mkimage() {
 cmd_bootimg() {
 	parse_build_flags "$@"
 
-	if ! bsp_want_rebuild && have_bootimg_artifacts; then
+	if ! bsp_want_rebuild && have_bootimg_artifacts && ! bootimg_stale_vs_kernel; then
 		info "已有 boot.img，跳过打包（加 --clean/--update 强制重做）"
 		ls -lh "${OUT_DIR}/boot.img"
 		return 0
+	fi
+	if bootimg_stale_vs_kernel && have_bootimg_artifacts && ! bsp_want_rebuild; then
+		info "检测到 kernel/dtb 新于 boot.img，自动重新打包 boot.img"
 	fi
 
 	local kernel_image kernel_dtb boot_dir boot_img mkimage_bin

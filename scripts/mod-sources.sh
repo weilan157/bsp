@@ -14,8 +14,8 @@ clone_or_update() {
 			return 0
 		fi
 		info "更新 ${name} (${branch})..."
-		# 丢弃本地 RT 补丁/rejects，再拉远端；否则会重复打补丁
-		rm -f "${dir}/.bsp-rt-applied"
+		# 丢弃本地 RT/EtherCAT 补丁与 rejects，再拉远端；否则会重复打补丁
+		rm -f "${dir}/.bsp-rt-applied" "${dir}/.bsp-ethercat-applied"
 		git -C "${dir}" fetch origin
 		git -C "${dir}" checkout -f "${branch}"
 		git -C "${dir}" reset --hard "origin/${branch}"
@@ -39,6 +39,7 @@ cmd_setup_kernel_sources() {
 	clone_or_update "${KERNEL_REPO}" "${KERNEL_BRANCH}" "${KERNEL_DIR}"
 	cmd_sync_dts
 	apply_kernel_rt_patches
+	apply_kernel_ethercat_patches
 	BSP_SETUP_KERNEL_DONE=1
 	info "内核源码就绪: ${KERNEL_DIR}"
 }
@@ -184,11 +185,13 @@ cmd_setup() {
 	case "${target}" in
 		uboot|u-boot) cmd_setup_uboot_sources ;;
 		kernel) cmd_setup_kernel_sources ;;
+		ethercat) cmd_setup_ethercat_sources ;;
 		all)
 			cmd_setup_uboot_sources
 			cmd_setup_kernel_sources
+			cmd_setup_ethercat_sources
 			;;
-		*) die "setup 用法: ./bsp setup [uboot|kernel|all] [--update]" ;;
+		*) die "setup 用法: ./bsp setup [uboot|kernel|ethercat|all] [--update]" ;;
 	esac
 }
 

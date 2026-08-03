@@ -1,0 +1,102 @@
+#!/bin/sh
+# 板端检查外置 IgH EtherCAT + 网口拓扑（Orange Pi R2S）
+# 千兆 YT8531C = eth0/eth1 上网；PCIe RTL8125 = EtherCAT（ec_generic）
+set -eu
+
+PATH="/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+export PATH
+
+echo "=== EtherCAT 设备节点 ==="
+if ls /dev/EtherCAT* >/dev/null 2>&1; then
+	ls -l /dev/EtherCAT*
+else
+	echo "(无 /dev/EtherCAT* — 尝试: sudo systemctl start ethercat)"
+fi
+
+echo
+echo "=== 已加载模块 ==="
+if command -v lsmod >/dev/null 2>&1; then
+	lsmod | grep -E '^ec_' || echo "(无 ec_* 模块 — 外置主站未加载)"
+else
+	echo "(无 lsmod)"
+fi
+
+echo
+echo "=== 拓扑说明 ==="
+echo "YT8531C 千兆 (SoC GMAC) → eth0/eth1：普通 IP/DHCP"
+echo "RTL8125BG 2.5G (PCIe)   → enp*：EtherCAT（generic；勿配 IP）"
+echo "启停: systemctl start|stop ethercat  或  ethercatctl start|stop"
+
+echo
+echo "=== dmesg（EtherCAT / r8125）==="
+if dmesg 2>/dev/null | grep -iE 'ethercat|ec_generic|ec_master|r8125|Accepting|offer EtherCAT|waiting for devices|x1_ec_master|x1-emac' | tail -n 50; then
+	:
+else
+	if [ "$(id -u)" -ne 0 ]; then
+		echo "(普通用户可能无法读内核日志，请: sudo ethercat-info)"
+	else
+		echo "(无匹配日志)"
+	fi
+fi
+
+echo
+echo "=== 内核配置（内嵌 EC 应关闭）==="
+if [ -r /proc/config.gz ]; then
+	zcat /proc/config.gz | grep -E '^CONFIG_EC_|^CONFIG_ETHERCAT|^CONFIG_R8125|# CONFIG_ETHERCAT' || true
+elif [ -r "/boot/config-$(uname -r)" ]; then
+	grep -E '^CONFIG_EC_|^CONFIG_ETHERCAT|^CONFIG_R8125|# CONFIG_ETHERCAT' "/boot/config-$(uname -r)" || true
+else
+	echo "(无 config.gz)"
+fi
+
+echo
+echo "=== 运行时 conf ==="
+if [ -r /run/ethercat.conf ]; then
+	cat /run/ethercat.conf
+elif [ -r /etc/ethercat.conf ]; then
+	echo "(尚无 /run/ethercat.conf，显示 /etc/ethercat.conf)"
+	grep -vE '^\s*(#|$)' /etc/ethercat.conf || true
+else
+	echo "(无 ethercat.conf)"
+fi
+
+echo
+echo "=== IP 网口（期望 eth0/eth1；enp* 给 EC）==="
+if command -v ip >/dev/null 2>&1; then
+	ip -o link show 2>/dev/null || true
+elif [ -x /sbin/ifconfig ]; then
+	/sbin/ifconfig -a 2>/dev/null || true
+else
+	echo "(未找到 ip/ifconfig)"
+fi
+
+echo
+echo "=== 快速判定 ==="
+if [ -e /dev/EtherCAT0 ]; then
+	if dmesg 2>/dev/null | grep -qi 'x1_ec_master\|x1-ec-emac\|ec_x1'; then
+		echo "警告: 仍见 Ky 内嵌 EC 日志 — 请确认已刷外置 IgH 内核/rootfs。"
+	fi
+	if dmesg 2>/dev/null | grep -qi 'Accepting .* as main'; then
+		echo "主站已 Accepting 至少一块网卡。"
+	elif dmesg 2>/dev/null | grep -q 'waiting for devices'; then
+		echo "主站在等网卡：确认 PCIe RTL8125（ip link | grep enp / dmesg | grep r8125）。"
+	else
+		echo "有 /dev/EtherCAT0；请结合 dmesg / ethercat slaves 确认。"
+	fi
+else
+	echo "缺少 /dev/EtherCAT0 — 执行: sudo systemctl start ethercat"
+fi
+
+if ! lsmod 2>/dev/null | grep -q '^ec_master'; then
+	echo "ec_master 未加载。"
+fi
+
+if ! ip -o link 2>/dev/null | grep -qE 'enp|eth2|eth3'; then
+	if ! dmesg 2>/dev/null | grep -qi r8125; then
+		echo "未看到 RTL8125/enp*：请检查 PCIe（dmesg | grep -iE 'pci|r8125|8125'）。"
+	fi
+fi
+
+echo
+echo "扫站: ethercat slaves   或  ethercat-slaves -r"
+echo "上网: ifup eth0 / eth1 (DHCP)"

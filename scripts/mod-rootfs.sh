@@ -30,6 +30,60 @@ install_ky_firmware() {
 	fi
 }
 
+# 安装 IgH 用户态头文件（外置 sources/ethercat；make install 已装则跳过）
+install_ethercat_headers() {
+	local root="$1"
+	local hdr="${ETHERCAT_DIR}/include/ecrt.h"
+	local dest="${root}/usr/include/ecrt.h"
+	if [[ "${KERNEL_ETHERCAT}" != "y" && "${KERNEL_ETHERCAT}" != "1" ]]; then
+		return 0
+	fi
+	if [[ -f "${dest}" ]]; then
+		info "ecrt.h 已由 IgH install 提供"
+		return 0
+	fi
+	if [[ -f "${hdr}" ]]; then
+		info "安装 ecrt.h -> ${root}/usr/include/"
+		run_root mkdir -p "${root}/usr/include"
+		run_root cp -a "${hdr}" "${dest}"
+	else
+		warn "未找到 ${hdr}（请先 ./bsp setup ethercat）"
+	fi
+}
+
+# 交叉编译最小扫站工具（ioctl；优先官方 ethercat slaves）
+install_ethercat_slaves() {
+	local root="$1"
+	local src="${BSP_ROOT}/vendor/rootfs/src/ethercat-slaves/ethercat-slaves.c"
+	local ec_master="${ETHERCAT_DIR}/master"
+	local ec_inc="${ETHERCAT_DIR}/include"
+	local out_dir="${OUT_DIR}/ethercat-tools"
+	local bin="${out_dir}/ethercat-slaves"
+
+	if [[ "${KERNEL_ETHERCAT}" != "y" && "${KERNEL_ETHERCAT}" != "1" ]]; then
+		return 0
+	fi
+	if [[ ! -f "${src}" ]]; then
+		warn "缺少 ${src}"
+		return 0
+	fi
+	if [[ ! -f "${ec_master}/ioctl.h" ]]; then
+		warn "未找到 ${ec_master}/ioctl.h（请先 ./bsp setup ethercat）"
+		return 0
+	fi
+
+	setup_cross_compile
+	mkdir -p "${out_dir}"
+	info "交叉编译 ethercat-slaves..."
+	"${CROSS_COMPILE}gcc" -O2 -Wall -Wextra \
+		-I"${ec_master}" -I"${ec_inc}" \
+		-o "${bin}" "${src}" || die "ethercat-slaves 编译失败"
+
+	run_root mkdir -p "${root}/usr/local/sbin" "${root}/usr/local/bin"
+	run_root install -m 755 "${bin}" "${root}/usr/local/sbin/ethercat-slaves"
+	run_root ln -sfn /usr/local/sbin/ethercat-slaves "${root}/usr/local/bin/ethercat-slaves"
+}
+
 qemu_static_for_arch() {
 	# 旧包 qemu-user-static：qemu-<arch>-static；新包 qemu-user：qemu-<arch>
 	local candidates=()
@@ -108,8 +162,29 @@ cmd_rootfs() {
 	if [[ -d "${overlay}" ]]; then
 		info "应用 overlay: ${overlay}"
 		run_root rsync -a "${overlay}/" "${rootfs}/"
+		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-info" 2>/dev/null || true
+		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-board-conf" 2>/dev/null || true
+		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-r8125-up" 2>/dev/null || true
+		run_root chmod 755 "${rootfs}/usr/local/sbin/rt-latency-test" 2>/dev/null || true
+		run_root chmod 644 "${rootfs}/etc/profile.d/bsp-path.sh" 2>/dev/null || true
+		run_root chmod 644 "${rootfs}/etc/profile.d/bsp-bashrc.sh" 2>/dev/null || true
+		# 供非 login 也能找到：再链到 /usr/local/bin
+		run_root mkdir -p "${rootfs}/usr/local/bin"
+		run_root ln -sfn /usr/local/sbin/ethercat-info "${rootfs}/usr/local/bin/ethercat-info" 2>/dev/null || true
+		run_root ln -sfn /usr/local/sbin/rt-latency-test "${rootfs}/usr/local/bin/rt-latency-test" 2>/dev/null || true
+		run_root mkdir -p "${rootfs}/etc/systemd/system/multi-user.target.wants"
+		run_root ln -sfn /etc/systemd/system/ethercat.service \
+			"${rootfs}/etc/systemd/system/multi-user.target.wants/ethercat.service" 2>/dev/null || true
+		# 旧内嵌 EC 辅助服务不再默认启用
+		run_root rm -f "${rootfs}/etc/systemd/system/multi-user.target.wants/ethercat-r8125.service" 2>/dev/null || true
 	fi
 	install_ky_firmware "${rootfs}"
+	# 外置 IgH 用户态（模块等 kernelrelease 确定后再装）
+	if [[ "${KERNEL_ETHERCAT}" == "y" || "${KERNEL_ETHERCAT}" == "1" ]]; then
+		install_ethercat_oot "${rootfs}"
+	fi
+	install_ethercat_headers "${rootfs}"
+	install_ethercat_slaves "${rootfs}"
 
 	rootfs_mount "${rootfs}"
 	cleanup_rootfs() { rootfs_umount "${rootfs}"; }
@@ -138,6 +213,10 @@ cmd_rootfs() {
 		local kernel_release
 		kernel_release="$(install_kernel_modules "${rootfs}" | tail -n1)"
 		[[ "${kernel_release}" =~ ^[0-9] ]] || die "无效 kernelrelease: ${kernel_release}"
+		# 外置 IgH .ko 需与 kernelrelease 一致；若早前已装过则再同步一次
+		if [[ "${KERNEL_ETHERCAT}" == "y" || "${KERNEL_ETHERCAT}" == "1" ]]; then
+			install_ethercat_oot "${rootfs}"
+		fi
 		if [[ ! -x "${rootfs}/sbin/depmod" ]] && [[ ! -x "${rootfs}/usr/sbin/depmod" ]]; then
 			info "rootfs 缺少 depmod，安装 kmod..."
 			run_root chroot "${rootfs}" apt-get update

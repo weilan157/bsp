@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0
+# If master is not ready yet, defer probe instead of failing permanently.
+
+--- a/drivers/net/ethercat/device/ecdev.h
++++ b/drivers/net/ethercat/device/ecdev.h
+@@ -52,6 +52,9 @@
+  * Offering/withdrawal functions
+  ****************************************************************************/
+ 
++/** Number of configured masters (0 if master driver not ready). */
++unsigned int ec_master_count(void);
++
+ ec_device_t *ecdev_offer(struct net_device *net_dev, ec_pollfunc_t poll,
+         struct module *module);
+ void ecdev_withdraw(ec_device_t *device);
+--- a/drivers/net/ethercat/device/ec_x1_emac.c
++++ b/drivers/net/ethercat/device/ec_x1_emac.c
+@@ -1607,7 +1607,13 @@
+ 
+ 	priv->ecdev = ecdev_offer(priv->ndev, emac_ec_poll, THIS_MODULE);
+ 	if(!priv->ecdev) {
+-		dev_err(&pdev->dev, "failed to offer EtherCAT device\n");
++		/* Master may not be probed yet; retry via deferred probe. */
++		if (!ec_master_count()) {
++			dev_info(&pdev->dev, "EtherCAT master not ready, deferring\n");
++			ret = -EPROBE_DEFER;
++			goto err_mdio_deinit;
++		}
++		dev_err(&pdev->dev, "failed to offer EtherCAT device (MAC mismatch?)\n");
+ 		goto err_mdio_deinit;
+ 	} else {
+ 		pr_info("success to offer EtherCAT device\n");

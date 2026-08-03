@@ -1,0 +1,17 @@
+[Unit]
+Description=IgH EtherCAT Master (out-of-tree generic + RTL8125)
+Documentation=https://gitlab.com/etherlab.org/ethercat
+After=network-pre.target local-fs.target
+Wants=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 按 PCI 8125 生成 /run/ethercat.conf 并拉起接口
+ExecStartPre=/usr/local/sbin/ethercat-board-conf /run/ethercat.conf
+ExecStart=/usr/sbin/ethercatctl -c /run/ethercat.conf start
+ExecStop=/usr/sbin/ethercatctl -c /run/ethercat.conf stop
+
+[Install]
+WantedBy=multi-user.target

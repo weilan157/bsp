@@ -1,0 +1,2 @@
+# IgH EtherCAT 字符设备权限（主站创建 /dev/EtherCAT0）
+KERNEL=="EtherCAT[0-9]*", MODE="0666", GROUP="dialout"

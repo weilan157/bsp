@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0
+# Allow DT mac-address=ff:ff:... (broadcast) for EC_GENERIC accept-any
+
+diff --git a/drivers/net/ethercat/master/module.c b/drivers/net/ethercat/master/module.c
+index a8d3ca2f4..5f582b385 100644
+--- a/drivers/net/ethercat/master/module.c
++++ b/drivers/net/ethercat/master/module.c
+@@ -69,6 +69,24 @@ char *ec_master_version_str = EC_MASTER_VERSION; /**< Version string. */
+ 
+ /****************************************************************************/
+ 
++static int ec_read_mac_from_node(struct device_node *node, uint8_t *mac)
++{
++    int ret;
++
++    /*
++     * of_get_mac_address() rejects broadcast (ff:ff:...) via
++     * is_valid_ether_addr(). For EC_GENERIC we intentionally use broadcast
++     * in DT so any matching NIC (r8125) can be accepted.
++     */
++    ret = of_property_read_u8_array(node, "mac-address", mac, ETH_ALEN);
++    if (!ret)
++        return 0;
++    ret = of_property_read_u8_array(node, "local-mac-address", mac, ETH_ALEN);
++    if (!ret)
++        return 0;
++    return of_get_mac_address(node, mac);
++}
++
+ static int ec_parse_eth_node(struct device_node *eth_node, int master_index, const char *mode)
+ {
+     int ret;
+@@ -83,13 +101,13 @@ static int ec_parse_eth_node(struct device_node *eth_node, int master_index, con
+     }
+ 
+     if (strcmp(mode, "ec_main") == 0) {
+-        ret = of_get_mac_address(eth_node, macs[master_index][0]);
++        ret = ec_read_mac_from_node(eth_node, macs[master_index][0]);
+         if (ret) {
+             EC_ERR("Failed to read MAC address from %s.\n", eth_node->name);
+             return ret;
+         }
+     } else if (strcmp(mode, "ec_backup") == 0) {
+-        ret = of_get_mac_address(eth_node, macs[master_index][1]);
++        ret = ec_read_mac_from_node(eth_node, macs[master_index][1]);
+         if (ret) {
+             EC_ERR("Failed to read MAC address from %s.\n", eth_node->name);
+             return ret;

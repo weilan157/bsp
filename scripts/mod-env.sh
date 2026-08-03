@@ -71,7 +71,8 @@ cmd_env() {
 		python3 python3-pip libssl-dev git rsync curl pkg-config
 		u-boot-tools debootstrap
 		debian-archive-keyring e2fsprogs dosfstools fdisk gdisk parted
-		xz-utils mtools
+		xz-utils mtools patch
+		autoconf automake libtool
 	)
 
 	# Ubuntu Resolute+：qemu-user-static 变为虚包，改装 qemu-user + qemu-user-binfmt

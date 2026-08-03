@@ -1,0 +1,14 @@
+[Unit]
+Description=Bring up RTL8125 for IgH EtherCAT (ec_generic)
+After=network-pre.target
+Before=network.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# PCIe 口名因拓扑可能是 enp1s0/enp2s0 或 eth2/eth3；按驱动目录匹配更稳
+ExecStart=/usr/local/sbin/ethercat-r8125-up
+
+[Install]
+WantedBy=multi-user.target

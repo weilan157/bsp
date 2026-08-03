@@ -56,10 +56,51 @@ if ! id "${USER_NAME}" >/dev/null 2>&1; then
 	echo "${USER_NAME}:${USER_PASSWORD}" | chpasswd
 	usermod -aG sudo "${USER_NAME}"
 fi
+# dialout：访问 /dev/EtherCAT*（udev 规则 GROUP=dialout）
+usermod -aG dialout,sudo "${USER_NAME}" 2>/dev/null || true
+
+# 常用板端工具放到普通用户 PATH（/usr/local/bin）
+mkdir -p /usr/local/bin
+for t in ethercat-info ethercat-slaves ethercat-board-conf rt-latency-test; do
+	if [[ -x "/usr/local/sbin/${t}" ]]; then
+		ln -sfn "/usr/local/sbin/${t}" "/usr/local/bin/${t}"
+	fi
+done
+# 官方 CLI
+if [[ -x /usr/bin/ethercat ]]; then
+	ln -sfn /usr/bin/ethercat /usr/local/bin/ethercat 2>/dev/null || true
+fi
+
+# 非 login 交互 bash（SSH 默认）也会加载 bsp profile.d
+if [[ -f /etc/bash.bashrc ]] && ! grep -q 'bsp-.*\.sh' /etc/bash.bashrc; then
+	cat >> /etc/bash.bashrc <<'EOF'
+
+# BSP: interactive non-login shells also load bsp profile snippets
+if [ -d /etc/profile.d ]; then
+	for _bsp_i in /etc/profile.d/bsp-*.sh; do
+		[ -r "${_bsp_i}" ] && . "${_bsp_i}"
+	done
+	unset _bsp_i
+fi
+EOF
+fi
+
+# PAM / SSH 会话统一 PATH（含 sbin，普通用户可用 ifconfig）
+if [[ -f /etc/environment ]]; then
+	if grep -qE '^PATH=' /etc/environment; then
+		sed -i 's|^PATH=.*|PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"|' /etc/environment
+	else
+		echo 'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' >> /etc/environment
+	fi
+else
+	echo 'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment
+fi
 
 echo ">>> 启用 ssh / timesyncd"
 systemctl enable ssh 2>/dev/null || true
 systemctl enable systemd-timesyncd.service 2>/dev/null || true
+systemctl enable ethercat.service 2>/dev/null || true
+systemctl disable ethercat-r8125.service 2>/dev/null || true
 
 echo ">>> 串口登录（overlay 已 mask serial-getty@ttyS0、启用 console-getty）"
 # Ky UART 作 console 时 udev 常不产生 dev-ttyS0.device；见 vendor/rootfs/overlay/.../systemd

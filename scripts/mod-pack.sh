@@ -261,6 +261,9 @@ cmd_pack() {
 		return 0
 	fi
 
+	# 打包前确保 boot.img 与当前 kernel 一致
+	cmd_bootimg
+
 	cmd_stage
 
 	[[ -f "${OUT_DIR}/boot.img" ]] || die "缺少 out/boot.img"
@@ -500,6 +503,10 @@ cmd_all() {
 	cmd_uboot
 	cmd_setup_kernel_sources
 	cmd_kernel
+	# 外置 IgH：依赖已配置内核树；在 rootfs 之前产出 ko/CLI
+	if [[ "${KERNEL_ETHERCAT}" == "y" || "${KERNEL_ETHERCAT}" == "1" ]]; then
+		cmd_ethercat
+	fi
 	cmd_bootimg
 
 	if [[ "${skip_rootfs}" != "y" ]]; then

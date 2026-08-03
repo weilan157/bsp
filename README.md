@@ -69,12 +69,15 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 
 固定板型：`BOARD=orangepir2s`，`KERNEL_DTS_NAME=x1_orangepi-r2s`。
 
+默认开启 **PREEMPT_RT**（`KERNEL_RT=y`）与 **外置 IgH EtherCAT**（`KERNEL_ETHERCAT=y`，与 RT 无关）：千兆 YT8531C（`eth0`/`eth1`）DHCP；PCIe RTL8125（`enp*`）给 `ec_generic` → `/dev/EtherCAT0`（`systemctl start ethercat`）。
+
 ## 编译产物
 
 | 命令 | 产物 |
 |------|------|
 | `./bsp uboot` | `out/uboot/`：`FSBL.bin`、`bootinfo_sd.bin`、`u-boot-opensbi.itb` 等 |
 | `./bsp kernel` | `out/kernel/Image`、`out/kernel/x1_orangepi-r2s.dtb` |
+| `./bsp ethercat` | `out/ethercat/`：`ec_master.ko`、`ec_generic.ko`、`ethercat` CLI |
 | `./bsp bootimg` | `out/boot/`、`out/boot.img`（FAT：Image + dtb + boot.scr） |
 | `./bsp rootfs` | `out/rootfs/`、`out/rootfs.ext4` |
 | `./bsp pack` | `out/orangepir2s.img`（可 `dd` 到 microSD） |

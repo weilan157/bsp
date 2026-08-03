@@ -35,10 +35,22 @@ fi
 : "${KERNEL_RT:=y}"
 : "${KERNEL_RT_PATCH_URL:=https://cdn.kernel.org/pub/linux/kernel/projects/rt/6.6/older/patch-6.6.63-rt46.patch.xz}"
 : "${KERNEL_RT_PATCH_NAME:=patch-6.6.63-rt46.patch.xz}"
-# 默认 fragment：slim +（KERNEL_RT=y 时）rt
+# 外置 IgH EtherCAT（官方 stable-1.6 线；与 KERNEL_RT 无关）
+: "${KERNEL_ETHERCAT:=y}"
+: "${ETHERCAT_REPO:=https://gitlab.com/etherlab.org/ethercat.git}"
+: "${ETHERCAT_BRANCH:=stable-1.6}"
+# 发布 tarball（含 configure，无需主机 bootstrap）；与 stable-1.6 对齐
+: "${ETHERCAT_VERSION:=1.6.10}"
+: "${ETHERCAT_DIST_URL:=https://gitlab.com/api/v4/projects/24894054/packages/generic/ethercat/${ETHERCAT_VERSION}/ethercat-${ETHERCAT_VERSION}.tar.gz}"
+# git：拉分支后需 autoconf bootstrap；dist：默认用官方发布包（推荐）
+: "${ETHERCAT_SOURCE:=dist}"
+# 默认 fragment：slim +（KERNEL_RT=y 时）rt +（KERNEL_ETHERCAT=y 时关闭内核内嵌 EC）
 _kernel_default_frags="${BSP_ROOT}/vendor/kernel-config/slim.config"
 if [[ "${KERNEL_RT}" == "y" || "${KERNEL_RT}" == "1" ]]; then
 	_kernel_default_frags="${_kernel_default_frags} ${BSP_ROOT}/vendor/kernel-config/rt.config"
+fi
+if [[ "${KERNEL_ETHERCAT}" == "y" || "${KERNEL_ETHERCAT}" == "1" ]]; then
+	_kernel_default_frags="${_kernel_default_frags} ${BSP_ROOT}/vendor/kernel-config/ethercat.config"
 fi
 : "${KERNEL_EXTRA_FRAGMENTS:=${_kernel_default_frags}}"
 unset _kernel_default_frags
@@ -70,6 +82,7 @@ BACKUP_DIR="${BSP_ROOT}/backup"
 UBOOT_DIR="${SOURCES_DIR}/u-boot"
 RKBIN_DIR="${SOURCES_DIR}/rkbin"
 KERNEL_DIR="${SOURCES_DIR}/kernel"
+ETHERCAT_DIR="${SOURCES_DIR}/ethercat"
 VENDOR_DTS_DIR="${BSP_ROOT}/vendor/dts/${KERNEL_DTS_SUBDIR}"
 OUT_DIR="${BSP_ROOT}/out"
 LOCAL_BIN="${BSP_ROOT}/.local/bin"
@@ -231,6 +244,17 @@ have_kernel_artifacts() {
 
 have_bootimg_artifacts() {
 	[[ -f "${OUT_DIR}/boot.img" ]] && [[ -f "${OUT_DIR}/boot/boot.scr" ]]
+}
+
+# kernel/dtb 比 boot.img 新时需重打包（避免只编了 kernel 却刷到旧 boot）
+bootimg_stale_vs_kernel() {
+	local ki kd bi
+	ki="${OUT_DIR}/kernel/Image"
+	kd="${OUT_DIR}/kernel/${KERNEL_DTS_NAME}.dtb"
+	bi="${OUT_DIR}/boot.img"
+	[[ -f "${bi}" ]] || return 0
+	[[ -f "${ki}" && -f "${kd}" ]] || return 1
+	[[ "${ki}" -nt "${bi}" || "${kd}" -nt "${bi}" ]]
 }
 
 have_rootfs_artifacts() {

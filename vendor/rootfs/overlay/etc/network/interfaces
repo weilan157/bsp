@@ -1,9 +1,19 @@
 auto lo
 iface lo inet loopback
 
-# Orange Pi R2S：双 RGMII（eth0 / eth1），网线插哪个就起哪个
+# ---------- 千兆 YT8531C（SoC GMAC eth0/eth1）：普通上网 ----------
+auto eth0
 allow-hotplug eth0
 iface eth0 inet dhcp
 
+auto eth1
 allow-hotplug eth1
 iface eth1 inet dhcp
+
+# ---------- PCIe 2.5G RTL8125（通常为 enp*）：EtherCAT，勿配 IP ----------
+# 链路由 ethercat-r8125.service 拉起，再交给 ec_generic
+allow-hotplug enp1s0
+iface enp1s0 inet manual
+
+allow-hotplug enp2s0
+iface enp2s0 inet manual

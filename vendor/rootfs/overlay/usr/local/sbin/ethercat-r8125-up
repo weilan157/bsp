@@ -1,0 +1,49 @@
+#!/bin/sh
+# 拉起所有 r8125 网口（PCIe RTL8125BG），供 IgH EC_GENERIC 绑定
+set -eu
+PATH="/usr/sbin:/sbin:/usr/bin:/bin:${PATH:-}"
+
+found=0
+for d in /sys/class/net/*; do
+	[ -d "$d" ] || continue
+	iface=$(basename "$d")
+	[ "$iface" = "lo" ] && continue
+	drv=""
+	if [ -L "$d/device/driver" ]; then
+		drv=$(basename "$(readlink -f "$d/device/driver")")
+	fi
+	case "$drv" in
+		r8125) ;;
+		*)
+			case "$iface" in
+				enp*) ;;
+				*) continue ;;
+			esac
+			;;
+	esac
+	ip link set "$iface" up 2>/dev/null || true
+	echo "ethercat-r8125: up $iface (driver=${drv:-?})"
+	found=1
+done
+
+if [ "$found" -eq 0 ]; then
+	echo "ethercat-r8125: 未发现 r8125/enp* 网口"
+	echo "--- /sys/bus/pci/devices ---"
+	if [ -d /sys/bus/pci/devices ]; then
+		n=0
+		for d in /sys/bus/pci/devices/*; do
+			[ -d "$d" ] || continue
+			n=$((n + 1))
+			ven=$(cat "$d/vendor" 2>/dev/null || echo ?)
+			dev=$(cat "$d/device" 2>/dev/null || echo ?)
+			drv=""
+			[ -L "$d/driver" ] && drv=$(basename "$(readlink -f "$d/driver")")
+			echo "  $(basename "$d") vendor=$ven device=$dev driver=${drv:-none}"
+		done
+		[ "$n" -eq 0 ] && echo "(PCI 总线空 — 控制器可能未枚举到端点)"
+	else
+		echo "(无 PCI 子系统)"
+	fi
+	echo "--- dmesg pci/r8125 (tail) ---"
+	dmesg 2>/dev/null | grep -iE 'pci|pcie|r8125|8125|x1-pcie|link down|link up|pwr' | tail -n 40 || true
+fi

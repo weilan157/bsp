@@ -15,11 +15,18 @@ cmd_clean() {
 			rm -rf "${OUT_DIR}/uboot"
 			;;
 		kernel)
-			info "清除内核产物与 RT 补丁应用标记..."
+			info "清除内核产物与 RT/EtherCAT 补丁应用标记..."
 			rm -rf "${OUT_DIR}/kernel"
-			rm -f "${KERNEL_DIR}/.bsp-rt-applied"
+			rm -f "${KERNEL_DIR}/.bsp-rt-applied" "${KERNEL_DIR}/.bsp-ethercat-applied"
 			if [[ -d "${KERNEL_DIR}" ]]; then
 				make -C "${KERNEL_DIR}" ARCH="${KERNEL_ARCH}" distclean >/dev/null 2>&1 || true
+			fi
+			;;
+		ethercat)
+			info "清除外置 IgH EtherCAT 产物..."
+			rm -rf "${OUT_DIR}/ethercat" "${OUT_DIR}/ethercat-tools"
+			if [[ -d "${ETHERCAT_DIR}" ]]; then
+				make -C "${ETHERCAT_DIR}" distclean >/dev/null 2>&1 || true
 			fi
 			;;
 		bootimg)
@@ -56,6 +63,7 @@ cmd_clean() {
 			cmd_clean out
 			cmd_clean uboot
 			cmd_clean kernel
+			cmd_clean ethercat
 			cmd_clean bootimg
 			cmd_clean rootfs
 			cmd_clean pack
@@ -65,7 +73,7 @@ cmd_clean() {
 			info "  清工具链: ./bsp clean toolchain"
 			;;
 		*)
-			die "clean 用法: ./bsp clean [uboot|kernel|bootimg|rootfs|pack|dl|out|sources|toolchain|all]"
+			die "clean 用法: ./bsp clean [uboot|kernel|ethercat|bootimg|rootfs|pack|dl|out|sources|toolchain|all]"
 			;;
 	esac
 	info "清除完成: ${target}"
