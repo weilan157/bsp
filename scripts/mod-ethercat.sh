@@ -2,10 +2,23 @@
 # 外置官方 IgH EtherCAT（stable-1.6）：交叉编译模块 + 用户态工具
 
 have_ethercat_artifacts() {
-	[[ -f "${OUT_DIR}/ethercat/modules/ec_master.ko" ]] && \
-		[[ -f "${OUT_DIR}/ethercat/modules/ec_generic.ko" ]] && \
-		{ [[ -x "${OUT_DIR}/ethercat/usr/bin/ethercat" ]] || \
-		  [[ -x "${OUT_DIR}/ethercat/usr/sbin/ethercat" ]]; }
+	[[ -f "${OUT_DIR}/ethercat/modules/ec_master.ko" ]] || return 1
+	{ [[ -x "${OUT_DIR}/ethercat/usr/bin/ethercat" ]] || \
+	  [[ -x "${OUT_DIR}/ethercat/usr/sbin/ethercat" ]]; } || return 1
+	case "${ETHERCAT_DEVICE_MODULE:-r8169}" in
+		r8169)
+			[[ -f "${OUT_DIR}/ethercat/modules/ec_r8169.ko" ]] || return 1
+			;;
+		generic)
+			[[ -f "${OUT_DIR}/ethercat/modules/ec_generic.ko" ]] || return 1
+			;;
+		*)
+			# 同时需要两者时至少有一个设备模块
+			[[ -f "${OUT_DIR}/ethercat/modules/ec_r8169.ko" ]] || \
+				[[ -f "${OUT_DIR}/ethercat/modules/ec_generic.ko" ]] || return 1
+			;;
+	esac
+	return 0
 }
 
 cmd_setup_ethercat_sources() {
@@ -224,7 +237,7 @@ cmd_ethercat() {
 		make distclean >/dev/null 2>&1 || true
 	fi
 
-	info "configure 外置 IgH（generic，交叉 ${host_triplet}）..."
+	info "configure 外置 IgH（${ETHERCAT_DEVICE_MODULE}，交叉 ${host_triplet}）..."
 	local conf=(
 		./configure
 		"--host=${host_triplet}"
@@ -233,14 +246,12 @@ cmd_ethercat() {
 		"--sysconfdir=/etc"
 		"--with-devices=2"
 		"--enable-kernel"
-		"--enable-generic"
 		"--enable-tool"
 		"--enable-userlib"
 		"--disable-8139too"
 		"--disable-e100"
 		"--disable-e1000"
 		"--disable-e1000e"
-		"--disable-r8169"
 		"--disable-igb"
 		"--disable-igc"
 		"--disable-ccat"
@@ -253,6 +264,18 @@ cmd_ethercat() {
 		"LD=${ld}"
 		"AR=${ar}"
 	)
+	# 默认编 r8169（RTL8125）+ generic（回退）；按 ETHERCAT_DEVICE_MODULE 也可只编一侧
+	case "${ETHERCAT_DEVICE_MODULE}" in
+		r8169)
+			conf+=("--enable-r8169" "--with-r8169-kernel=${ETHERCAT_R8169_KERNEL}" "--enable-generic")
+			;;
+		generic)
+			conf+=("--disable-r8169" "--enable-generic")
+			;;
+		*)
+			conf+=("--enable-r8169" "--with-r8169-kernel=${ETHERCAT_R8169_KERNEL}" "--enable-generic")
+			;;
+	esac
 	if [[ -n "${sysroot}" ]]; then
 		conf+=("CFLAGS=--sysroot=${sysroot}" "LDFLAGS=--sysroot=${sysroot}")
 	fi
@@ -330,4 +353,45 @@ install_ethercat_oot() {
 	info "安装外置 IgH 模块 -> ${dest_mod}"
 	run_root mkdir -p "${dest_mod}"
 	run_root cp -a "${OUT_DIR}/ethercat/modules/"*.ko "${dest_mod}/"
+
+	install_ethercat_rtl8125_firmware "${root}"
+}
+
+# RTL8125B 固件（ec_r8169 的 VER_63 会 request_firmware）
+install_ethercat_rtl8125_firmware() {
+	local root="$1"
+	local fw_dir="${DL_DIR}/firmware/rtl_nic"
+	local dest_dir="${root}/lib/firmware/rtl_nic"
+	local name url path
+
+	mkdir -p "${fw_dir}"
+	run_root mkdir -p "${dest_dir}"
+
+	# 8125A / 8125B 固件都装上（ec_r8169 按芯片版本选择）
+	for name in rtl8125b-2.fw rtl8125a-3.fw; do
+		path="${fw_dir}/${name}"
+		url="https://raw.githubusercontent.com/armbian/firmware/master/rtl_nic/${name}"
+		if [[ "${name}" == "${ETHERCAT_RTL8125_FW_NAME}" ]]; then
+			url="${ETHERCAT_RTL8125_FW_URL}"
+		fi
+		if bsp_want_update; then
+			bsp_refresh_download "${path}"
+		fi
+		if [[ ! -f "${path}" ]]; then
+			info "下载 ${name}..."
+			if command -v curl >/dev/null 2>&1; then
+				curl -fL --retry 3 --connect-timeout 30 -o "${path}.partial" "${url}" && \
+					mv -f "${path}.partial" "${path}" || warn "下载失败: ${name}"
+			elif command -v wget >/dev/null 2>&1; then
+				wget -O "${path}.partial" "${url}" && mv -f "${path}.partial" "${path}" || \
+					warn "下载失败: ${name}"
+			else
+				warn "无法下载 ${name}（无 curl/wget）"
+				continue
+			fi
+		fi
+		[[ -s "${path}" ]] || continue
+		run_root cp -a "${path}" "${dest_dir}/${name}"
+	done
+	info "固件已安装到 ${dest_dir}/"
 }

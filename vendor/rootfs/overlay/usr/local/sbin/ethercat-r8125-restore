@@ -1,0 +1,58 @@
+#!/bin/sh
+# 停止主站后把 RTL8125 交回内置 r8125（Ky 无 CONFIG_R8169，不能靠 ethercatctl 的 modprobe r8169）
+set -eu
+PATH="/usr/sbin:/sbin:/usr/bin:/bin:${PATH:-}"
+
+CONF="${1:-/run/ethercat.conf}"
+STATE_DIR="/run/ethercat-r2s"
+
+# 先按官方脚本卸 ec_*；忽略其后 modprobe r8169 失败
+if [ -x /usr/sbin/ethercatctl ]; then
+	/usr/sbin/ethercatctl -c "${CONF}" stop 2>/dev/null || true
+fi
+# 确保卸干净
+rmmod ec_r8169 2>/dev/null || true
+rmmod ec_generic 2>/dev/null || true
+rmmod ec_master 2>/dev/null || true
+
+# 恢复 r8125 对 10ec:8125 的认领
+if [ -w /sys/bus/pci/drivers/r8125/new_id ]; then
+	echo "10ec 8125" > /sys/bus/pci/drivers/r8125/new_id 2>/dev/null || true
+fi
+
+bdfs=""
+if [ -f "${STATE_DIR}/pci-bdfs" ]; then
+	bdfs=$(tr '\n' ' ' < "${STATE_DIR}/pci-bdfs")
+fi
+if [ -z "$bdfs" ]; then
+	for d in /sys/bus/pci/devices/*; do
+		[ -d "$d" ] || continue
+		ven=$(cat "$d/vendor" 2>/dev/null || true)
+		dev=$(cat "$d/device" 2>/dev/null || true)
+		[ "$ven" = "0x10ec" ] && [ "$dev" = "0x8125" ] || continue
+		bdfs="${bdfs} $(basename "$d")"
+	done
+fi
+
+for bdf in $bdfs; do
+	[ -d "/sys/bus/pci/devices/${bdf}" ] || continue
+	if [ -w "/sys/bus/pci/devices/${bdf}/driver_override" ]; then
+		# 清空 override
+		echo > "/sys/bus/pci/devices/${bdf}/driver_override" 2>/dev/null || true
+	fi
+	# 若仍绑在 ec_*，先卸
+	if [ -L "/sys/bus/pci/devices/${bdf}/driver" ]; then
+		drv=$(basename "$(readlink -f "/sys/bus/pci/devices/${bdf}/driver")")
+		case "$drv" in
+			ec_*)
+				echo "${bdf}" > "/sys/bus/pci/drivers/${drv}/unbind" 2>/dev/null || true
+				;;
+		esac
+	fi
+	if [ ! -L "/sys/bus/pci/devices/${bdf}/driver" ] && [ -w /sys/bus/pci/drivers/r8125/bind ]; then
+		echo "${bdf}" > /sys/bus/pci/drivers/r8125/bind 2>/dev/null || true
+		echo "ethercat-r8125-restore: bound ${bdf} -> r8125"
+	fi
+done
+
+exit 0

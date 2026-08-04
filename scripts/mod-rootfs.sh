@@ -84,6 +84,55 @@ install_ethercat_slaves() {
 	run_root ln -sfn /usr/local/sbin/ethercat-slaves "${root}/usr/local/bin/ethercat-slaves"
 }
 
+# ServoDrive_FSMC 最小 PDO 周期例程（进 OP + 测唤醒抖动）
+install_ethercat_io_demo() {
+	local root="$1"
+	local src="${BSP_ROOT}/vendor/rootfs/src/ethercat-io-demo/ethercat-io-demo.c"
+	local out_dir="${OUT_DIR}/ethercat-tools"
+	local bin="${out_dir}/ethercat-io-demo"
+	local inc_flags=()
+	local lib_flags=()
+
+	if [[ "${KERNEL_ETHERCAT}" != "y" && "${KERNEL_ETHERCAT}" != "1" ]]; then
+		return 0
+	fi
+	if [[ ! -f "${src}" ]]; then
+		warn "缺少 ${src}"
+		return 0
+	fi
+
+	setup_cross_compile
+	mkdir -p "${out_dir}"
+
+	if [[ -f "${OUT_DIR}/ethercat/usr/include/ecrt.h" ]]; then
+		inc_flags+=("-I${OUT_DIR}/ethercat/usr/include")
+	elif [[ -f "${ETHERCAT_DIR}/include/ecrt.h" ]]; then
+		inc_flags+=("-I${ETHERCAT_DIR}/include")
+	else
+		warn "缺少 ecrt.h，跳过 ethercat-io-demo"
+		return 0
+	fi
+
+	if [[ -f "${OUT_DIR}/ethercat/usr/lib/libethercat.so" ]] || \
+		[[ -f "${OUT_DIR}/ethercat/usr/lib/libethercat.a" ]]; then
+		lib_flags+=("-L${OUT_DIR}/ethercat/usr/lib" "-lethercat")
+	elif [[ -f "${ETHERCAT_DIR}/lib/.libs/libethercat.so" ]]; then
+		lib_flags+=("-L${ETHERCAT_DIR}/lib/.libs" "-lethercat")
+	else
+		warn "缺少 libethercat，跳过 ethercat-io-demo（先 ./bsp ethercat）"
+		return 0
+	fi
+
+	info "交叉编译 ethercat-io-demo..."
+	"${CROSS_COMPILE}gcc" -O2 -Wall -Wextra \
+		"${inc_flags[@]}" -o "${bin}" "${src}" \
+		"${lib_flags[@]}" -lrt -lpthread || die "ethercat-io-demo 编译失败"
+
+	run_root mkdir -p "${root}/usr/local/sbin" "${root}/usr/local/bin"
+	run_root install -m 755 "${bin}" "${root}/usr/local/sbin/ethercat-io-demo"
+	run_root ln -sfn /usr/local/sbin/ethercat-io-demo "${root}/usr/local/bin/ethercat-io-demo"
+}
+
 qemu_static_for_arch() {
 	# 旧包 qemu-user-static：qemu-<arch>-static；新包 qemu-user：qemu-<arch>
 	local candidates=()
@@ -164,6 +213,7 @@ cmd_rootfs() {
 		run_root rsync -a "${overlay}/" "${rootfs}/"
 		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-info" 2>/dev/null || true
 		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-board-conf" 2>/dev/null || true
+		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-r8125-restore" 2>/dev/null || true
 		run_root chmod 755 "${rootfs}/usr/local/sbin/ethercat-r8125-up" 2>/dev/null || true
 		run_root chmod 755 "${rootfs}/usr/local/sbin/rt-latency-test" 2>/dev/null || true
 		run_root chmod 644 "${rootfs}/etc/profile.d/bsp-path.sh" 2>/dev/null || true
@@ -185,6 +235,7 @@ cmd_rootfs() {
 	fi
 	install_ethercat_headers "${rootfs}"
 	install_ethercat_slaves "${rootfs}"
+	install_ethercat_io_demo "${rootfs}"
 
 	rootfs_mount "${rootfs}"
 	cleanup_rootfs() { rootfs_umount "${rootfs}"; }

@@ -69,7 +69,7 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 
 固定板型：`BOARD=orangepir2s`，`KERNEL_DTS_NAME=x1_orangepi-r2s`。
 
-默认开启 **PREEMPT_RT**（`KERNEL_RT=y`）与 **外置 IgH EtherCAT**（`KERNEL_ETHERCAT=y`，与 RT 无关）：千兆 YT8531C（`eth0`/`eth1`）DHCP；PCIe RTL8125（`enp*`）给 `ec_generic` → `/dev/EtherCAT0`（`systemctl start ethercat`）。
+默认开启 **PREEMPT_RT**（`KERNEL_RT=y`）与 **外置 IgH EtherCAT**（`KERNEL_ETHERCAT=y`，与 RT 无关）：千兆 YT8531C（`eth0`/`eth1`）DHCP；PCIe RTL8125 默认走 **`ec_r8169`** → `/dev/EtherCAT0`（`systemctl start ethercat`）。
 
 ## 编译产物
 

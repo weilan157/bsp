@@ -19,8 +19,9 @@ Shell：`/etc/profile.d/bsp-path.sh` 为普通用户补上 `/sbin`、`/usr/sbin`
 
 IgH EtherCAT（默认 `KERNEL_ETHERCAT=y`，外置官方模块）：
 
-- `etc/network/interfaces`：`eth0`/`eth1`（YT8531C）DHCP；PCIe `enp*` 为 EtherCAT（manual）
-- `etc/ethercat.conf` + `ethercat.service`：`ethercat-board-conf` 解析双 RTL8125 → `ethercatctl start`
-- `etc/udev/rules.d/99-ethercat.rules`：`/dev/EtherCAT*` 权限
+- `etc/network/interfaces`：`eth0`/`eth1`（YT8531C）DHCP；PCIe RTL8125 给 EtherCAT
+- 默认 **`ec_r8169`**：`ethercat-board-conf` 从 `r8125` 接管 PCI `10ec:8125`；停止时 `ethercat-r8125-restore` 交还
+- 固件：`/lib/firmware/rtl_nic/rtl8125b-2.fw`
+- `etc/ethercat.conf` + `ethercat.service`：`DEVICE_MODULES=r8169`
 - 构建时安装 `ec_*.ko`、`ethercat` CLI、`libethercat`、`ecrt.h`
-- `usr/local/sbin/ethercat-info` / `ethercat-slaves`：自检与备用扫站（优先用官方 `ethercat slaves`）
+- `usr/local/sbin/ethercat-info` / `ethercat-io-demo`：自检与 PDO 例程

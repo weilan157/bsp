@@ -1,17 +1,19 @@
 [Unit]
-Description=IgH EtherCAT Master (out-of-tree generic + RTL8125)
+Description=IgH EtherCAT Master (ec_r8169 + RTL8125BG)
 Documentation=https://gitlab.com/etherlab.org/ethercat
-After=network-pre.target local-fs.target
+After=network-pre.target local-fs.target systemd-modules-load.service
 Wants=network-pre.target
 Before=network.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# 按 PCI 8125 生成 /run/ethercat.conf 并拉起接口
+Environment=ETHERCAT_DEVICE_MODULE=r8169
+# 从 r8125 手中接管 PCI 8125，并生成 /run/ethercat.conf
 ExecStartPre=/usr/local/sbin/ethercat-board-conf /run/ethercat.conf
 ExecStart=/usr/sbin/ethercatctl -c /run/ethercat.conf start
-ExecStop=/usr/sbin/ethercatctl -c /run/ethercat.conf stop
+# 不能用官方 stop：会 modprobe r8169（本板未编该驱动）
+ExecStop=/usr/local/sbin/ethercat-r8125-restore /run/ethercat.conf
 
 [Install]
 WantedBy=multi-user.target

@@ -1,6 +1,6 @@
 #!/bin/sh
 # 板端检查外置 IgH EtherCAT + 网口拓扑（Orange Pi R2S）
-# 千兆 YT8531C = eth0/eth1 上网；PCIe RTL8125 = EtherCAT（ec_generic）
+# 千兆 YT8531C = eth0/eth1 上网；PCIe RTL8125 = EtherCAT（默认 ec_r8169）
 set -eu
 
 PATH="/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
@@ -22,14 +22,29 @@ else
 fi
 
 echo
-echo "=== 拓扑说明 ==="
-echo "YT8531C 千兆 (SoC GMAC) → eth0/eth1：普通 IP/DHCP"
-echo "RTL8125BG 2.5G (PCIe)   → enp*：EtherCAT（generic；勿配 IP）"
-echo "启停: systemctl start|stop ethercat  或  ethercatctl start|stop"
+echo "=== PCI 8125 绑定驱动 ==="
+found=0
+for d in /sys/bus/pci/devices/*; do
+	[ -d "$d" ] || continue
+	ven=$(cat "$d/vendor" 2>/dev/null || true)
+	dev=$(cat "$d/device" 2>/dev/null || true)
+	[ "$ven" = "0x10ec" ] && [ "$dev" = "0x8125" ] || continue
+	found=1
+	drv="none"
+	[ -L "$d/driver" ] && drv=$(basename "$(readlink -f "$d/driver")")
+	echo "  $(basename "$d") driver=${drv}"
+done
+[ "$found" -eq 0 ] && echo "(无 10ec:8125)"
 
 echo
-echo "=== dmesg（EtherCAT / r8125）==="
-if dmesg 2>/dev/null | grep -iE 'ethercat|ec_generic|ec_master|r8125|Accepting|offer EtherCAT|waiting for devices|x1_ec_master|x1-emac' | tail -n 50; then
+echo "=== 拓扑说明 ==="
+echo "YT8531C 千兆 (SoC GMAC) → eth0/eth1：普通 IP/DHCP"
+echo "RTL8125BG 2.5G (PCIe)   → ec_r8169（默认）或 generic"
+echo "启停: systemctl start|stop ethercat"
+
+echo
+echo "=== dmesg（EtherCAT / r8125 / r8169）==="
+if dmesg 2>/dev/null | grep -iE 'ethercat|ec_generic|ec_master|ec_r8169|r8125|r8169|Accepting|offer EtherCAT|waiting for devices|x1_ec_master|x1-emac|8125' | tail -n 50; then
 	:
 else
 	if [ "$(id -u)" -ne 0 ]; then

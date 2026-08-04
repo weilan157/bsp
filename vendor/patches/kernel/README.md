@@ -24,12 +24,12 @@ Applied by `./bsp setup kernel` when `KERNEL_RT=y` (default).
 
 ## IgH EtherCAT（外置）
 
-主站改为官方外置模块（`sources/ethercat`，`stable-1.6` + `ec_generic`），**与 `KERNEL_RT` 无关**。
+主站改为官方外置模块（`sources/ethercat`，`1.6.x`），**与 `KERNEL_RT` 无关**。默认设备驱动为 **`ec_r8169`**（PCI `0x8125` / RTL8125B），`ec_generic` 仍编出作回退。
 
 | File | Purpose | Applied? |
 |------|---------|----------|
 | `0100`–`0104` | 旧内嵌 EC（DTS / EC_GENERIC 过滤等） | **否**（保留作历史参考） |
-| `0105-r8125-honor-config-builtin.patch` | r8125 Makefile 尊重 `CONFIG_R8125=y` | **是**（`KERNEL_ETHERCAT=y`） |
+| `0105-r8125-honor-config-builtin.patch` | r8125 Makefile 尊重 `CONFIG_R8125=y` | **是**（普通网卡驱动；EC 启动时会 unbind） |
 
 `ethercat.config` 显式关闭内核内嵌 `CONFIG_ETHERCAT`；setup 时会清掉 DTS 里旧的 `ec_master` / `ec-mac-*` 节点。
 
@@ -38,6 +38,6 @@ Applied by `./bsp setup kernel` when `KERNEL_RT=y` (default).
 | 硬件 | 接口 | 用途 |
 |------|------|------|
 | YT8531C ×2 | SoC GMAC `eth0`/`eth1` | 普通 IP / DHCP |
-| RTL8125BG ×2 | PCIe `enp*` | EtherCAT（外置 `ec_generic`） |
+| RTL8125BG ×2 | PCIe `10ec:8125` | EtherCAT（`ec_r8169`，IgH 树 `--with-r8169-kernel=6.4`） |
 
-构建：`./bsp ethercat`（内核之后）。板上：`systemctl start ethercat` / `ethercat slaves`。
+构建：`./bsp ethercat`。板上：`systemctl start ethercat` / `ls /sys/bus/pci/drivers/ec_r8169/` / `ethercat slaves`。

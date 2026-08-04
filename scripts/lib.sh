@@ -44,6 +44,13 @@ fi
 : "${ETHERCAT_DIST_URL:=https://gitlab.com/api/v4/projects/24894054/packages/generic/ethercat/${ETHERCAT_VERSION}/ethercat-${ETHERCAT_VERSION}.tar.gz}"
 # git：拉分支后需 autoconf bootstrap；dist：默认用官方发布包（推荐）
 : "${ETHERCAT_SOURCE:=dist}"
+# 设备驱动：r8169（原生 ec_r8169，RTL8125）或 generic
+: "${ETHERCAT_DEVICE_MODULE:=r8169}"
+# IgH 无 6.6 专用树；Ky 6.6 用最接近的 6.4
+: "${ETHERCAT_R8169_KERNEL:=6.4}"
+# RTL8125B 固件（ec_r8169 / r8125 均可 request_firmware）
+: "${ETHERCAT_RTL8125_FW_URL:=https://raw.githubusercontent.com/armbian/firmware/master/rtl_nic/rtl8125b-2.fw}"
+: "${ETHERCAT_RTL8125_FW_NAME:=rtl8125b-2.fw}"
 # 默认 fragment：slim +（KERNEL_RT=y 时）rt +（KERNEL_ETHERCAT=y 时关闭内核内嵌 EC）
 _kernel_default_frags="${BSP_ROOT}/vendor/kernel-config/slim.config"
 if [[ "${KERNEL_RT}" == "y" || "${KERNEL_RT}" == "1" ]]; then

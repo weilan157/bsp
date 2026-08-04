@@ -37,12 +37,16 @@
 
 1. 合并 `ethercat.config`（关掉内嵌 EC）
 2. 仅打 `0105`（r8125 内置）；清 DTS 内嵌 `ec_master`
-3. `./bsp ethercat` 交叉编译官方 `stable-1.6` → `ec_master.ko` + `ec_generic.ko` + CLI
+3. `./bsp ethercat` 交叉编译官方 `1.6.x` → `ec_master.ko` + **`ec_r8169.ko`**（`--with-r8169-kernel=6.4`）+ `ec_generic.ko`（回退）
 
 | 硬件 | 接口 | 用途 |
 |------|------|------|
 | YT8531C ×2 | `eth0` / `eth1` | 普通 IP / DHCP |
-| RTL8125BG ×2 | PCIe `enp*` | EtherCAT（`DEVICE_MODULES=generic`） |
+| RTL8125BG ×2 | PCIe `10ec:8125` | EtherCAT（默认 `DEVICE_MODULES=r8169`） |
+
+启动时 `ethercat-board-conf` 会从内置 `r8125` **unbind**，再交给 `ec_r8169`；停止时 `ethercat-r8125-restore` 交还。
+
+回退 generic：`./bsp config ETHERCAT_DEVICE_MODULE=generic` 后重编 ethercat/rootfs，并把 service 环境改回 generic。
 
 板上：`systemctl start ethercat`，`ethercat slaves`，自检 `ethercat-info`。
 

@@ -61,7 +61,7 @@ usermod -aG dialout,sudo "${USER_NAME}" 2>/dev/null || true
 
 # 常用板端工具放到普通用户 PATH（/usr/local/bin）
 mkdir -p /usr/local/bin
-for t in ethercat-info ethercat-slaves ethercat-board-conf rt-latency-test; do
+for t in ethercat-info ethercat-slaves ethercat-board-conf ethercat-r8125-restore ethercat-io-demo rt-latency-test; do
 	if [[ -x "/usr/local/sbin/${t}" ]]; then
 		ln -sfn "/usr/local/sbin/${t}" "/usr/local/bin/${t}"
 	fi
