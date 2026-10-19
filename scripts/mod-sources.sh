@@ -79,38 +79,44 @@ resolve_dts_source() {
 cmd_sync_dts() {
 	[[ -d "${KERNEL_DIR}" ]] || die "请先运行 ./bsp setup kernel"
 
-	local dts_src kernel_dts_dir makefile tspi_mark
+	local dts_src kernel_dts_dir makefile dtb_mark
 	dts_src="$(resolve_dts_source)"
 	kernel_dts_dir="${KERNEL_DIR}/arch/arm64/boot/dts/rockchip"
 	makefile="${kernel_dts_dir}/Makefile"
-	tspi_mark="tspi-3m-rk3576.dtb"
+	dtb_mark="${KERNEL_DTS_NAME}.dtb"
 
 	info "设备树来源: ${dts_src}"
 	info "目标目录:   ${kernel_dts_dir}"
 
-	local local_files=()
+	# 板级文件：<KERNEL_DTS_NAME>*（如 rk3566-lckfb-tspi.dts），
+	# 以及可选的 DTS_EXTRA_FILES（如从 SDK 同步时附带的 rk3566-linux.dtsi）
+	local local_files=() extra_name
 	shopt -s nullglob
-	local_files=( "${dts_src}"/tspi-3m-rk3576* )
+	local_files=( "${dts_src}"/"${KERNEL_DTS_NAME}"* )
+	if [[ -n "${DTS_EXTRA_FILES:-}" ]]; then
+		for extra_name in ${DTS_EXTRA_FILES//,/ }; do
+			[[ -f "${dts_src}/${extra_name}" ]] || continue
+			local_files+=( "${dts_src}/${extra_name}" )
+		done
+	fi
 	shopt -u nullglob
-	[[ ${#local_files[@]} -gt 0 ]] || die "来源目录无 tspi-3m-rk3576* 文件"
+	[[ ${#local_files[@]} -gt 0 ]] || die "来源目录无 ${KERNEL_DTS_NAME}* 文件"
 
 	rsync -a "${local_files[@]}" "${kernel_dts_dir}/"
 
-	if [[ -f "${dts_src}/rk3576-linux.dtsi" ]]; then
-		rsync -a "${dts_src}/rk3576-linux.dtsi" "${kernel_dts_dir}/"
-	fi
 	if [[ -d "${dts_src}/device-tree-overlays" ]]; then
+		mkdir -p "${kernel_dts_dir}/device-tree-overlays"
 		rsync -a "${dts_src}/device-tree-overlays/" "${kernel_dts_dir}/device-tree-overlays/"
 	fi
 
-	if ! grep -q "${tspi_mark}" "${makefile}"; then
-		info "向 Makefile 添加 ${tspi_mark} 条目"
-		echo "dtb-\$(CONFIG_ARCH_ROCKCHIP) += ${tspi_mark}" >> "${makefile}"
+	if ! grep -q "${dtb_mark}" "${makefile}"; then
+		info "向 Makefile 添加 ${dtb_mark} 条目"
+		echo "dtb-\$(CONFIG_ARCH_ROCKCHIP) += ${dtb_mark}" >> "${makefile}"
 	else
-		info "Makefile 已包含 ${tspi_mark}"
+		info "Makefile 已包含 ${dtb_mark}"
 	fi
 
-	info "设备树同步完成 (${#local_files[@]} 个 tspi 文件)"
+	info "设备树同步完成 (${#local_files[@]} 个文件)"
 }
 
 cmd_sync_config() {
@@ -133,7 +139,7 @@ cmd_sync_config() {
 			die "TSPI_KERNEL_CONFIG_SOURCE 不是目录: ${TSPI_KERNEL_CONFIG_SOURCE}"
 		info "自 SDK 路径复制可选 fragment:"
 		local name
-		for name in tspi-vendor.config rk3576.config; do
+		for name in $(kernel_defconfig_fragments); do
 			[[ -f "${TSPI_KERNEL_CONFIG_SOURCE}/${name}" ]] || continue
 			install_fragment "${TSPI_KERNEL_CONFIG_SOURCE}/${name}"
 		done

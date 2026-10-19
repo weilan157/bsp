@@ -8,7 +8,10 @@ cmd_clean() {
 			info "清除 U-Boot 编译产物..."
 			if [[ -d "${UBOOT_DIR}" ]]; then
 				rm -f "${UBOOT_DIR}/uboot.img" "${UBOOT_DIR}/trust.img"
-				rm -f "${UBOOT_DIR}"/rk3576_spl_loader_*.bin "${UBOOT_DIR}"/rk3576_idblock_*.img
+				find "${UBOOT_DIR}" -maxdepth 1 -name "${UBOOT_LOADER_PATTERN}" -delete 2>/dev/null || true
+				if [[ -n "${UBOOT_IDBLOCK_PATTERN}" ]]; then
+					find "${UBOOT_DIR}" -maxdepth 1 -name "${UBOOT_IDBLOCK_PATTERN}" -delete 2>/dev/null || true
+				fi
 				make -C "${UBOOT_DIR}" distclean >/dev/null 2>&1 || true
 			fi
 			;;

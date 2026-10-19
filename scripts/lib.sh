@@ -20,12 +20,15 @@ fi
 : "${UBOOT_BRANCH:=next-dev}"
 : "${RKBIN_REPO:=https://github.com/rockchip-linux/rkbin.git}"
 : "${RKBIN_BRANCH:=master}"
-: "${UBOOT_BOARD:=rk3576}"
+: "${UBOOT_BOARD:=rk3566}"
+# make.sh 产物名与 SoC 相关：RK3566 只有 loader，没有 RK3576/RK3588 的 idblock
+: "${UBOOT_LOADER_PATTERN:=rk3566_spl_loader_*.bin}"
+: "${UBOOT_IDBLOCK_PATTERN:=}"
 : "${KERNEL_REPO:=https://github.com/rockchip-linux/kernel.git}"
 : "${KERNEL_BRANCH:=develop-6.1}"
 : "${KERNEL_DEFCONFIG:=rockchip_linux_defconfig}"
-: "${KERNEL_DEFCONFIG_FRAGMENTS:=rk3576.config bsp-boot.config bsp-wifi.config}"
-: "${KERNEL_DTS_NAME:=tspi-3m-rk3576}"
+: "${KERNEL_DEFCONFIG_FRAGMENTS:=rk3566.config bsp-boot.config bsp-wifi.config}"
+: "${KERNEL_DTS_NAME:=rk3566-lckfb-tspi}"
 : "${TSPI_DTS_SOURCE:=}"
 : "${TSPI_VENDOR_KERNEL_CONFIG:=n}"
 : "${TSPI_KERNEL_CONFIG_SOURCE:=}"
@@ -156,8 +159,28 @@ kernel_defconfig_fragments() {
 bsp_want_force() { [[ "${BSP_FORCE}" == "1" || "${BSP_FORCE}" == "y" ]]; }
 bsp_want_update() { [[ "${BSP_UPDATE}" == "1" || "${BSP_UPDATE}" == "y" ]]; }
 
+# 注意 pipefail：源码目录不存在时 find 会失败，这里吞掉错误只返回空串
 uboot_loader_path() {
-	find "${UBOOT_DIR}" -maxdepth 1 -name 'rk3576_spl_loader_*.bin' 2>/dev/null | head -1
+	find "${UBOOT_DIR}" -maxdepth 1 -name "${UBOOT_LOADER_PATTERN}" 2>/dev/null \
+		| sort | head -1 || true
+}
+
+# RK3576/RK3588 才有 IdBlock；RK3566 为空，函数返回空串
+uboot_idblock_path() {
+	[[ -n "${UBOOT_IDBLOCK_PATTERN}" ]] || return 0
+	find "${UBOOT_DIR}" -maxdepth 1 -name "${UBOOT_IDBLOCK_PATTERN}" 2>/dev/null \
+		| sort | head -1 || true
+}
+
+# 打印 U-Boot 主要产物（缺失的静默跳过）
+uboot_print_artifacts() {
+	local f
+	for f in "${UBOOT_DIR}/uboot.img" "${UBOOT_DIR}/trust.img"; do
+		[[ -f "${f}" ]] && ls -l "${f}"
+	done
+	[[ -n "$(uboot_loader_path)" ]] && ls -l "$(uboot_loader_path)"
+	[[ -n "$(uboot_idblock_path)" ]] && ls -l "$(uboot_idblock_path)"
+	return 0
 }
 
 have_uboot_artifacts() {

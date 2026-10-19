@@ -1,0 +1,8 @@
+# 仓库以 Linux 构建为主：统一用 LF 检出，避免 Windows 检出后
+# ./bsp 在 WSL / 容器 / 交叉编译主机里报 "$'\r': command not found"
+* text=auto eol=lf
+
+# 二进制固件不做换行转换
+*.bin binary
+*.img binary
+*.hcd binary

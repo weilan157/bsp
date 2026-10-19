@@ -8,7 +8,7 @@ cmd_uboot() {
 
 	if ! bsp_want_force && have_uboot_artifacts; then
 		info "已有 U-Boot 产物，跳过编译（加 --clean 强制重编）"
-		ls -la "${UBOOT_DIR}/uboot.img" "$(uboot_loader_path)" 2>/dev/null || true
+		uboot_print_artifacts
 		return 0
 	fi
 
@@ -25,6 +25,8 @@ cmd_uboot() {
 	)
 
 	info "编译完成，主要产物:"
-	ls -la "${UBOOT_DIR}"/uboot.img "${UBOOT_DIR}"/trust.img 2>/dev/null || true
-	ls -la "${UBOOT_DIR}"/rk3576_spl_loader_*.bin "${UBOOT_DIR}"/rk3576_idblock_*.img 2>/dev/null || true
+	uboot_print_artifacts
+
+	[[ -n "$(uboot_loader_path)" ]] || \
+		warn "未找到 ${UBOOT_LOADER_PATTERN}，请检查 rkbin 是否包含 ${UBOOT_BOARD} 的 loader ini"
 }

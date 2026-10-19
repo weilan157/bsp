@@ -19,7 +19,8 @@ cmd_kernel() {
 	kmake=(make -C "${KERNEL_DIR}" -j"${jobs}" ARCH="${arch}" CROSS_COMPILE="${CROSS_COMPILE}")
 	fragments="$(kernel_defconfig_fragments)"
 
-	# 始终同步 vendor/kernel-config（含 bsp-boot.config、rk3576.config 等）
+	# 始终同步 vendor/kernel-config（bsp-boot.config、bsp-wifi.config 等）；
+	# rk3566.config 由 rockchip-linux/kernel 自带，无需入 vendor
 	cmd_sync_config
 
 	info "配置内核: ${KERNEL_DEFCONFIG} ${fragments}"

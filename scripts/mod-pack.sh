@@ -123,8 +123,8 @@ cmd_stage() {
 
 	[[ -d "${UBOOT_DIR}" ]] || die "请先 ./bsp setup uboot && ./bsp uboot"
 
-	loader="$(find "${UBOOT_DIR}" -maxdepth 1 -name 'rk3576_spl_loader_*.bin' | head -1)"
-	[[ -n "${loader}" ]] || die "未找到 rk3576_spl_loader_*.bin，请先 ./bsp uboot"
+	loader="$(uboot_loader_path)"
+	[[ -n "${loader}" ]] || die "未找到 ${UBOOT_LOADER_PATTERN}，请先 ./bsp uboot"
 	[[ -f "${UBOOT_DIR}/uboot.img" ]] || die "未找到 uboot.img"
 
 	info "收集固件到 ${fw_dir}/"

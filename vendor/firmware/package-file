@@ -1,4 +1,4 @@
-# Rockchip update.img package (泰山派 RK3576 GPT)
+# Rockchip update.img package (泰山派 RK3566 GPT)
 # NAME	PATH
 package-file	package-file
 parameter	Image/parameter.txt

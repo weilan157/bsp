@@ -1,6 +1,8 @@
 /*
- * Rockchip RK3576 boot FIT (unsigned, for rockchip-bsp)
- * Placeholders replaced by scripts/mk-fitimage.sh
+ * Rockchip RK3566 boot FIT (unsigned, for rockchip-bsp)
+ * Placeholders (@KERNEL_DTB@ / @KERNEL_IMG@ / @RESOURCE_IMG@) are substituted
+ * by scripts/mod-kernel.sh (mk_fitimage), then packed with:
+ *   mkimage -f <its> -E -p 0x800 boot.img
  */
 
 /dts-v1/;
