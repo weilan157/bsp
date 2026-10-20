@@ -16,10 +16,10 @@
 `sources/kernel/arch/arm64/boot/dts/rockchip/`，并自动在 kernel 的 `Makefile` 里补
 `dtb-$(CONFIG_ARCH_ROCKCHIP) += tspi-rk3566-user-v10-linux.dtb`。
 
-这些文件与 `repo sync` 后的 SDK 树 SHA256 完全一致，并已分别在
-SDK 的 `kernel-6.1`（6.1.141）与 GitHub `develop-6.1`（6.1.172）里用
-`cpp` + `dtc` 预编译通过；SDK 自带的写法会产生少量 `simple_bus_reg` /
-`graph_child_address` 告警，属正常。
+这些文件与 `repo sync` 后的 SDK 树**内容一致**（SDK 里 5 个 dtsi 是 CRLF，
+本仓库按 `.gitattributes` 统一为 LF），并已分别在 SDK 的 `kernel-6.1`
+（6.1.141）与 GitHub `develop-6.1`（6.1.172）里用 `cpp` + `dtc` 预编译通过；
+SDK 自带的写法会产生少量 `simple_bus_reg` / `graph_child_address` 告警，属正常。
 
 IO 电源域与 SDK 文档一致：`vccio4`、`vccio6` 接 `vcc_1v8`（1.8V），
 `pmuio2`、`vccio1`、`vccio5`、`vccio7` 为 3.3V，`vccio3` 为 SD 卡可变电压。

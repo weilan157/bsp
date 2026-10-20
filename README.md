@@ -169,8 +169,9 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
 
 对同步后的 `extracted_sdk/`（kernel 6.1.141、u-boot、device/rockchip 均已是工作区）：
 
-- **设备树**：`vendor/dts/rockchip/` 的 7 个文件与 SDK 树 **SHA256 完全一致**；
-  在 SDK 自己的 `kernel-6.1` 树里用 `cpp` + `dtc` 预编译通过
+- **设备树**：`vendor/dts/rockchip/` 的 7 个文件与 SDK 树**内容一致**（SDK 里
+  5 个 dtsi 是 CRLF，本仓库按 `.gitattributes` 统一为 LF，`tr -d '\r'` 后 diff
+  为空）；在 SDK 自己的 `kernel-6.1` 树里用 `cpp` + `dtc` 预编译通过
   （`DTC_OK 101774 bytes`，仅 SDK 自身写法带来的常规告警）；对 GitHub
   `develop-6.1`（6.1.172）同样通过。
 - **分区表**：`vendor/firmware/parameter.txt` 与 SDK 的
