@@ -12,11 +12,11 @@ ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD:-root}"
 USER_NAME="${ROOTFS_USER:-debian}"
 USER_PASSWORD="${ROOTFS_USER_PASSWORD:-debian}"
 
-echo ">>> 配置 sources.list（main + non-free-firmware，默认清华源）"
+echo ">>> 配置 sources.list（仅 main，默认清华源）"
 cat > /etc/apt/sources.list <<EOF
-deb http://${DEBIAN_MIRROR}/debian ${DEBIAN_RELEASE} main non-free-firmware
-deb http://${DEBIAN_MIRROR}/debian ${DEBIAN_RELEASE}-updates main non-free-firmware
-deb http://${DEBIAN_MIRROR}/debian-security ${DEBIAN_RELEASE}-security main non-free-firmware
+deb http://${DEBIAN_MIRROR}/debian ${DEBIAN_RELEASE} main
+deb http://${DEBIAN_MIRROR}/debian ${DEBIAN_RELEASE}-updates main
+deb http://${DEBIAN_MIRROR}/debian-security ${DEBIAN_RELEASE}-security main
 EOF
 
 echo ">>> apt update"

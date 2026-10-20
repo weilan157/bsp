@@ -1,0 +1,211 @@
+/********************************************************************
+ * SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+ * 
+ * Copyright (c) 2023 Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2026 LCKFB <lckfb@sz-jlc.com>
+ *********************************************************************
+ * Wiki-(Chinese)：https://wiki.lckfb.com/
+ * Wiki-(English)：https://wiki.lckfb.com/en/
+ *********************************************************************/
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/display/media-bus-format.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include "rk3566.dtsi"
+#include <dt-bindings/display/rockchip_vop.h>
+
+
+//tspi core config layer, rarely needs modification
+#include "tspi-rk3566-core-v10.dtsi"
+
+//[ON/OFF] EDP display screen config, users can copy and modify for their own screen
+// Note: EDP and MIPI are mutually exclusive as they share VOP. Modify yourself if simultaneous display needed
+// #include "tspi-rk3566-edp-v10.dtsi"
+
+//[ON/OFF] MIPI display screen config, users can copy and modify for their own screen
+// Note: EDP and MIPI are mutually exclusive as they share VOP. Modify yourself if simultaneous display needed
+// #include "tspi-rk3566-dsi-v10.dtsi"
+
+//[ON/OFF] HDMI display screen config, rarely needs modification, comment out if HDMI not needed
+#include "tspi-rk3566-hdmi-v10.dtsi"
+
+//[ON/OFF] Camera, currently using ov5695
+#include "tspi-rk3566-csi-v10.dtsi"
+
+//[ON/OFF] Ethernet, expansion board uses Gigabit Ethernet, can be disabled if not using expansion board
+#include "tspi-rk3566-gmac1-v10.dtsi"
+
+//[ON/OFF] User definition layer below, all user modifications should be made here
+/ {
+	model = "lckfb tspi V10 Board";
+	compatible = "lckfb,tspi-v10", "rockchip,rk3566";
+
+	rk_headset: rk-headset {
+		compatible = "rockchip_headset";
+		headset_gpio = <&gpio0 RK_PC5 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hp_det>;
+	};
+
+	leds: leds {
+		compatible = "gpio-leds";
+		rgb_led_r: rgb-led-r {
+			gpios = <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "timer";
+			linux,delay-reg = <0>;   		// delay register
+			linux,blink-delay-on = <500>; 	// on time
+			linux,blink-delay-off = <500>;	// off time
+		};
+		rgb_led_g: rgb-led-g {
+			gpios = <&gpio1 RK_PB1 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "timer";
+			linux,delay-reg = <100>;   		// delay register
+			linux,blink-delay-on = <1000>; 
+			linux,blink-delay-off = <1000>;
+		};
+		rgb_led_b: rgb-led-b {
+			gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "timer";
+			linux,delay-reg = <100>;  		// delay register
+			linux,blink-delay-on = <1500>; 
+			linux,blink-delay-off = <1500>;
+		};
+	};
+	regulators: regulators {
+        compatible = "simple-bus";
+        #address-cells = <1>;
+        #size-cells = <0>;
+		
+		usb_hub_en: usb-hub-en {
+            compatible = "regulator-fixed";
+            regulator-name = "usb_hub_en";
+            gpio = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>; 
+            enable-active-high;
+            regulator-always-on;
+            regulator-boot-on;
+            regulator-min-microvolt = <3300000>;
+            regulator-max-microvolt = <3300000>;
+        };
+	};
+};
+
+&pinctrl {
+	headphone {
+		hp_det: hp-det {
+			rockchip,pins = <0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+//User RGB LED
+&leds {
+	status = "okay";
+};
+
+//Headphone insertion detection, should be disabled if not using expansion board, otherwise it will detect headphone by default
+&rk_headset {
+	status = "okay";
+};
+
+//User UART3
+&uart3 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3m1_xfer>;
+};
+
+//User I2C2
+&i2c2 {
+	status = "okay";
+
+	/*Add your I2C device reference
+	gt1x: gt1x@14 {
+		compatible = "goodix,gt1x";
+		reg = <0x14>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_gpio>;
+		goodix,rst-gpio = <&gpio0 RK_PB6 GPIO_ACTIVE_HIGH>;
+		goodix,irq-gpio = <&gpio0 RK_PB5 IRQ_TYPE_LEVEL_LOW>;
+	};*/
+};
+
+&i2c3 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c3m1_xfer>;
+	/*Add your I2C device reference
+	gt1x: gt1x@14 {
+		compatible = "goodix,gt1x";
+		reg = <0x14>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_gpio>;
+		goodix,rst-gpio = <&gpio0 RK_PB6 GPIO_ACTIVE_HIGH>;
+		goodix,irq-gpio = <&gpio0 RK_PB5 IRQ_TYPE_LEVEL_LOW>;
+	};*/
+};
+
+
+&spi3 {
+	status = "okay";
+	// max-freq = <48000000>;
+	// dma-names = "tx","rx";
+	pinctrl-names = "default", "high_speed";
+	pinctrl-0 = <&spi3m1_cs0 &spi3m1_pins>;
+	pinctrl-1 = <&spi3m1_cs0 &spi3m1_pins_hs>;
+	spi_test@0 {
+		compatible ="rockchip,spidev";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+&pwm8 {
+	status = "okay";
+};
+
+&pwm9 {
+	status = "okay";
+};
+
+&pwm14 {
+	status = "okay";
+};
+
+//PWM15 IR remote controller
+&pwm15 {
+	status = "okay";
+	compatible = "rockchip,remotectl-pwm";
+	remote_pwm_id = <3>;
+	handle_cpu_id = <1>;
+	remote_support_psci = <0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm15m0_pins>;
+
+	//Custom method: enable adb log output and use dmesg to determine usercode=address and key_table=command
+	//echo 1 > sys/module/rockchip_pwm_remotectl/parameters/code_print
+	//Key codes can be found in include/dt-bindings/input/linux-event-codes.h
+	ir_key1 {
+		rockchip,usercode = <0xff00>;
+		rockchip,key_table =
+			<0xf2	KEY_MENU>,
+			<0xe9	KEY_BACK>,
+			<0xe3	KEY_ENTER>,
+			<0xe7	KEY_UP>,
+			<0xad	KEY_DOWN>,
+			<0xf7	KEY_LEFT>,
+			<0xa5	KEY_RIGHT>,
+			<0xba	KEY_1>,
+			<0xb9	KEY_2>,
+			<0xb8	KEY_3>,
+			<0xbb	KEY_4>,
+			<0xbf	KEY_5>,
+			<0xbc	KEY_6>,
+			<0xf8	KEY_7>,
+			<0xea	KEY_8>,
+			<0xf6	KEY_9>,
+			<0xe6	KEY_0>;
+	};
+};

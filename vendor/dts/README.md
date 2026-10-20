@@ -1,28 +1,36 @@
-# 泰山派 RK3566 设备树（vendor）
+# 泰山派 1M RK3566 设备树（vendor）
 
-`rk3566-lckfb-tspi.dts` 是 LCKFB 泰山派 RK3566 的板级设备树，由 `./bsp sync dts`
-同步到 `sources/kernel/arch/arm64/boot/dts/rockchip/`，并自动在 kernel 的
-`Makefile` 里补 `dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-lckfb-tspi.dtb`。
+7 个文件逐字取自泰山派官方 6.1 SDK 的 `kernel-6.1/arch/arm64/boot/dts/rockchip/`：
 
-来源：上游 mainline 的 `rk3566-lckfb-tspi.dts`（Junhao Xie <bigfoot@classfun.cn>），
-已按厂商 `develop-6.1` 内核的写法改写（combphy/USB3/HDMI 路由/regulator 命名）。
-改动细节见文件头注释。
+| 文件 | 作用 |
+|------|------|
+| `tspi-rk3566-user-v10-linux.dts` | 主 dts（`RK_KERNEL_DTS_NAME`），用户层：LED、耳机检测、UART3、I2C2/3、SPI3、PWM、红外 |
+| `tspi-rk3566-core-v10.dtsi` | 核心板：电源/PMIC、音频、SD/eMMC、USB、WiFi/BT platdata、按键等 |
+| `tspi-rk3566-hdmi-v10.dtsi` | HDMI 输出（1M 默认开 HDMI） |
+| `tspi-rk3566-dsi-v10.dtsi` | MIPI-DSI 屏（默认注释，与 EDP 互斥） |
+| `tspi-rk3566-edp-v10.dtsi` | EDP 屏（默认注释） |
+| `tspi-rk3566-csi-v10.dtsi` | CSI 摄像头（ov5695） |
+| `tspi-rk3566-gmac1-v10.dtsi` | 扩展板千兆网口 |
 
-## 从泰山派 SDK 刷新（可选）
+`./bsp sync dts` 会按 `DTS_FILES_GLOB=tspi-rk3566-*` 把这 7 个文件同步到
+`sources/kernel/arch/arm64/boot/dts/rockchip/`，并自动在 kernel 的 `Makefile` 里补
+`dtb-$(CONFIG_ARCH_ROCKCHIP) += tspi-rk3566-user-v10-linux.dtb`。
 
-SDK 是 5.10 内核，dts 里会引用 SDK 自己的 dtsi/驱动；直接覆盖前请先对比。
-需要时在 `config.env` 设置：
+这些文件已用 `cpp` + `dtc` 对 GitHub `rockchip-linux/kernel` `develop-6.1`
+（6.1.172）预编译通过；SDK 自带的写法会产生少量 `simple_bus_reg` /
+`graph_child_address` 告警，属正常。
+
+## 从 SDK 刷新
 
 ```bash
-TSPI_DTS_SOURCE="/path/to/TaishanPi-Linux/kernel/arch/arm64/boot/dts/rockchip"
-# 若 SDK 的板级文件还依赖 rk3566-linux.dtsi 之类，一并同步
-DTS_EXTRA_FILES="rk3566-linux.dtsi"
+# config.env
+TSPI_DTS_SOURCE="/path/to/sdk/kernel/arch/arm64/boot/dts/rockchip"
+./bsp sync dts && ./bsp kernel
 ```
-
-然后 `./bsp sync dts && ./bsp kernel`。
 
 ## overlay
 
-本分支未附带 dtbo overlay（`device-tree-overlays/` 为空则由 sync 跳过）。
-需要时在 `vendor/dts/rockchip/device-tree-overlays/` 下新建并放 `overlays/*.dts`，
-`ubootEnv.txt` 里用 `overlays=xxx.dtbo` 启用。
+SDK 额外提供 `device-tree-overlays/`（`Makefile` + `ubootEnv.txt`），依赖 SDK
+u-boot 里的 `overlay_loader` 补丁从 `/boot/ubootEnv.txt` 动态加载 dtbo。
+本仓库用的是 GitHub 官方 u-boot，没有该补丁，因此未收录；需要时把 SDK 的
+overlay 目录和 u-boot 补丁一起移植进来。

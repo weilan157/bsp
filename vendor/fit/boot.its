@@ -1,7 +1,12 @@
 /*
- * Rockchip RK3566 boot FIT (unsigned, for rockchip-bsp)
- * Placeholders (@KERNEL_DTB@ / @KERNEL_IMG@ / @RESOURCE_IMG@) are substituted
- * by scripts/mod-kernel.sh (mk_fitimage), then packed with:
+ * Rockchip RK3566 boot FIT (unsigned variant of the TaiShan Pi SDK one)
+ *
+ * 结构与 SDK 的 device/rockchip/.chips/rk3566_rk3568/boot.its 一致；
+ * 差别只有：这里没有 signature 节点（SDK 用 AVB key "dev" 对 fdt/kernel/
+ * resource 做 sha256,rsa2048-pss 签名，本仓库不出镜像签名）。
+ *
+ * 占位符 @KERNEL_DTB@ / @KERNEL_IMG@ / @RESOURCE_IMG@ 由 scripts/mod-kernel.sh
+ * (mk_fitimage) 替换，再由下面的命令打包：
  *   mkimage -f <its> -E -p 0x800 boot.img
  */
 

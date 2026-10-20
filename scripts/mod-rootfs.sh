@@ -18,6 +18,26 @@ rootfs_umount() {
 	done
 }
 
+# 板载 AP6212A（BCM43438）：bcmdhd 固件，取自 SDK 的 external/rkwifibt
+# 路径与 kernel-config/tspi-1m.config 里的 BCMDHD_FW_PATH/NVRAM_PATH 一致
+install_ap6212_firmware() {
+	local root="$1"
+	local src="${BSP_ROOT}/vendor/firmware/ap6212"
+	local f
+	[[ -d "${src}" ]] || return 0
+
+	info "安装 AP6212A 固件到 ${root}/lib/firmware"
+	run_root mkdir -p "${root}/lib/firmware" "${root}/lib/firmware/brcm"
+	for f in fw_bcm43438a1.bin nvram_ap6212a.txt BCM4343A1.hcd; do
+		[[ -s "${src}/${f}" ]] || continue
+		run_root install -m 644 "${src}/${f}" "${root}/lib/firmware/${f}"
+	done
+	# 蓝牙 HCD 由 bluez 从 /lib/firmware/brcm/ 取
+	[[ -s "${src}/BCM4343A1.hcd" ]] && \
+		run_root install -m 644 "${src}/BCM4343A1.hcd" "${root}/lib/firmware/brcm/BCM4343A1.hcd"
+	return 0
+}
+
 cmd_rootfs() {
 	parse_build_flags "$@"
 	command -v debootstrap >/dev/null 2>&1 || die "缺少 debootstrap，请运行 ./bsp env"
@@ -65,6 +85,7 @@ cmd_rootfs() {
 		run_root rsync -a "${overlay}/" "${rootfs}/"
 		run_root chmod 755 "${rootfs}/usr/local/sbin/rockchip-partnames" 2>/dev/null || true
 	fi
+	install_ap6212_firmware "${rootfs}"
 
 	rootfs_mount "${rootfs}"
 	cleanup_rootfs() { rootfs_umount "${rootfs}"; }

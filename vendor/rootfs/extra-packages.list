@@ -1,7 +1,6 @@
 # 可选：每行一个 apt 包名（无桌面）
 # openssh-server 等已在 chroot-setup.sh 默认安装
 
-# 板载 AP6212（BCM43438）：WiFi 固件 + 蓝牙协议栈
-# firmware-brcm80211 在 non-free-firmware（chroot-setup.sh 已加入源）
-firmware-brcm80211
+# 板载 AP6212A 的蓝牙协议栈。WiFi/BT 固件由 vendor/firmware/ap6212/ 提供
+# （与 SDK 相同的 bcmdhd 方案），不依赖 Debian 的 firmware-brcm80211。
 bluez

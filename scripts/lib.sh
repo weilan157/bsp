@@ -27,8 +27,11 @@ fi
 : "${KERNEL_REPO:=https://github.com/rockchip-linux/kernel.git}"
 : "${KERNEL_BRANCH:=develop-6.1}"
 : "${KERNEL_DEFCONFIG:=rockchip_linux_defconfig}"
-: "${KERNEL_DEFCONFIG_FRAGMENTS:=rk3566.config bsp-boot.config bsp-wifi.config}"
-: "${KERNEL_DTS_NAME:=rk3566-lckfb-tspi}"
+: "${KERNEL_DEFCONFIG_FRAGMENTS:=rk3566.config bsp-boot.config tspi-1m.config}"
+# 泰山派 SDK 的主 dts（RK_KERNEL_DTS_NAME）
+: "${KERNEL_DTS_NAME:=tspi-rk3566-user-v10-linux}"
+# 同步到内核树时匹配的板级文件；SDK 的 dts + 6 个 dtsi 共用 tspi-rk3566- 前缀
+: "${DTS_FILES_GLOB:=${KERNEL_DTS_NAME}*}"
 : "${TSPI_DTS_SOURCE:=}"
 : "${TSPI_VENDOR_KERNEL_CONFIG:=n}"
 : "${TSPI_KERNEL_CONFIG_SOURCE:=}"

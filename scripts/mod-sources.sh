@@ -88,11 +88,12 @@ cmd_sync_dts() {
 	info "设备树来源: ${dts_src}"
 	info "目标目录:   ${kernel_dts_dir}"
 
-	# 板级文件：<KERNEL_DTS_NAME>*（如 rk3566-lckfb-tspi.dts），
-	# 以及可选的 DTS_EXTRA_FILES（如从 SDK 同步时附带的 rk3566-linux.dtsi）
+	# 板级文件：默认 <KERNEL_DTS_NAME>*；泰山派同时带 6 个 tspi-rk3566-*.dtsi，
+	# 因此本分支把 DTS_FILES_GLOB 设为 tspi-rk3566-*。
+	# DTS_EXTRA_FILES 用于额外点名同步的零散文件。
 	local local_files=() extra_name
 	shopt -s nullglob
-	local_files=( "${dts_src}"/"${KERNEL_DTS_NAME}"* )
+	local_files=( "${dts_src}"/${DTS_FILES_GLOB} )
 	if [[ -n "${DTS_EXTRA_FILES:-}" ]]; then
 		for extra_name in ${DTS_EXTRA_FILES//,/ }; do
 			[[ -f "${dts_src}/${extra_name}" ]] || continue
@@ -100,7 +101,7 @@ cmd_sync_dts() {
 		done
 	fi
 	shopt -u nullglob
-	[[ ${#local_files[@]} -gt 0 ]] || die "来源目录无 ${KERNEL_DTS_NAME}* 文件"
+	[[ ${#local_files[@]} -gt 0 ]] || die "来源目录无 ${DTS_FILES_GLOB} 文件"
 
 	rsync -a "${local_files[@]}" "${kernel_dts_dir}/"
 

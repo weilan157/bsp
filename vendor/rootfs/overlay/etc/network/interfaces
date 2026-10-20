@@ -1,11 +1,11 @@
 auto lo
 iface lo inet loopback
 
-# 泰山派 RK3566 无板载 RJ45；接 USB 网卡时按 eth0 处理
+# 泰山派 1M 有扩展板时才有 gmac1（板载 RJ45）；否则接 USB 网卡按 eth0 处理
 allow-hotplug eth0
 iface eth0 inet dhcp
 
-# AP6212（brcmfmac）：先配 /etc/wpa_supplicant/wpa_supplicant.conf 再 ifup wlan0
+# AP6212A（bcmdhd）：先配 /etc/wpa_supplicant/wpa_supplicant.conf 再 ifup wlan0
 allow-hotplug wlan0
 iface wlan0 inet dhcp
 	wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
