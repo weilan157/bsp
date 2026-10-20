@@ -21,8 +21,10 @@ fi
 : "${RKBIN_REPO:=https://github.com/rockchip-linux/rkbin.git}"
 : "${RKBIN_BRANCH:=master}"
 : "${UBOOT_BOARD:=rk3566}"
-# make.sh 产物名与 SoC 相关：RK3566 只有 loader，没有 RK3576/RK3588 的 idblock
-: "${UBOOT_LOADER_PATTERN:=rk3566_spl_loader_*.bin}"
+# make.sh 产物名来自 rkbin 的 RK3566MINIALL.ini：RK3566 实际是
+# rk356x_loader_vX.YY.ZZZ.bin（旧 rkbin 为 rk356x_spl_loader_...），
+# 所以用 SDK 同样的 *_loader_*.bin 通配，不能写死 rk3566_spl_loader
+: "${UBOOT_LOADER_PATTERN:=*_loader_*.bin}"
 : "${UBOOT_IDBLOCK_PATTERN:=}"
 : "${KERNEL_REPO:=https://github.com/rockchip-linux/kernel.git}"
 : "${KERNEL_BRANCH:=develop-6.1}"
@@ -40,7 +42,7 @@ fi
 : "${DEBIAN_ARCH:=arm64}"
 : "${DEBIAN_MIRROR:=mirrors.tuna.tsinghua.edu.cn}"
 : "${DEBIAN_VARIANT:=minbase}"
-: "${ROOTFS_HOSTNAME:=rockchip}"
+: "${ROOTFS_HOSTNAME:=taishanpi}"
 : "${ROOTFS_LOCALE:=en_US.UTF-8}"
 : "${ROOTFS_ROOT_PASSWORD:=root}"
 : "${ROOTFS_USER:=debian}"

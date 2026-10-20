@@ -74,7 +74,7 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 | 配置 | 默认值 | 对应 SDK |
 |------|--------|----------|
 | `UBOOT_BOARD` | `rk3566` | `./make.sh rk3566`（`RK_UBOOT_SPL=y`） |
-| `UBOOT_LOADER_PATTERN` | `rk3566_spl_loader_*.bin` | make.sh `--spl-new` 产物 |
+| `UBOOT_LOADER_PATTERN` | `rk356x_*loader_*.bin` | make.sh `--spl-new` 产物 |
 | `KERNEL_DEFCONFIG_FRAGMENTS` | `rk3566.config bsp-boot.config tspi-1m.config` | `rockchip_linux_defconfig` + LCKFB 增量 |
 | `KERNEL_DTS_NAME` | `tspi-rk3566-user-v10-linux` | `RK_KERNEL_DTS_NAME` |
 | `DTS_FILES_GLOB` | `tspi-rk3566-*` | dts + 6 个 dtsi 一起同步 |
@@ -131,7 +131,7 @@ TSPI_DTS_SOURCE="/path/to/sdk/kernel/arch/arm64/boot/dts/rockchip"
 
 | 命令 | 产物 |
 |------|------|
-| `./bsp uboot` | `sources/u-boot/uboot.img`、`rk3566_spl_loader_*.bin` |
+| `./bsp uboot` | `sources/u-boot/uboot.img`、`rk356x_*loader_*.bin` |
 | `./bsp kernel` | `out/kernel/Image`、`out/kernel/tspi-rk3566-user-v10-linux.dtb` |
 | `./bsp bootimg` | `out/kernel/resource.img`、`out/boot.img` |
 | `./bsp rootfs` | `out/rootfs/`、`out/rootfs.ext4` |
@@ -165,15 +165,43 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
 - `OrangePi-kyX1`：Orange Pi R2S（Ky X1）
 - `rk3566`：**本分支**，泰山派 1M RK3566
 
-## 验证状态
+## 验证状态（已按 `repo sync` 后的 SDK 复核）
 
-- `vendor/dts/rockchip/` 的 7 个文件逐字取自 SDK；已用 `cpp` + `dtc` 对
-  GitHub `develop-6.1`（6.1.172）的 dtsi/dt-bindings 预编译通过，仅剩 SDK
-  自身写法带来的常规 `simple_bus_reg` / `graph_child_address` 告警。
-- `./bsp` 脚本在 Linux 上 `bash -n` 通过；`./bsp sync dts` 实测能同步 7 个文件
-  并幂等追加 Makefile 条目。
-- u-boot / kernel / rootfs / `update.img` 的完整构建需要 Linux x86_64 主机与
-  `aarch64-linux-gnu-` 工具链，未在本次环境里执行；未在真机启动验证。
+对同步后的 `extracted_sdk/`（kernel 6.1.141、u-boot、device/rockchip 均已是工作区）：
+
+- **设备树**：`vendor/dts/rockchip/` 的 7 个文件与 SDK 树 **SHA256 完全一致**；
+  在 SDK 自己的 `kernel-6.1` 树里用 `cpp` + `dtc` 预编译通过
+  （`DTC_OK 101774 bytes`，仅 SDK 自身写法带来的常规告警）；对 GitHub
+  `develop-6.1`（6.1.172）同样通过。
+- **分区表**：`vendor/firmware/parameter.txt` 与 SDK 的
+  `parameter-buildroot-fit.txt` 逐字相同。
+- **板级名**：`KERNEL_DTS_NAME` 与 SDK BoardConfig 的
+  `RK_KERNEL_DTS_NAME="tspi-rk3566-user-v10-linux"` 一致。
+- **引导链**：SDK 用 `RK_UBOOT_SPL=y` → `./make.sh rk3566 --spl-new`，产物名取自
+  rkbin 的 `RKBOOT/RK3566MINIALL.ini`：新版 rkbin 是
+  `rk356x_loader_v1.26.114.bin`，SDK 自带的 rkbin 是
+  `rk356x_spl_loader_v1.25.114.bin`，都不是 `rk3566_spl_loader_*`；
+  `mk-loader.sh` 用 `u-boot/*_loader_*.bin` 匹配。本分支的
+  `UBOOT_LOADER_PATTERN` 已相应改成 `*_loader_*.bin`（之前写成
+  `rk3566_spl_loader_*.bin`，会导致 `./bsp pack` 找不到 loader）。
+  GitHub u-boot `next-dev` 里也有同样的 `configs/rk3566.config`。
+- **内核配置增量**：与 SDK 的 `rockchip_linux_defconfig` 逐行比对，SDK 多出的
+  板级项只有 `BCMDHD_FW_PATH/NVRAM_PATH`、LED triggers、
+  `USB_NET_CDC_MBIM/QMI_WWAN`、`LTE(+RM310)`、`MALI_BIFROST`、`GT9XX`；
+  前四类已在 `tspi-1m.config`，LTE 需 SDK 的 `drivers/net/lte` 源码所以未开，
+  Mali/GT9xx 放在可选的 `tspi-vendor.config`。
+- **IO 电源域**：dts 里 `vccio4`/`vccio6` 接 `vcc_1v8`（1.8V），其余
+  `pmuio2`、`vccio1/5/7` 接 3.3V，与 SDK 文档“除 VCCIO4/6 外都选 3V3”一致，
+  编译期不需要 whiptail 交互。
+- **PARTUUID**：dts 的 `root=PARTUUID=614e0000-0000` 用前缀匹配，内核
+  `devt_from_partuuid()` 原生支持截断 UUID，和 `parameter.txt` 的
+  `uuid:rootfs` 对应。
+- `./bsp` 脚本 `bash -n` 通过；`./bsp sync dts` 实测同步 7 个文件并在内核
+  `Makefile` 里幂等追加 `tspi-rk3566-user-v10-linux.dtb`。
+
+仍未覆盖：u-boot / kernel / rootfs / `update.img` 的完整编译（需 Linux x86_64 +
+`aarch64-linux-gnu-`）与真机启动；蓝牙需要 SDK 的 `rk_hciattach` 才能把
+AP6212A 挂到 `hci0`（本仓库只装固件和 `bluez`）。
 
 ## 远程仓库
 

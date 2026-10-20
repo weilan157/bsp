@@ -27,3 +27,9 @@
 编辑 `extra-packages.list`（每行一个包名）。当前只加了 `bluez`；
 WiFi/BT 固件随 `./bsp rootfs` 从 `vendor/firmware/ap6212/` 安装，
 不使用 Debian 的 `firmware-brcm80211`（与 SDK 的 bcmdhd 方案保持一致）。
+
+> WiFi：`bcmdhd` 由 `/etc/modules-load.d/bcmdhd.conf` 开机加载，固件路径在
+> `vendor/kernel-config/tspi-1m.config` 里写死，`wlan0` 应自动出现。
+> 蓝牙：内核侧由 `wireless-bluetooth`（`bluetooth-platdata`）驱动上电，
+> 还需要 SDK 的 `rk_hciattach`（或蓝点 `btattach -P bcm`）把 UART1 挂到
+> `hci0`；这一步本仓库没有集成，需要时从 SDK 的 `external/rkwifibt` 编。
