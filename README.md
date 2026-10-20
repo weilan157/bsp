@@ -84,7 +84,7 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 
 | | 版本 | 说明 |
 |---|---|---|
-| 泰山派 SDK | **6.1.141** | `rk/kernel-stable`，tag `linux-6.1-stan-rkr7`，其上 3 个 LCKFB “适配泰山派1M” 提交 |
+| 泰山派 SDK | **6.1.141** | `rk/kernel-stable`，tag `linux-6.1-stan-rkr7`，其上 4 个 LCKFB “适配泰山派1M” 提交 |
 | 本仓库默认 | **6.1.172** | GitHub `rockchip-linux/kernel` 的 `develop-6.1`，同一 6.1 厂商内核树 |
 
 想用 SDK 里那份内核（含 LCKFB 的 `drivers/net/lte` 等改动）编译时，在 `config.env` 里
