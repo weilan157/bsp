@@ -233,7 +233,21 @@ cmd_pack() {
 	cat package-file
 
 	"${pack_dir}/afptool" -pack ./ "${work}/update.raw.img"
-	tag="RK$(dd if=Image/MiniLoaderAll.bin bs=1 count=4 skip=21 status=none | rev)"
+	# 芯片标识：PACK_CHIP_TAG 优先；否则从 loader 头的 21..24 字节反推。
+	# RK356x 的 loader 是通用的（rk356x_loader_*.bin），头里固定写 3568，
+	# 与板级 RK3566 不一致时按 UBOOT_BOARD 取，避免烧写工具判成 RK3568。
+	local tag board_tag
+	board_tag="RK$(printf '%s' "${UBOOT_BOARD}" | sed -e 's/^[Rr][Kk]//' -e 's/.*/\U&/')"
+	if [[ -n "${PACK_CHIP_TAG}" ]]; then
+		tag="${PACK_CHIP_TAG}"
+	else
+		tag="RK$(dd if=Image/MiniLoaderAll.bin bs=1 count=4 skip=21 status=none | rev)"
+		if [[ "${tag}" != "${board_tag}" ]]; then
+			warn "loader 头标识 ${tag} 与板级 ${board_tag} 不一致（通用 rk356x loader），按板级打包"
+			tag="${board_tag}"
+		fi
+	fi
+	info "update.img 芯片标识: ${tag}"
 	"${pack_dir}/rkImageMaker" "-${tag}" Image/MiniLoaderAll.bin \
 		"${work}/update.raw.img" "${update_img}" -os_type:androidos
 

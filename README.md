@@ -165,6 +165,44 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
 - `OrangePi-kyX1`：Orange Pi R2S（Ky X1）
 - `rk3566`：**本分支**，泰山派 1M RK3566
 
+## 在 WSL2 / Ubuntu 22.04.5 上的实测（2026-10-20）
+
+整条链路已在本机跑通：`env → setup → uboot → kernel → bootimg → rootfs → pack`。
+
+| 项 | 值 |
+|---|---|
+| 主机 | Ubuntu 22.04.5 LTS (WSL2, kernel 6.18.54.1-microsoft-standard-WSL2)，8 vCPU / 7.2 GiB |
+| 工具链 | gcc / aarch64-linux-gnu-gcc 11.4.0、binutils 2.38、dtc 1.6.1、debootstrap 1.0.126 |
+| 源码 | u-boot `next-dev` / rkbin `master` / kernel `develop-6.1`（6.1.172） |
+| 耗时 | u-boot ~40 s；内核 `Image`+dtb **11 min 21 s**（563% CPU）；rootfs ~10 min；`update.img` ~15 s |
+| 产物 | `Image` 40 MB、dtb 165 KB、`boot.img` 41 MB、`rootfs.ext4` 436 MB（160 个 `.ko`）、`update.img` 482 MB |
+
+产物文件名与分区地址已核对：`boot@0x8000`、`misc@0x6000`、`uboot@0x4000`、
+`rootfs@0x78000`，与 `parameter.txt` 的 `CMDLINE` 一致；`rkImageMaker -unpack`
+和 `afptool -unpack` 都能正常解开 `update.img`。
+
+### 这次踩到的四个坑（脚本已修）
+
+1. **GitHub 直连不通**：`git clone` 卡死、`cdn.jsdelivr.net` 直接 reset。改在
+   `config.env` 里给三个仓库加 `https://ghfast.top/` 前缀即可；打不开
+   jsdelivr 时 `PACK_TOOLS_DOWNLOAD_MIRRORS` 也换成 ghfast 的 raw 地址。
+   这些都是本机配置，别写进 `config.env.example` 默认值。
+2. **`--spl-new` 在 u-boot `next-dev` 里已删除**：`make.sh` 会把它当 defconfig 名，
+   报 `ERROR: No configs/--spl-new_defconfig`。`mod-uboot.sh` 现在先
+   `grep -- '--spl-new' make.sh`，只有老 SDK 的 u-boot 才传这个参数；新版
+   loader 直接由 rkbin 的 `RK3566MINIALL.ini` 打出
+   （`rk356x_loader_v1.26.114.bin`，471 KB）。
+3. **jammy 自带的 `debian-archive-keyring` 2021.1.1 太旧**，debootstrap 装
+   trixie 会在 `Checking Release signature` 报
+   `Release signed by unknown key (key id 762F67A0B2C39DE4)`。`./bsp env` 现在会
+   检查版本并从 Debian 镜像把 keyring 升到最新（`ensure_debian_keyring`）。
+4. **`update.img` 芯片标识**：`rk356x` 的 loader 是通用镜像，头部 21..24 字节固定
+   写 `3568`，原来按它推 tag 会打出 `-RK3568` 的固件。现在按 `UBOOT_BOARD`
+   取 `RK3566`（可用 `PACK_CHIP_TAG` 覆盖），头里已是 `6653`（小端 3566）。
+
+另外：**别在 `/mnt/d` 上直接编**。9p 文件系统上内核要几千次小文件读写，这里
+是先 `rsync` 到 ext4（`/root/bsp`）再编、最后把 `out/` 拷回 Windows 侧的。
+
 ## 验证状态（已按 `repo sync` 后的 SDK 复核）
 
 对同步后的 `extracted_sdk/`（kernel 6.1.141、u-boot、device/rockchip 均已是工作区）：
@@ -185,7 +223,8 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
   `mk-loader.sh` 用 `u-boot/*_loader_*.bin` 匹配。本分支的
   `UBOOT_LOADER_PATTERN` 已相应改成 `*_loader_*.bin`（之前写成
   `rk3566_spl_loader_*.bin`，会导致 `./bsp pack` 找不到 loader）。
-  GitHub u-boot `next-dev` 里也有同样的 `configs/rk3566.config`。
+  GitHub u-boot `next-dev` 里也有同样的 `configs/rk3566.config`，但**没有**
+  `--spl-new` 这个子命令（见上一节第 2 条）。
 - **内核配置增量**：与 SDK 的 `rockchip_linux_defconfig` 逐行比对，SDK 多出的
   板级项只有 `BCMDHD_FW_PATH/NVRAM_PATH`、LED triggers、
   `USB_NET_CDC_MBIM/QMI_WWAN`、`LTE(+RM310)`、`MALI_BIFROST`、`GT9XX`；
@@ -200,9 +239,9 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
 - `./bsp` 脚本 `bash -n` 通过；`./bsp sync dts` 实测同步 7 个文件并在内核
   `Makefile` 里幂等追加 `tspi-rk3566-user-v10-linux.dtb`。
 
-仍未覆盖：u-boot / kernel / rootfs / `update.img` 的完整编译（需 Linux x86_64 +
-`aarch64-linux-gnu-`）与真机启动；蓝牙需要 SDK 的 `rk_hciattach` 才能把
-AP6212A 挂到 `hci0`（本仓库只装固件和 `bluez`）。
+仍未覆盖：真机启动与烧写验证（`update.img` 只做了 `rkImageMaker/afptool`
+解包自检）；开机画面无 `logo.bmp`（`resource.img` 只含 dtb）；蓝牙需要 SDK 的
+`rk_hciattach` 才能把 AP6212A 挂到 `hci0`（本仓库只装固件和 `bluez`）。
 
 ## 远程仓库
 

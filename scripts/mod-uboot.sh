@@ -15,13 +15,23 @@ cmd_uboot() {
 	ensure_python2_wrapper
 	setup_cross_compile
 
+	# 旧版 SDK 的 u-boot make.sh 支持 --spl-new（用 u-boot SPL 重打 loader）；
+	# rockchip next-dev 等新版已删除该选项（传了会被当成 defconfig 名而报错），
+	# 直接按 board 编译，loader 由 rkbin 的 RK3566MINIALL.ini 决定
+	local -a make_args=("${UBOOT_BOARD}")
+	local spl_note=""
+	if grep -q -- '--spl-new' "${UBOOT_DIR}/make.sh"; then
+		make_args+=(--spl-new)
+		spl_note=", --spl-new"
+	fi
+
 	(
 		cd "${UBOOT_DIR}"
 		apply_uboot_patches
 		info "清理旧产物..."
 		make distclean 2>/dev/null || true
-		info "编译 U-Boot (board=${UBOOT_BOARD}, --spl-new)..."
-		./make.sh "${UBOOT_BOARD}" --spl-new "CROSS_COMPILE=${CROSS_COMPILE}"
+		info "编译 U-Boot (board=${UBOOT_BOARD}${spl_note})..."
+		./make.sh "${make_args[@]}" "CROSS_COMPILE=${CROSS_COMPILE}"
 	)
 
 	info "编译完成，主要产物:"

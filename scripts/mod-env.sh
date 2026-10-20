@@ -47,7 +47,39 @@ cmd_env() {
 		die "交叉编译器 ${CROSS_COMPILE_PREFIX}gcc 未安装成功"
 	command -v debootstrap >/dev/null 2>&1 || die "debootstrap 未安装成功"
 
+	ensure_debian_keyring
+
 	info "主机环境就绪"
+}
+
+# Ubuntu 22.04 自带 debian-archive-keyring 2021.1.1，里面没有 Debian 12/13 的
+# 签名密钥；debootstrap bookworm/trixie 会在 "Checking Release signature" 阶段
+# 报 "Release signed by unknown key (key id 762F67A0B2C39DE4)"。
+# 这里按需从 Debian 镜像拉最新 debian-archive-keyring（arch: all）装上。
+ensure_debian_keyring() {
+	local cur base deb tmp
+	cur="$(dpkg-query -W -f='${Version}' debian-archive-keyring 2>/dev/null || true)"
+	if [[ -n "${cur}" ]] && dpkg --compare-versions "${cur}" ge "2023.1"; then
+		return 0
+	fi
+
+	info "debian-archive-keyring ${cur:-未安装} 过旧，升级到镜像上的最新版..."
+	base="http://${DEBIAN_MIRROR}/debian/pool/main/d/debian-archive-keyring"
+	deb="$(curl -fsSL "${base}/" 2>/dev/null \
+		| grep -o 'debian-archive-keyring_[0-9][^"]*_all\.deb' | sort -u | tail -1)"
+	if [[ -z "${deb}" ]]; then
+		warn "无法从 ${base} 获取 debian-archive-keyring，"
+		warn "debootstrap ${DEBIAN_RELEASE} 可能因 Release 签名校验失败"
+		return 0
+	fi
+	tmp="$(mktemp -d)"
+	if curl -fsSL -o "${tmp}/${deb}" "${base}/${deb}" && run_root dpkg -i "${tmp}/${deb}"; then
+		info "debian-archive-keyring 已升级: ${deb}"
+	else
+		warn "debian-archive-keyring 升级失败（debootstrap 可能无法校验 ${DEBIAN_RELEASE}）"
+	fi
+	rm -rf "${tmp}"
+	return 0
 }
 
 cmd_env_host_tools() {

@@ -57,6 +57,9 @@ fi
 : "${PACK_TOOLS_DOWNLOAD_MIRRORS:=}"
 : "${FIRMWARE_PARAMETER:=${BSP_ROOT}/vendor/firmware/parameter.txt}"
 : "${FIRMWARE_PACKAGE_FILE:=${BSP_ROOT}/vendor/firmware/package-file}"
+# update.img 头里的芯片标识（如 RK3566）。留空则从 loader 头推导，
+# 推导值与 UBOOT_BOARD 不一致时以 UBOOT_BOARD 为准（通用 rk356x loader 头里是 3568）
+: "${PACK_CHIP_TAG:=}"
 : "${CROSS_COMPILE_PREFIX:=aarch64-linux-gnu-}"
 : "${TOOLCHAIN_BIN:=}"
 : "${RKBIN_BACKUP_SRC:=}"
