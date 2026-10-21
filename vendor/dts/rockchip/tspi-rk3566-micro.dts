@@ -22,4 +22,13 @@
 / {
 	model = "microduck TSPI 1M RK3566";
 	compatible = "lckfb,tspi-1m-rk3566", "rockchip,rk3566";
+
+	/*
+	 * 启动速度：关掉 console 刷屏（quiet + loglevel=3），
+	 * 需要调试时改成 loglevel=7 或去掉 quiet 即可。
+	 * U-Boot 若用 env 里的 bootargs 会覆盖这里，见 README。
+	 */
+	chosen {
+		bootargs = "console=ttyFIQ0,1500000n8 quiet loglevel=3 root=PARTUUID=614e0000-0000 rw rootwait";
+	};
 };

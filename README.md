@@ -81,7 +81,7 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 | 留下的 | `AP6XXX`(bcmdhd)、`CFG80211`、`BT_HCIUART`、`RFKILL_RK`、`SND_SOC_ROCKCHIP_I2S`+`SND_SOC_RK817`+`SND_SIMPLE_CARD`、`VIDEO_ROCKCHIP_ISP`+`CIF`+`PHY_ROCKCHIP_CSI2_DPHY`+`VIDEO_OV5695`、`ZRAM(lz4)`、ext4/tmpfs/devtmpfs、MMC/SDHCI、8250 串口 |
 | 设备树 | `tspi-rk3566-micro.dts`：只 include `core` + `csi`，不含 HDMI/DSI/EDP/gmac |
 | rootfs | `ROOTFS_TYPE=micro`：Debian minbase + **sysvinit**（无 systemd/udev）+ busybox |
-| 启动 | `/etc/init.d/rcS` 只做：挂 proc/sys/devpts、加载 bcmdhd/hci_uart、ZRAM、后台扩容与 WiFi |
+| 启动 | `/etc/init.d/rcS` 只做挂载 + ZRAM；`bcmdhd/hci_uart/ov5695` 加载、WiFi、`resize2fs` 全在后台；`bootargs` 带 `quiet loglevel=3` |
 | ZRAM | `/usr/sbin/microduck-zram`：内存的 1/2，lz4，开机 `swapon` |
 | 开机扩容 | `parameter.txt` 里 `rootfs:grow`；`/usr/sbin/microduck-grow` 在后台 `resize2fs` |
 
@@ -93,11 +93,35 @@ cp config.env.example config.env
 启动耗时这样看（rcS 会往 dmesg 打点）：
 
 ```bash
-dmesg | grep microduck          # microduck: userspace ready in 1.8s
+dmesg | grep microduck          # microduck: mounts done at 1.2s / zram at 1.3s / userspace ready in 1.4s
 ```
 
-想进一步压缩启动时间，可以在 u-boot 里加 `bootdelay=0`、关掉 `CONFIG_FIQ_DEBUGGER`
-（同时把 console 改成 `ttyS2`），以及去掉 `earlycon`。
+### 启动还能怎么更快
+
+已做：
+
+- `next-dev` 的 u-boot 默认就是 `CONFIG_BOOTDELAY=0`（SDK 自带的 u-boot 是 2，
+  换 SDK u-boot 时记得改）；
+- DT `chosen/bootargs` 加 `quiet loglevel=3`、去掉 `earlycon`；
+- 内核关 `VT/VT_CONSOLE`、无 DRM/FB、无 systemd/udev；
+- `rcS` 只做挂载 + ZRAM，`bcmdhd/hci_uart/ov5695` 加载、WiFi、`resize2fs` 全在后台；
+- 计时锚点 `mounts done / zram / userspace ready` 都打进了 `dmesg`。
+
+分阶段继续压（社区做法，按收益排序）：
+
+| 阶段 | 做法 | 预期 |
+|---|---|---|
+| U-Boot | `bootcmd` 收敛成 `boot_fit`（跳过 `boot_android`/`bootrkp`/`distro_bootcmd` 扫描），关 `CONFIG_ANDROID_AVB`、`CONFIG_CMD_BOOT_ANDROID` | 100–300 ms |
+| U-Boot | 按 [Rockchip Boot Time](https://opensource.rock-chips.com/wiki_Boot_Time) 的做法在 loader/U-Boot 阶段提 CPU 频率 | 100–300 ms（注意散热） |
+| 内核 | `bootargs` 加 `initcall_debug`，看 `dmesg \| grep initcall` 找慢驱动；`driver_async_probe` / 减少 deferred probe | 视驱动而定 |
+| 内核 | 生产镜像去掉 `CONFIG_FIQ_DEBUGGER` + `earlycon`，`loglevel=0` | 50–150 ms |
+| 内核 | `Image.lz4` + FIT `compression = "lz4"`（eMMC 读速慢时收益明显） | 50–150 ms |
+| 用户态 | busybox init 取代 sysvinit；去掉 getty/login（调试时再开） | 20–50 ms |
+| 硬件 | 启动介质（eMMC/SPI-NOR）、DDR 频率 | 视硬件 |
+
+测法：串口抓 u-boot 的 `Boot …` 时间点；内核侧 `initcall_debug` 后再看
+`dmesg | grep microduck` 的差值。通用方法论可参考
+[Bootlin 的 boot-time principles](https://github.com/bootlin/training-materials/blob/master/slides/boot-time-principles/boot-time-principles.tex)。
 
 ### 板级相关配置（与 SDK 对齐）
 
