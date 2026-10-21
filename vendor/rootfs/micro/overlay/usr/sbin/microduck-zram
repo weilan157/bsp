@@ -1,0 +1,17 @@
+#!/bin/sh
+# 用一半内存做 lz4 zram swap
+[ -e /sys/block/zram0/disksize ] || modprobe zram 2>/dev/null
+[ -e /sys/block/zram0/disksize ] || exit 0
+
+mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+size=$((mem_kb * 1024 / 2))
+
+# 换掉默认压缩算法（失败就用内核默认，不影响功能）
+echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+echo 1   > /sys/block/zram0/reset 2>/dev/null || true
+
+echo "$size" > /sys/block/zram0/disksize || exit 0
+/sbin/mkswap /dev/zram0 >/dev/null 2>&1 || exit 0
+/sbin/swapon /dev/zram0 2>/dev/null
+
+printf 'microduck: zram0 %s MiB (lz4) swapped in\n' "$((size / 1024 / 1024))" > /dev/kmsg 2>/dev/null

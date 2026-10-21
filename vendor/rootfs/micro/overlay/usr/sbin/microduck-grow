@@ -1,0 +1,18 @@
+#!/bin/sh
+# 首次启动把 rootfs 扩到分区大小
+#   - 分区本身由 parameter.txt 的 rootfs:grow 在烧写时扩到磁盘末尾
+#   - 这里只负责把 ext4 文件系统扩到分区大小（在线 resize，秒级）
+dev=$(awk '$2=="/"{print $1}' /proc/mounts | head -1)
+[ -b "$dev" ] || exit 0
+
+bs=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block size/{gsub(/ /,"",$2);print $2}')
+fs_blocks=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block count/{gsub(/ /,"",$2);print $2}')
+size_bytes=$(blockdev --getsize64 "$dev" 2>/dev/null) || exit 0
+
+[ -n "$bs" ] && [ -n "$fs_blocks" ] && [ -n "$size_bytes" ] || exit 0
+part_blocks=$((size_bytes / bs))
+[ "$fs_blocks" -lt "$part_blocks" ] || exit 0
+
+if resize2fs "$dev" >/dev/null 2>&1; then
+	printf 'microduck: rootfs resized %s -> %s blocks\n' "$fs_blocks" "$part_blocks" > /dev/kmsg 2>/dev/null
+fi

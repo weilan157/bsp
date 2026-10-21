@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * microduck：泰山派 1M（RK3566）精简镜像设备树
+ *
+ * 只保留：
+ *   - tspi-rk3566-core-v10.dtsi  电源/PMIC(RK809)/音频/SDIO WiFi/BT/UART/I2C
+ *   - tspi-rk3566-csi-v10.dtsi   MIPI CSI 摄像头（OV5695）
+ * 不包含：HDMI / MIPI-DSI / EDP 显示、gmac1 以太网。
+ *
+ * 编译目标：tspi-rk3566-micro.dtb（KERNEL_DTS_NAME）
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/display/rockchip_vop.h>
+#include "rk3566.dtsi"
+#include "tspi-rk3566-core-v10.dtsi"
+#include "tspi-rk3566-csi-v10.dtsi"
+
+/ {
+	model = "microduck TSPI 1M RK3566";
+	compatible = "lckfb,tspi-1m-rk3566", "rockchip,rk3566";
+};

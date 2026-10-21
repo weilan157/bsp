@@ -41,7 +41,7 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 ./bsp env                          # 主机依赖（需 sudo）
 ./bsp setup all                    # 克隆 u-boot / rkbin / kernel
 ./bsp uboot
-./bsp kernel                       # → Image + tspi-rk3566-user-v10-linux.dtb
+./bsp kernel                       # → Image + tspi-rk3566-micro.dtb
 ./bsp bootimg                      # FIT boot.img → out/boot.img
 ./bsp rootfs                       # Debian minbase → out/rootfs.ext4
 ./bsp pack                         # out/update.img
@@ -69,14 +69,44 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 
 无 sudo 且缺 flex/bison：`./bsp env --host-tools`。
 
+## microduck：极致精简
+
+本分支（`microduck-tspi-rk3566`）在 `rk3566` 的基础上做减法，目标：**5 秒内启动**，
+只留 **板载 WiFi/BT（AP6212A）+ 音频（RK809/I2S）+ MIPI 摄像头（ISP/CIF/OV5695）**。
+
+| 维度 | microduck |
+|---|---|
+| 内核配置 | 在 `rk3566.config + bsp-boot.config + tspi-1m.config` 之上再叠 `microduck-tiny.config` |
+| 关掉的 | DRM/FB/GPU(Mali/Panfrost)、VPU/RGA/ISPP/AIISP/VPSS/HDMI-RX、USB、PCIe、以太网(gmac)、netfilter/IPv6、多余文件系统（btrfs/xfs/f2fs/ntfs/nfs/cifs/9p/overlay/squashfs…）、SCSI/ATA/NVMe、HID/输入设备、蓝牙多余 profile、FTRACE/KPROBES/BPF/KALLSYMS |
+| 留下的 | `AP6XXX`(bcmdhd)、`CFG80211`、`BT_HCIUART`、`RFKILL_RK`、`SND_SOC_ROCKCHIP_I2S`+`SND_SOC_RK817`+`SND_SIMPLE_CARD`、`VIDEO_ROCKCHIP_ISP`+`CIF`+`PHY_ROCKCHIP_CSI2_DPHY`+`VIDEO_OV5695`、`ZRAM(lz4)`、ext4/tmpfs/devtmpfs、MMC/SDHCI、8250 串口 |
+| 设备树 | `tspi-rk3566-micro.dts`：只 include `core` + `csi`，不含 HDMI/DSI/EDP/gmac |
+| rootfs | `ROOTFS_TYPE=micro`：Debian minbase + **sysvinit**（无 systemd/udev）+ busybox |
+| 启动 | `/etc/init.d/rcS` 只做：挂 proc/sys/devpts、加载 bcmdhd/hci_uart、ZRAM、后台扩容与 WiFi |
+| ZRAM | `/usr/sbin/microduck-zram`：内存的 1/2，lz4，开机 `swapon` |
+| 开机扩容 | `parameter.txt` 里 `rootfs:grow`；`/usr/sbin/microduck-grow` 在后台 `resize2fs` |
+
+```bash
+cp config.env.example config.env
+./bsp env && ./bsp all          # kernel 用 microduck-tiny.config，rootfs 用 micro
+```
+
+启动耗时这样看（rcS 会往 dmesg 打点）：
+
+```bash
+dmesg | grep microduck          # microduck: userspace ready in 1.8s
+```
+
+想进一步压缩启动时间，可以在 u-boot 里加 `bootdelay=0`、关掉 `CONFIG_FIQ_DEBUGGER`
+（同时把 console 改成 `ttyS2`），以及去掉 `earlycon`。
+
 ### 板级相关配置（与 SDK 对齐）
 
 | 配置 | 默认值 | 对应 SDK |
 |------|--------|----------|
 | `UBOOT_BOARD` | `rk3566` | `./make.sh rk3566`（`RK_UBOOT_SPL=y`） |
 | `UBOOT_LOADER_PATTERN` | `rk356x_*loader_*.bin` | make.sh `--spl-new` 产物 |
-| `KERNEL_DEFCONFIG_FRAGMENTS` | `rk3566.config bsp-boot.config tspi-1m.config` | `rockchip_linux_defconfig` + LCKFB 增量 |
-| `KERNEL_DTS_NAME` | `tspi-rk3566-user-v10-linux` | `RK_KERNEL_DTS_NAME` |
+| `KERNEL_DEFCONFIG_FRAGMENTS` | `rk3566.config bsp-boot.config tspi-1m.config microduck-tiny.config` | `rockchip_linux_defconfig` + LCKFB 增量 + microduck 精简 |
+| `KERNEL_DTS_NAME` | `tspi-rk3566-micro` | microduck 精简 dts（无显示/以太网） |
 | `DTS_FILES_GLOB` | `tspi-rk3566-*` | dts + 6 个 dtsi 一起同步 |
 | `parameter.txt` | `vendor/firmware/parameter.txt` | `parameter-buildroot-fit.txt` |
 
@@ -105,15 +135,22 @@ KERNEL_BRANCH="tspi-1m-local"
 默认 `n`；设为 `y` 会再叠加 `vendor/kernel-config/tspi-vendor.config`
 （PANFROST / Mali Bifrost / GT9xx）。
 
-### Debian rootfs
+### rootfs（ROOTFS_TYPE）
 
-官方 **debootstrap minbase**（无桌面）。产物：`out/rootfs/` 与 `out/rootfs.ext4`。
-默认 Debian 13 (trixie)；主机 debootstrap 过旧时 `./bsp config DEBIAN_RELEASE=bookworm`。
+产物：`out/rootfs/` 与 `out/rootfs.ext4`。
+
+| 值 | 说明 |
+|----|------|
+| `debian` | 官方 debootstrap minbase + systemd，功能完整 |
+| `micro`（本分支默认） | microduck 精简：sysvinit + busybox，无 systemd/udev，带 ZRAM 与开机扩容 |
+
+两种都用 Debian 13 (trixie)；主机 debootstrap 过旧时 `./bsp config DEBIAN_RELEASE=bookworm`。
 
 AP6212A（BCM43438，SDK 同款 `bcmdhd`）：`./bsp rootfs` 会把
 `vendor/firmware/ap6212/` 的 `fw_bcm43438a1.bin`、`nvram_ap6212a.txt`、`BCM4343A1.hcd`
-装进 `/lib/firmware/`，并启用 `/etc/modules-load.d/bcmdhd.conf`。
-改 `overlay/etc/wpa_supplicant/wpa_supplicant.conf` 后 `ifup wlan0`。
+装进 `/lib/firmware/`。`debian` 用 `/etc/modules-load.d/bcmdhd.conf` 开机加载；
+`micro` 在 `rcS` 里 `modprobe bcmdhd` 并在后台拉起 `wpa_supplicant`（配好
+`/etc/wpa_supplicant/wpa_supplicant.conf` 的 SSID 才会连）。
 
 ### 从 SDK 刷新设备树
 
@@ -125,14 +162,14 @@ TSPI_DTS_SOURCE="/path/to/sdk/kernel/arch/arm64/boot/dts/rockchip"
 ```
 
 `DTS_FILES_GLOB=tspi-rk3566-*` 会把 SDK 的 7 个板级文件一起同步，并在内核
-`Makefile` 里补 `dtb-$(CONFIG_ARCH_ROCKCHIP) += tspi-rk3566-user-v10-linux.dtb`。
+`Makefile` 里补 `dtb-$(CONFIG_ARCH_ROCKCHIP) += tspi-rk3566-micro.dtb`。
 
 ## 编译产物
 
 | 命令 | 产物 |
 |------|------|
 | `./bsp uboot` | `sources/u-boot/uboot.img`、`rk356x_*loader_*.bin` |
-| `./bsp kernel` | `out/kernel/Image`、`out/kernel/tspi-rk3566-user-v10-linux.dtb` |
+| `./bsp kernel` | `out/kernel/Image`、`out/kernel/tspi-rk3566-micro.dtb` |
 | `./bsp bootimg` | `out/kernel/resource.img`、`out/boot.img` |
 | `./bsp rootfs` | `out/rootfs/`、`out/rootfs.ext4` |
 | `./bsp pack --stage-only` | `out/firmware/` |
@@ -163,7 +200,8 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
 - `main`：仓库骨架
 - `rk3576`：RK3576 / 泰山派 3M
 - `OrangePi-kyX1`：Orange Pi R2S（Ky X1）
-- `rk3566`：**本分支**，泰山派 1M RK3566
+- `rk3566`：泰山派 1M RK3566（完整功能）
+- `microduck-tspi-rk3566`：**本分支**，在 rk3566 基础上做极致精简（5s 启动、ZRAM、开机扩容）
 
 ## 在 WSL2 / Ubuntu 22.04.5 上的实测（2026-10-20）
 
@@ -245,15 +283,32 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
   `devt_from_partuuid()` 原生支持截断 UUID，和 `parameter.txt` 的
   `uuid:rootfs` 对应。
 - `./bsp` 脚本 `bash -n` 通过；`./bsp sync dts` 实测同步 7 个文件并在内核
-  `Makefile` 里幂等追加 `tspi-rk3566-user-v10-linux.dtb`。
+  `Makefile` 里幂等追加 `tspi-rk3566-micro.dtb`。
 
 仍未覆盖：真机启动与烧写验证（`update.img` 只做了 `rkImageMaker/afptool`
 解包自检）；开机画面无 `logo.bmp`（`resource.img` 只含 dtb）；蓝牙需要 SDK 的
 `rk_hciattach` 才能把 AP6212A 挂到 `hci0`（本仓库只装固件和 `bluez`）。
 
+## microduck 验证状态
+
+- **内核配置**：在 SDK 的 `kernel-6.1`（6.1.141）树上跑
+  `rockchip_linux_defconfig + rk3566.config + bsp-boot.config + tspi-1m.config + microduck-tiny.config`
+  再 `olddefconfig`，结果符合预期：`DRM/FB/USB/PCI/IPv6/NETFILTER` 关闭，
+  `VIDEO_ROCKCHIP_ISP/CIF + PHY_ROCKCHIP_CSI2_DPHY + VIDEO_OV5695`、
+  `SND_SOC_RK817/I2S + SND_SIMPLE_CARD`、`AP6XXX + BT_HCIUART + RFKILL_RK`、
+  `ZRAM(lz4)`、`CMA 64MB` 打开。
+- **设备树**：`tspi-rk3566-micro.dts` 在 SDK 树上 `cpp + dtc` 通过（99432 字节
+  dtb），不含 HDMI/DSI/EDP/gmac 的 include。
+- **rootfs**：WSL 里用 `ROOTFS_TYPE=micro` 实测构建通过——sysvinit 做 init、
+  我们的 `inittab/rcS/fstab` 生效、`btattach`、`wpa_supplicant`、`resize2fs`
+  都在；`out/rootfs` 约 175 MB、`out/rootfs.ext4` 约 265 MB（保留 `bluez` 的代价，
+  去掉它可再省 ~40 MB）。
+- **未验证**：真机上的 5 秒启动目标——需要上板量；`dmesg | grep microduck`
+  会打印 userspace ready 的时间点。
+
 ## 远程仓库
 
 ```bash
 git remote add origin git@github.com:weilan157/bsp.git
-git push -u origin rk3566
+git push -u origin microduck-tspi-rk3566
 ```

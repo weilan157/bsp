@@ -1,8 +1,13 @@
-# rockchip-bsp 官方 Debian 无桌面 rootfs
+# rootfs（Debian / microduck）
 
-使用 `debootstrap --variant=minbase`，不依赖 SDK `live-build` / 桌面栈。构建：`./bsp rootfs`。
+`ROOTFS_TYPE` 二选一，产物都是 `out/rootfs/` + `out/rootfs.ext4`：
 
-## 默认
+| 值 | 内容 |
+|----|------|
+| `debian` | `debootstrap --variant=minbase` + systemd，功能完整 |
+| `micro` | microduck 精简版：同一套 minbase，但用 **sysvinit** 启动（无 systemd），并加 ZRAM/开机扩容脚本、去掉文档/locale |
+
+## Debian（默认）
 
 | 项 | 默认 |
 |----|------|
@@ -10,6 +15,17 @@
 | 架构 | `arm64` |
 | 变体 | `minbase`（官方最小根文件系统） |
 | 镜像 | `out/rootfs/` 目录 + `out/rootfs.ext4` |
+
+## micro（microduck）
+
+- `micro/chroot-setup.sh`：装 busybox/sysvinit/wpa_supplicant/bluez/kmod/e2fsprogs，
+  卸掉 systemd，清文档/locale；
+- `micro/overlay/etc/inittab` + `init.d/rcS`：sysvinit 的 `sysinit` 只跑我们的脚本；
+- `micro/overlay/usr/sbin/microduck-{zram,grow,wifi}`：ZRAM swap、resize2fs 扩容、
+  后台连 WiFi；
+- `micro/overlay/etc/fstab`、`wpa_supplicant.conf`、`usr/share/udhcpc/default.script`。
+
+启动日志里会有一行 `microduck: userspace ready in Xs`，可用来量启动时间。
 
 ## overlay
 

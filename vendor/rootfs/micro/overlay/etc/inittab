@@ -1,0 +1,9 @@
+# microduck 精简 inittab（sysvinit）
+id:2:initdefault:
+si::sysinit:/etc/init.d/rcS
+
+# 调试串口（RK3566 FIQ debugger / uart2）
+ttyFIQ0::respawn:/sbin/getty -L 1500000 ttyFIQ0 vt100
+
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r

@@ -1,0 +1,11 @@
+#!/bin/sh
+# 有 SSID 配置才联网；后台跑，不拖慢启动
+CONF=/etc/wpa_supplicant/wpa_supplicant.conf
+[ -f "$CONF" ] || exit 0
+grep -q '^[[:space:]]*network=' "$CONF" || exit 0
+
+/usr/sbin/ip link set wlan0 up 2>/dev/null || exit 0
+/usr/sbin/wpa_supplicant -B -i wlan0 -c "$CONF" 2>/dev/null || exit 0
+busybox udhcpc -i wlan0 -b -q -t 5 -T 2 >/dev/null 2>&1 || true
+
+printf 'microduck: wlan0 up\n' > /dev/kmsg 2>/dev/null

@@ -1,4 +1,4 @@
-# Rockchip update.img package (泰山派 RK3566 GPT)
+# Rockchip update.img package (microduck TSPI 1M RK3566)
 # NAME	PATH
 package-file	package-file
 parameter	Image/parameter.txt
@@ -7,4 +7,3 @@ uboot		Image/uboot.img
 misc		Image/misc.img
 boot		Image/boot.img
 rootfs		Image/rootfs.img
-backup		RESERVED

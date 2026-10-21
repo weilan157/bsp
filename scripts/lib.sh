@@ -38,6 +38,9 @@ fi
 : "${TSPI_VENDOR_KERNEL_CONFIG:=n}"
 : "${TSPI_KERNEL_CONFIG_SOURCE:=}"
 : "${KERNEL_EXTRA_FRAGMENTS:=}"
+# rootfs 类型：debian（默认，debootstrap 无桌面）
+#           micro（microduck 精简版：sysvinit + busybox，ZRAM，开机扩容）
+: "${ROOTFS_TYPE:=debian}"
 : "${DEBIAN_RELEASE:=trixie}"
 : "${DEBIAN_ARCH:=arm64}"
 : "${DEBIAN_MIRROR:=mirrors.tuna.tsinghua.edu.cn}"

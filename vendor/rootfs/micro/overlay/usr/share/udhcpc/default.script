@@ -1,0 +1,15 @@
+#!/bin/sh
+# microduck：udhcpc 最小钩子（busybox 默认脚本路径）
+case "$1" in
+deconfig)
+	ip addr flush dev "$interface" 2>/dev/null
+	;;
+bound|renew)
+	ip addr add "$ip/$mask" dev "$interface" 2>/dev/null
+	[ -n "$router" ] && ip route add default via "$router" dev "$interface" 2>/dev/null
+	: > /etc/resolv.conf
+	for d in $dns; do
+		echo "nameserver $d" >> /etc/resolv.conf
+	done
+	;;
+esac
