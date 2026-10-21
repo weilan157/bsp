@@ -194,14 +194,22 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
    （`rk356x_loader_v1.26.114.bin`，471 KB）。
 3. **jammy 自带的 `debian-archive-keyring` 2021.1.1 太旧**，debootstrap 装
    trixie 会在 `Checking Release signature` 报
-   `Release signed by unknown key (key id 762F67A0B2C39DE4)`。`./bsp env` 现在会
-   检查版本并从 Debian 镜像把 keyring 升到最新（`ensure_debian_keyring`）。
-4. **`update.img` 芯片标识**：`rk356x` 的 loader 是通用镜像，头部 21..24 字节固定
-   写 `3568`，原来按它推 tag 会打出 `-RK3568` 的固件。现在按 `UBOOT_BOARD`
-   取 `RK3566`（可用 `PACK_CHIP_TAG` 覆盖），头里已是 `6653`（小端 3566）。
+   `Release signed by unknown key (key id 762F67A0B2C39DE4)`。`./bsp env` 和
+   `./bsp rootfs` 都会检查，必要时从 Debian 镜像把 keyring 升到最新
+   （`ensure_debian_keyring`）。
+4. **`update.img` 芯片标识**：`RKBOOT/RK3566MINIALL.ini` 与 `RK3568MINIALL.ini`
+   只差 DDR 参数（1056MHz / 1560MHz），`[CHIP_NAME] NAME=RK3568` 两文件相同，
+   所以 rk356x 通用 loader 头部 21..24 字节是 `3568`，按它推 tag 会打出
+   `-RK3568` 的固件。现在按 `UBOOT_BOARD` 取 `RK3566`（可用 `PACK_CHIP_TAG`
+   覆盖），头里已是 `6653`（小端 3566）。
 
-另外：**别在 `/mnt/d` 上直接编**。9p 文件系统上内核要几千次小文件读写，这里
-是先 `rsync` 到 ext4（`/root/bsp`）再编、最后把 `out/` 拷回 Windows 侧的。
+> 另外：next-dev 的 `make.sh` 没有 `--spl-new` 之后，loader 的 FlashBoot 用的是
+> rkbin 预编译的 `bin/rk35/rk356x_spl_v1.14.bin`（SDK 的 `--spl-new` 会换成
+> 自己编的 `u-boot-spl.bin`）。rk356x 一般不受影响；若真机卡在 loader 阶段，
+> 换 SDK 的 u-boot（支持 `--spl-new`）再编一次。
+
+**别在 `/mnt/d` 上直接编**：9p 文件系统上内核要几千次小文件读写，这里是
+先 `rsync` 到 ext4（`/root/bsp`）再编、最后把 `out/` 拷回 Windows 侧的。
 
 ## 验证状态（已按 `repo sync` 后的 SDK 复核）
 

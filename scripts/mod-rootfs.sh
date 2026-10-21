@@ -47,6 +47,12 @@ cmd_rootfs() {
 		die "本机 debootstrap 不支持 ${DEBIAN_RELEASE}，请升级 debootstrap 或 ./bsp config DEBIAN_RELEASE=bookworm"
 	fi
 
+	# 没跑过 ./bsp env 的主机也可能 debootstrap：keyring 太旧时这里补一次，
+	# 否则会在 "Checking Release signature" 阶段失败（见 mod-env.sh）
+	if declare -F ensure_debian_keyring >/dev/null; then
+		ensure_debian_keyring
+	fi
+
 	local rootfs image mirror overlay chroot_setup extra_list
 	rootfs="${OUT_DIR}/rootfs"
 	image="${OUT_DIR}/rootfs.ext4"

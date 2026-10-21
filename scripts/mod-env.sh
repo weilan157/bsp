@@ -58,6 +58,8 @@ cmd_env() {
 # 这里按需从 Debian 镜像拉最新 debian-archive-keyring（arch: all）装上。
 ensure_debian_keyring() {
 	local cur base deb tmp
+	# 非 Debian 系主机（没有 dpkg）就不管了，debootstrap 本身也只在 Debian 系常见
+	command -v dpkg >/dev/null 2>&1 || return 0
 	cur="$(dpkg-query -W -f='${Version}' debian-archive-keyring 2>/dev/null || true)"
 	if [[ -n "${cur}" ]] && dpkg --compare-versions "${cur}" ge "2023.1"; then
 		return 0
