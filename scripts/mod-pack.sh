@@ -271,11 +271,16 @@ cmd_all() {
 		esac
 	done
 
-	if [[ "${skip_rootfs}" != "y" ]]; then
+	if [[ "${skip_rootfs}" != "y" ]] && [[ "${ROOTFS_TYPE}" == "debian" ]]; then
 		if ! command -v debootstrap >/dev/null 2>&1; then
 			warn "未安装 debootstrap，跳过 rootfs（可先 ./bsp env）"
 			skip_rootfs=y
 		fi
+	fi
+	if [[ "${skip_rootfs}" != "y" ]] && [[ "${ROOTFS_TYPE}" == "armbian" ]] && \
+		[[ -z "${ARMBIAN_ROOTFS_SOURCE}" ]]; then
+		warn "ROOTFS_TYPE=armbian 但未设置 ARMBIAN_ROOTFS_SOURCE，跳过 rootfs"
+		skip_rootfs=y
 	fi
 
 	info "全量编译（缓存：有则跳过；--clean 强制重编；--update 拉取源码）"

@@ -22,7 +22,7 @@ usage() {
   uboot [--clean]        编译 U-Boot（已有产物则跳过）
   kernel [--clean]       编译内核 Image + dtb（已有则跳过）
   bootimg [--clean]      打包 FIT boot.img（已有则跳过）
-  rootfs [--clean]       构建 Debian rootfs + ext4（已有则跳过）
+  rootfs [--clean]       构建 rootfs + ext4（ROOTFS_TYPE=debian|armbian；已有则跳过）
   modules [ROOTFS]       安装内核模块到 rootfs（默认 out/rootfs）
   pack [--stage-only] [--clean]
                          打包 update.img（已有则跳过）
