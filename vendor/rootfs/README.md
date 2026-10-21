@@ -1,16 +1,8 @@
-# rockchip-bsp 的 rootfs（Debian / Armbian）
+# rockchip-bsp 官方 Debian 无桌面 rootfs
 
-两种来源，产物都是 `out/rootfs/` + `out/rootfs.ext4`，由 `ROOTFS_TYPE` 选择：
+使用 `debootstrap --variant=minbase`，不依赖 SDK `live-build` / 桌面栈。构建：`./bsp rootfs`。
 
-- `debian`（默认）：`debootstrap --variant=minbase`，不依赖 SDK `live-build` / 桌面栈。
-- `armbian`：`ARMBIAN_ROOTFS_SOURCE` 指向 Armbian 官方 `.img.xz`（或 rootfs
-  `.tar.zst/.tar.xz/.tar.gz`），脚本解出 rootfs 后套本目录的 overlay、AP6212A
-  固件和本项目内核模块。Armbian 用 NetworkManager，`overlay/etc/network/interfaces`
-  对它不生效。
-
-构建：`./bsp rootfs`。
-
-## 默认（Debian）
+## 默认
 
 | 项 | 默认 |
 |----|------|

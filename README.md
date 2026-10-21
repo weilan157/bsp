@@ -2,7 +2,7 @@
 
 独立仓库：从 GitHub 拉取 `rockchip-linux/u-boot`、`rkbin`、`kernel`，在主机上
 编译 **泰山派 1M（LCKFB Taishan Pi 1M，RK3566）** 的引导链、内核、`boot.img`、
-rootfs（Debian 或 Armbian）与 `update.img`。**不调用 SDK 的 `./build.sh`**。
+Debian rootfs 与 `update.img`。**不调用 SDK 的 `./build.sh`**。
 
 设备树、分区表、defconfig 增量、WiFi/BT 方案均取自泰山派官方 6.1 SDK
 （`tspi_1m_linux_kernel6.1_sdk_20260807`，manifest `tspi_1m_rk3566_linux.xml`）。
@@ -21,7 +21,7 @@ rockchip-bsp/
 │   ├── fit/boot.its         # FIT boot.img 模板（对齐 SDK 的 boot.its）
 │   ├── firmware/            # parameter.txt / package-file / ap6212 固件
 │   ├── patches/             # u-boot 补丁
-│   └── rootfs/              # rootfs overlay + chroot 配置（Debian/Armbian）
+│   └── rootfs/              # debootstrap overlay + chroot 配置
 ├── scripts/
 │   ├── lib.sh               # 公共变量与工具函数
 │   ├── mod-env.sh
@@ -43,7 +43,7 @@ cp config.env.example config.env   # 或 ./bsp config 自动创建
 ./bsp uboot
 ./bsp kernel                       # → Image + tspi-rk3566-user-v10-linux.dtb
 ./bsp bootimg                      # FIT boot.img → out/boot.img
-./bsp rootfs                       # Debian minbase（或 ROOTFS_TYPE=armbian）→ out/rootfs.ext4
+./bsp rootfs                       # Debian minbase → out/rootfs.ext4
 ./bsp pack                         # out/update.img
 ```
 
@@ -105,48 +105,15 @@ KERNEL_BRANCH="tspi-1m-local"
 默认 `n`；设为 `y` 会再叠加 `vendor/kernel-config/tspi-vendor.config`
 （PANFROST / Mali Bifrost / GT9xx）。
 
-### 根文件系统：Debian 或 Armbian
+### Debian rootfs
 
-`ROOTFS_TYPE` 二选一，产物都是 `out/rootfs/` + `out/rootfs.ext4`：
-
-| 值 | 说明 |
-|----|------|
-| `debian`（默认） | 官方 debootstrap minbase，无桌面 |
-| `armbian` | 用 Armbian 官方镜像（或 rootfs 压缩包）的用户空间，套本仓库的 overlay、AP6212A 固件与内核模块 |
-
-**Debian**
-
+官方 **debootstrap minbase**（无桌面）。产物：`out/rootfs/` 与 `out/rootfs.ext4`。
 默认 Debian 13 (trixie)；主机 debootstrap 过旧时 `./bsp config DEBIAN_RELEASE=bookworm`。
 
 AP6212A（BCM43438，SDK 同款 `bcmdhd`）：`./bsp rootfs` 会把
 `vendor/firmware/ap6212/` 的 `fw_bcm43438a1.bin`、`nvram_ap6212a.txt`、`BCM4343A1.hcd`
 装进 `/lib/firmware/`，并启用 `/etc/modules-load.d/bcmdhd.conf`。
 改 `overlay/etc/wpa_supplicant/wpa_supplicant.conf` 后 `ifup wlan0`。
-
-**Armbian**
-
-```bash
-# config.env
-ROOTFS_TYPE=armbian
-ARMBIAN_ROOTFS_SOURCE="https://github.com/armbian/os/releases/download/<tag>/Armbian_<ver>_<board>_<rel>_<kernel>_minimal.img.xz"
-# 或者本地文件：
-# ARMBIAN_ROOTFS_SOURCE="/data/images/Armbian_..._minimal.img.xz"
-./bsp rootfs
-```
-
-- 支持 `.img` / `.img.xz` / `.img.zst` / `.img.gz`：自动 `losetup` 挂载并 rsync 出
-  rootfs 分区（`ARMBIAN_ROOTFS_PART=auto` 取最大 ext4，也可写分区号）；
-- 也支持 `.tar.zst` / `.tar.xz` / `.tar.gz` 的 rootfs 包（以 `/` 为根，不带顶层目录）；
-- 下载缓存到 `sources/downloads/`，解压出的 `.img` 也留在同级目录，可复用；
-- 默认删掉 Armbian 自带的 `/boot` 与 `/lib/modules`（`ARMBIAN_KEEP_BOOT=y` 可保留），
-  然后用 `./bsp kernel` 产出的模块；
-- Armbian 用 **NetworkManager**，不认 `overlay/etc/network/interfaces`；WiFi 请用
-  `nmcli` 或 `/etc/NetworkManager/system-connections/` 配置。首次开机仍走 Armbian
-  的 first-run（默认用户 `armbian`/`1234`，或按它的 `/root/.not_logged_in_yet` 流程）。
-
-> 官方 Armbian 只发布整盘 `.img.xz`（[armbian/os releases](https://github.com/armbian/os/releases)），
-> 不单独提供 rootfs tarball；同架构的任意板子镜像都能取 rootfs（板级差异在
-> 内核/DTB 里，本项目用自己的）。
 
 ### 从 SDK 刷新设备树
 

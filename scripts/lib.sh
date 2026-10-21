@@ -38,15 +38,6 @@ fi
 : "${TSPI_VENDOR_KERNEL_CONFIG:=n}"
 : "${TSPI_KERNEL_CONFIG_SOURCE:=}"
 : "${KERNEL_EXTRA_FRAGMENTS:=}"
-# rootfs 类型：debian（debootstrap，默认）| arbian（Armbian 官方镜像/rootfs 包）
-: "${ROOTFS_TYPE:=debian}"
-# Armbian 来源：本地路径或 URL，支持 .img/.img.xz/.img.zst/.img.gz
-# 以及 .tar.zst/.tar.xz/.tar.gz（以 / 为根的 rootfs 包）
-: "${ARMBIAN_ROOTFS_SOURCE:=}"
-# auto = 取镜像里最大的 ext4 分区；也可以指定分区号（如 2）
-: "${ARMBIAN_ROOTFS_PART:=auto}"
-# n = 删掉 Armbian 镜像自带的 /boot 与 /lib/modules（本项目用自己编的内核）
-: "${ARMBIAN_KEEP_BOOT:=n}"
 : "${DEBIAN_RELEASE:=trixie}"
 : "${DEBIAN_ARCH:=arm64}"
 : "${DEBIAN_MIRROR:=mirrors.tuna.tsinghua.edu.cn}"
