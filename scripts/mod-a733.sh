@@ -43,7 +43,7 @@ a733_env() {
 		gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 		python3 python3-setuptools swig rsync curl wget git
 		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio
-		dosfstools mtools u-boot-tools
+		dosfstools mtools u-boot-tools binutils-aarch64-linux-gnu
 	)
 	info "安装 A733 构建依赖（需要 sudo）..."
 	run_root apt-get update
@@ -166,6 +166,7 @@ cmd_a733_rootfs() {
 	# 只额外盖一层 A733 的 console/模块清单
 	ROOTFS_OVERLAY_EXTRA="${BSP_ROOT}/vendor/a733/overlay" \
 		INSTALL_AP6212_FIRMWARE=n \
+		ROOTFS_STRIP=y \
 		cmd_rootfs_micro "$@"
 }
 

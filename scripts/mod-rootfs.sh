@@ -80,6 +80,32 @@ rootfs_pack_ext4() {
 	run_root mkfs.ext4 -d "${root}" -L rootfs "${image}" "${image_size_mb}M"
 }
 
+# 裁剪目录里的 ELF 符号/调试段（Tina 裁剪指南 2.4.3）
+# 用 aarch64 的 strip，别用宿主 strip（x86 的 binutils 不一定带 aarch64 目标）
+rootfs_strip() {
+	local root="$1"
+	local strip_bin="${ROOTFS_STRIP_BIN:-aarch64-linux-gnu-strip}"
+	local before after
+
+	if [[ "${ROOTFS_STRIP:-n}" != "y" ]]; then
+		return 0
+	fi
+	if ! command -v "${strip_bin}" >/dev/null 2>&1; then
+		warn "没有 ${strip_bin}，跳过 strip（apt install binutils-aarch64-linux-gnu）"
+		return 0
+	fi
+
+	before="$(run_root du -sm "${root}" | cut -f1)"
+	info "strip 可执行文件与 .so（${strip_bin}）..."
+	# 跳过动态加载器（ld-*.so），只处理普通 ELF；非 ELF 会被 strip 拒绝，直接忽略
+	run_root find "${root}" -xdev -type f \
+		\( -perm -u+x -o -name '*.so' -o -name '*.so.*' \) \
+		! -name 'ld-*.so' ! -name 'ld-*.so.*' -print0 2>/dev/null |
+		xargs -0 -r "${strip_bin}" --strip-unneeded 2>/dev/null || true
+	after="$(run_root du -sm "${root}" | cut -f1)"
+	info "strip 完成: ${before} MB -> ${after} MB"
+}
+
 cmd_rootfs_debian() {
 	parse_build_flags "$@"
 	command -v debootstrap >/dev/null 2>&1 || die "缺少 debootstrap，请运行 ./bsp env"
@@ -177,6 +203,7 @@ cmd_rootfs_debian() {
 	cleanup_rootfs
 	trap - EXIT
 
+	rootfs_strip "${rootfs}"
 	rootfs_pack_ext4 "${rootfs}" "${image}"
 
 	info "完成:"
@@ -279,6 +306,7 @@ cmd_rootfs_micro() {
 	cleanup_micro
 	trap - EXIT
 
+	rootfs_strip "${rootfs}"
 	rootfs_pack_ext4 "${rootfs}" "${image}"
 
 	info "完成:"

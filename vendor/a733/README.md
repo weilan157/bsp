@@ -109,3 +109,33 @@ arch/arm/dts/sun60i-a733-cubie-a7z.dts      # 板级（model/compatible/外设�
 参考 [hqu-little-boy/archlinuxarm-a733](https://github.com/hqu-little-boy/archlinuxarm-a733)：
 它本身**不带** u-boot dts，也是用 `radxa/u-boot` + `allwinner-device` 这套源码；
 它的做法是把 `device-a733` 拷进 u-boot 树里再 `sed` 改 include 路径（我们用符号链接代替），
+## 启动裁剪（参考 Tina《系统裁剪开发指南》v1.8）
+
+文档是全志 2025.04 的《Tina Linux 系统裁剪开发指南》，主线是省 flash；1.1 也说明
+裁剪后"通常也会提升启动速度"，所以按它的条目挑了能落地的：
+
+| 文档条目 | 本项目做法 |
+|---|---|
+| 2.3.1 删除不使用的功能 | `microduck.config` 关掉 `KALLSYMS`、`ELF_CORE`、`PROC_KCORE`、`AIO`、`POSIX_MQUEUE`、`SYSV_IPC`；`SWAP`/`SHMEM` 保留（ZRAM 和日常程序要用） |
+| 2.3.2 删除不使用的驱动 | DRM/FB/GPU、USB、PCIe、以太网、多余文件系统都已关（见上文） |
+| 2.4.3 应用与库 strip | `ROOTFS_STRIP=y`，用 `aarch64-linux-gnu-strip --strip-unneeded` 处理可执行文件和 `.so`（跳过 `ld-*.so`）。实测只省 ~5 MB：Debian 的包本身已经 strip 过，这条对 buildroot 类 rootfs 才明显 |
+| 2.4.1 删冗余文件 | micro rootfs 已去文档/locale/apt lists；没有 strace/tcpdump 这类调试工具 |
+| 2.4.2 换小 C 库 | 仍用 glibc（musl 要整盘重编，收益大但工作量大），暂不做 |
+
+内核压缩（文档 2.3.3.4 的实测表，加载+解压总时间）：
+
+| 压缩 | 镜像 | 加载 | 解压 | 总时间 |
+|---|---|---|---|---|
+| GZIP | 2.31M | 124ms | 89ms | 213ms |
+| LZO | 2.53M | 136ms | 23ms | **159ms** |
+| LZ4 | 2.68M | 143ms | 27ms | **170ms** |
+| XZ | 1.95M | 104ms | 667ms | 771ms |
+
+结论：**要快就 LZO/LZ4，别用 XZ**。arm64 内核本身不支持自解压，压缩是在打包时由
+bootloader 做的；我们现在的 `pack` 是 `fatload Image` + `booti`（不压缩），以后如果让
+u-boot 解压（`Image.lz4` + u-boot lz4 支持），选 LZ4/LZO。
+
+文件系统压缩（2.4.4）：squashfs 更省空间但只读；micro 需要可写 + ZRAM，继续用 ext4。
+
+不适用：**2.1 boot0 裁剪、2.2 uboot 裁剪/压缩** —— 都在 longan 的 boot package 里做，
+我们的 `pack` 不生成 boot0/u-boot，这两块仍用官方产物。

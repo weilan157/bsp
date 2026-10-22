@@ -43,6 +43,8 @@ fi
 : "${PLATFORM:=rk3566}"
 # 是否给 rootfs 装 AP6212A 固件（Rockchip 泰山派专用；A733 分支关掉）
 : "${INSTALL_AP6212_FIRMWARE:=y}"
+# rootfs 打包前是否 strip（Tina 裁剪指南 2.4.3）
+: "${ROOTFS_STRIP:=n}"
 : "${ROOTFS_TYPE:=debian}"
 : "${DEBIAN_RELEASE:=trixie}"
 : "${DEBIAN_ARCH:=arm64}"
