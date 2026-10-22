@@ -1,0 +1,5 @@
+# 开机要加载的模块（microduck-wifi 里逐个 modprobe）
+# RK3566 / 泰山派 1M：bcmdhd（WiFi/BT-SDIO）、hci_uart（BT-UART）、ov5695（摄像头）
+bcmdhd
+hci_uart
+ov5695

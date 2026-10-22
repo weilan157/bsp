@@ -1,0 +1,9 @@
+# Cubie A7Z（A733）开机要加载的模块，microduck-wifi 里逐个 modprobe。
+#
+# 板载 WiFi/BT 芯片对应的驱动在 allwinner-bsp/drivers/net/wireless/ 下
+# （bcmdhd / aic8800 / rtl8xxx / xr829 / uwe5622 之一），
+# 具体模块名由 Radxa 的 kernel deb 决定，拿到板子后用
+#   ls /lib/modules/$(uname -r)/kernel/drivers/net/wireless/
+# 确认后取消注释，例如：
+# aic8800_fdrv
+# bcmdhd

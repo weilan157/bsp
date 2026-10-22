@@ -13,7 +13,7 @@ Debian rootfs 与 `update.img`。**不调用 SDK 的 `./build.sh`**。
 
 ```
 rockchip-bsp/
-├── bsp                      # 唯一构建入口
+├── bsp                      # 唯一构建入口（PLATFORM=rk3566 | a733）
 ├── config.env.example
 ├── vendor/
 │   ├── dts/rockchip/        # SDK 的 tspi-rk3566-*.dts / *.dtsi（7 个文件）
@@ -21,7 +21,8 @@ rockchip-bsp/
 │   ├── fit/boot.its         # FIT boot.img 模板（对齐 SDK 的 boot.its）
 │   ├── firmware/            # parameter.txt / package-file / ap6212 固件
 │   ├── patches/             # u-boot 补丁
-│   └── rootfs/              # debootstrap overlay + chroot 配置
+│   ├── rootfs/              # debootstrap overlay + chroot 配置（含 micro 精简版）
+│   └── a733/                # Cubie A7Z：精简 kernel config + rootfs overlay
 ├── scripts/
 │   ├── lib.sh               # 公共变量与工具函数
 │   ├── mod-env.sh
@@ -29,7 +30,8 @@ rockchip-bsp/
 │   ├── mod-uboot.sh
 │   ├── mod-kernel.sh
 │   ├── mod-rootfs.sh
-│   └── mod-pack.sh
+│   ├── mod-pack.sh
+│   └── mod-a733.sh          # A733：包装 Radxa 的 debian 打包流程
 ├── out/                     # 产物（不入库）
 └── sources/                 # 克隆的源码（不入库）
 ```
@@ -122,6 +124,34 @@ dmesg | grep microduck          # microduck: mounts done at 1.2s / zram at 1.3s 
 测法：串口抓 u-boot 的 `Boot …` 时间点；内核侧 `initcall_debug` 后再看
 `dmesg | grep microduck` 的差值。通用方法论可参考
 [Bootlin 的 boot-time principles](https://github.com/bootlin/training-materials/blob/master/slides/boot-time-principles/boot-time-principles.tex)。
+
+## Cubie A7Z（Allwinner A733）
+
+同一个仓库里用 `PLATFORM=a733` 切到瑞莎 Cubie A7Z（A733 / sun60i）。
+**不重写 Allwinner longan 流程**，直接复用 Radxa 官方的 Debian 打包仓库：
+
+| 组件 | 上游 | 说明 |
+|---|---|---|
+| kernel | `radxa-pkg/linux-a733` | submodule：`radxa/kernel`（5.15 BSP）+ `allwinner-bsp` + `allwinner-device`；dtb `sun60i-a733-cubie-a7z.dtb` |
+| u-boot | `radxa-pkg/u-boot-aw2501` | 含 boot0/SPL（`tools`/`arisc`/`dramlib`） |
+| 镜像 | `RadxaOS-SDK/rsdk` | Docker 里的 `rsdk` TUI，主板选 `radxa-a733`，产出 `output.img` |
+
+```bash
+cp config.env.example config.env
+./bsp config PLATFORM=a733
+./bsp env && ./bsp setup
+./bsp kernel     # defconfig + radxa.config + vendor/a733/microduck.config
+./bsp uboot      # u-boot + boot0
+./bsp rootfs     # 复用 microduck 的精简 rootfs（sysvinit + busybox + ZRAM）
+./bsp os         # 提示用 rsdk 出 output.img
+```
+
+精简策略与 RK3566 一致（无显示/GPU/USB/以太网），但**保留视频编解码**：
+`CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`
+（符号来自 `allwinner-bsp/drivers/ve/cedar-ve/Kconfig`）。
+
+> 状态：A733 这层是参考 Radxa 文档搭的集成层，宿主机没有 Docker/A733 板子，
+> `make build` 与 `rsdk` 均未实跑；详见 `vendor/a733/README.md`。
 
 ### 板级相关配置（与 SDK 对齐）
 
@@ -225,7 +255,8 @@ dtbo）、`drivers/net/lte`（RM310 4G 模组驱动）、AVB 签名（SDK 的 `b
 - `rk3576`：RK3576 / 泰山派 3M
 - `OrangePi-kyX1`：Orange Pi R2S（Ky X1）
 - `rk3566`：泰山派 1M RK3566（完整功能）
-- `microduck-tspi-rk3566`：**本分支**，在 rk3566 基础上做极致精简（5s 启动、ZRAM、开机扩容）
+- `microduck-tspi-rk3566`：在 rk3566 基础上做极致精简（5s 启动、ZRAM、开机扩容）
+- `cubie-a7z-a733`：**本分支**，Cubie A7Z（Allwinner A733），同样精简 + 视频编解码
 
 ## 在 WSL2 / Ubuntu 22.04.5 上的实测（2026-10-20）
 

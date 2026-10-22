@@ -49,6 +49,16 @@ all / 编译选项:
   ./bsp clean out              # 只清 out/
   ./bsp clean all              # 清编译产物（保留 sources/）
   ./bsp uboot --clean
+
+平台（config.env 里的 PLATFORM）:
+  rk3566   Rockchip 泰山派 1M（本文件默认流程：uboot/kernel/bootimg/rootfs/pack）
+  a733     Cubie A7Z / Allwinner A733，命令换成：
+             ./bsp env        # 安装 A733 构建依赖
+             ./bsp setup      # clone radxa-pkg/linux-a733 + u-boot-aw2501（含 submodule）
+             ./bsp kernel     # Radxa 打包流程，叠 vendor/a733/microduck.config
+             ./bsp uboot      # u-boot + boot0
+             ./bsp rootfs     # 复用 microduck 精简 rootfs
+             ./bsp os         # 提示用 rsdk 出 output.img
 EOF
 }
 
@@ -179,6 +189,26 @@ source "${SCRIPT_DIR}/mod-rootfs.sh"
 source "${SCRIPT_DIR}/mod-pack.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/mod-clean.sh"
+
+# ---------------- 平台分发 ----------------
+# PLATFORM=rk3566：Rockchip 泰山派流程（本文件的默认流程）
+# PLATFORM=a733  ：Cubie A7Z / Allwinner A733，走 Radxa 的 debian 打包流程
+if [[ "${PLATFORM}" == "a733" ]]; then
+	# shellcheck source=/dev/null
+	source "${SCRIPT_DIR}/mod-a733.sh"
+	case "${COMMAND}" in
+		env) cmd_a733_env ;;
+		setup) cmd_a733_setup ;;
+		kernel) cmd_a733_kernel ;;
+		uboot|u-boot) cmd_a733_uboot ;;
+		rootfs) cmd_a733_rootfs "${ARGS[@]+"${ARGS[@]}"}" ;;
+		os|image) cmd_a733_os ;;
+		*)
+			die "PLATFORM=a733 下支持: env / setup / kernel / uboot / rootfs / os（./bsp help）"
+			;;
+	esac
+	exit 0
+fi
 
 case "${COMMAND}" in
 	env) cmd_env "${ARGS[@]+"${ARGS[@]}"}" ;;

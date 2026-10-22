@@ -1,14 +1,19 @@
 #!/bin/sh
-# 后台：加载 WiFi/BT/摄像头驱动，有 SSID 配置才连网
-/usr/sbin/modprobe bcmdhd   2>/dev/null
-/usr/sbin/modprobe hci_uart 2>/dev/null
-/usr/sbin/modprobe ov5695   2>/dev/null
+# 后台：按 /etc/microduck-modules 加载驱动，有 SSID 配置才连网
+if [ -f /etc/microduck-modules ]; then
+	while read -r m; do
+		case "$m" in
+			''|\#*) continue ;;
+		esac
+		/usr/sbin/modprobe "$m" 2>/dev/null
+	done < /etc/microduck-modules
+fi
 
 CONF=/etc/wpa_supplicant/wpa_supplicant.conf
 [ -f "$CONF" ] || exit 0
 grep -q '^[[:space:]]*network=' "$CONF" || exit 0
 
-# 等 wlan0 出现（bcmdhd 异步 probe）
+# 等 wlan0 出现（驱动异步 probe）
 i=0
 while [ ! -e /sys/class/net/wlan0 ] && [ $i -lt 30 ]; do
 	sleep 0.1

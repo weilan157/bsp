@@ -1,0 +1,9 @@
+# microduck（Cubie A7Z / A733）inittab
+id:2:initdefault:
+si::sysinit:/etc/init.d/rcS
+
+# A733 的调试串口是 ttyS0，115200
+ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100
+
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r

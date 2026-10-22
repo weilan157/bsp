@@ -40,6 +40,9 @@ fi
 : "${KERNEL_EXTRA_FRAGMENTS:=}"
 # rootfs 类型：debian（默认，debootstrap 无桌面）
 #           micro（microduck 精简版：sysvinit + busybox，ZRAM，开机扩容）
+: "${PLATFORM:=rk3566}"
+# 是否给 rootfs 装 AP6212A 固件（Rockchip 泰山派专用；A733 分支关掉）
+: "${INSTALL_AP6212_FIRMWARE:=y}"
 : "${ROOTFS_TYPE:=debian}"
 : "${DEBIAN_RELEASE:=trixie}"
 : "${DEBIAN_ARCH:=arm64}"

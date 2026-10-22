@@ -22,6 +22,7 @@ rootfs_umount() {
 # 路径与 kernel-config/tspi-1m.config 里的 BCMDHD_FW_PATH/NVRAM_PATH 一致
 install_ap6212_firmware() {
 	local root="$1"
+	[[ "${INSTALL_AP6212_FIRMWARE}" == "y" ]] || return 0
 	local src="${BSP_ROOT}/vendor/firmware/ap6212"
 	local f
 	[[ -d "${src}" ]] || return 0
@@ -225,6 +226,12 @@ cmd_rootfs_micro() {
 	if [[ -d "${overlay}" ]]; then
 		info "应用 micro overlay: ${overlay}"
 		run_root rsync -a --chown=root:root "${overlay}/" "${rootfs}/"
+	fi
+	if [[ -n "${ROOTFS_OVERLAY_EXTRA:-}" && -d "${ROOTFS_OVERLAY_EXTRA}" ]]; then
+		info "应用平台 overlay: ${ROOTFS_OVERLAY_EXTRA}"
+		run_root rsync -a --chown=root:root "${ROOTFS_OVERLAY_EXTRA}/" "${rootfs}/"
+	fi
+	if [[ -d "${overlay}" ]]; then
 		rootfs_fix_perms "${rootfs}"
 	fi
 	install_ap6212_firmware "${rootfs}"
@@ -260,6 +267,9 @@ cmd_rootfs_micro() {
 	if [[ -d "${overlay}" ]]; then
 		info "覆盖启动脚本（overlay 二次应用）"
 		run_root rsync -a --chown=root:root "${overlay}/" "${rootfs}/"
+		if [[ -n "${ROOTFS_OVERLAY_EXTRA:-}" && -d "${ROOTFS_OVERLAY_EXTRA}" ]]; then
+			run_root rsync -a --chown=root:root "${ROOTFS_OVERLAY_EXTRA}/" "${rootfs}/"
+		fi
 		rootfs_fix_perms "${rootfs}"
 		run_root chmod 755 "${rootfs}/etc/init.d/rcS" "${rootfs}"/usr/sbin/microduck-* \
 			"${rootfs}/usr/share/udhcpc/default.script" 2>/dev/null || true
