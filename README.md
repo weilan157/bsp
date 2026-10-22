@@ -145,7 +145,6 @@ cp config.env.example config.env
 ./bsp setup        # 官方 u-boot、kernel 6.6、allwinner-bsp、allwinner-device
 ./bsp uboot        # 官方 u-boot + boot0
 ./bsp kernel       # 挂 bsp/、拼 A7Z dts、defconfig+microduck.config -> Image + dtb
-./bsp mcu          # ARISC（E902/E907, RV32E）固件 -> scp.bin（需玄铁工具链）
 ./bsp rootfs       # micro 精简 rootfs
 ./bsp hal          # 检查 dtb 是否满足 HAT 的 BSP/HAL 基本要求
 ./bsp pack         # 按 sys_partition.fex 组 MBR 镜像

@@ -109,4 +109,3 @@ arch/arm/dts/sun60i-a733-cubie-a7z.dts      # 板级（model/compatible/外设�
 参考 [hqu-little-boy/archlinuxarm-a733](https://github.com/hqu-little-boy/archlinuxarm-a733)：
 它本身**不带** u-boot dts，也是用 `radxa/u-boot` + `allwinner-device` 这套源码；
 它的做法是把 `device-a733` 拷进 u-boot 树里再 `sed` 改 include 路径（我们用符号链接代替），
-另外还带了 8 个 ARISC 补丁让 stock 工具链能编 E902 固件（见 `mcu/README.md`）。

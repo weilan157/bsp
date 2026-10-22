@@ -58,7 +58,6 @@ all / 编译选项:
              ./bsp kernel     # defconfig + microduck.config + A7Z 板级 dts，出 Image/dtb
              ./bsp uboot      # 官方 u-boot + boot0（brandy）
              ./bsp rootfs     # 复用 microduck 精简 rootfs
-		             ./bsp mcu        # 编译 ARISC（E902/E907, RV32E）固件
 		             ./bsp hal        # 检查 dtb 是否满足 HAT 的 BSP/HAL 基本要求
              ./bsp pack       # 按 sys_partition.fex 组 MBR 镜像
 EOF
@@ -202,13 +201,12 @@ if [[ "${PLATFORM}" == "a733" ]]; then
 		env) cmd_a733_env ;;
 		setup) cmd_a733_setup ;;
 		kernel) cmd_a733_kernel ;;
-		mcu) cmd_a733_mcu ;;
 		uboot|u-boot) cmd_a733_uboot ;;
 		rootfs) cmd_a733_rootfs "${ARGS[@]+"${ARGS[@]}"}" ;;
 		hal) cmd_a733_hal ;;
 		pack) cmd_a733_pack ;;
 		*)
-			die "PLATFORM=a733 下支持: env / setup / uboot / kernel / mcu / rootfs / hal / pack（./bsp help）"
+			die "PLATFORM=a733 下支持: env / setup / uboot / kernel / rootfs / hal / pack（./bsp help）"
 			;;
 	esac
 	exit 0
