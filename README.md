@@ -127,45 +127,38 @@ dmesg | grep microduck          # microduck: mounts done at 1.2s / zram at 1.3s 
 
 ## Cubie A7Z（Allwinner A733）
 
-同一个仓库里用 `PLATFORM=a733` 切到瑞莎 Cubie A7Z（A733 / sun60i）。
-**不重写 Allwinner longan 流程**，直接复用 Radxa 官方的 Debian 打包仓库：
+同一个仓库里用 `PLATFORM=a733` 切到瑞莎 Cubie A7Z（A733 / sun60iw2p1）。
+结构与 `rk3566` 分支对齐：**官方 u-boot + 官方内核 + 自定义裁剪 rootfs + 板级设备树**。
 
 | 组件 | 上游 | 说明 |
 |---|---|---|
-| kernel | `radxa-pkg/linux-a733` | submodule：`radxa/kernel`（5.15 BSP）+ `allwinner-bsp` + `allwinner-device`；dtb `sun60i-a733-cubie-a7z.dtb` |
-| u-boot | `radxa-pkg/u-boot-aw2501` | 含 boot0/SPL（`tools`/`arisc`/`dramlib`） |
-| 镜像 | `RadxaOS-SDK/rsdk` | Docker 里的 `rsdk` TUI，主板选 `radxa-a733`，产出 `output.img` |
+| u-boot | `radxa/u-boot` @ `cubie-aiot-v1.4.6` | Allwinner u-boot 2018.07 + boot0/brandy（`sun60iw2p1_a733_defconfig`） |
+| kernel | `radxa/kernel` @ `allwinner-aiot-linux-6.6` | 全志 6.6 BSP（6.6.98） |
+| BSP | `radxa/allwinner-bsp` @ `cubie-aiot-v1.4.8` | `drivers/ve`（编解码）、`configs/linux-6.6/*.dtsi` |
+| 设备树 | `radxa/allwinner-device` @ `device-a733-v1.4.8` | `configs/cubie_a7z/linux-6.6/board.dts`、`sys_partition.fex` |
+| rootfs | 本仓库 `vendor/rootfs/micro` | sysvinit + busybox + ZRAM + 开机扩容 |
 
 ```bash
 cp config.env.example config.env
 ./bsp config PLATFORM=a733
-./bsp env && ./bsp setup
-./bsp kernel     # defconfig + radxa.config + vendor/a733/microduck.config
-./bsp uboot      # u-boot + boot0
-./bsp rootfs     # 复用 microduck 的精简 rootfs（sysvinit + busybox + ZRAM）
-./bsp os         # 提示用 rsdk 出 output.img
+./bsp env          # 交叉链 / dtc / dosfstools / mtools / mkimage
+./bsp setup        # 官方 u-boot、kernel 6.6、allwinner-bsp、allwinner-device
+./bsp uboot        # 官方 u-boot + boot0
+./bsp kernel       # 挂 bsp/、拼 A7Z dts、defconfig+microduck.config -> Image + dtb
+./bsp rootfs       # micro 精简 rootfs
+./bsp pack         # 按 sys_partition.fex 组 MBR 镜像
 ```
 
 精简策略与 RK3566 一致（无显示/GPU/USB/以太网），但**保留视频编解码**：
 `CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`
 （符号来自 `allwinner-bsp/drivers/ve/cedar-ve/Kconfig`）。
 
-### 可选：全志官方 6.6 内核
+镜像按板厂 `sys_partition.fex`：MBR 保留区 16 MB（boot0@8K、u-boot@128K）+
+boot-resource 32 MB + env 16 MB + boot 96 MB（FAT32：Image/dtb/boot.scr）+
+rootfs 7.27 GB（我们的 ext4）+ private 16 MB。
 
-全志 v1.4.8 已经为 6.6 提供 A7Z 的板级文件，把 `A733_KERNEL_VERSION` 改成 `6.6` 即可：
-
-```bash
-./bsp config A733_KERNEL_VERSION=6.6
-./bsp setup      # kernel@allwinner-aiot-linux-6.6 + bsp@v1.4.8 + device@v1.4.8
-./bsp kernel     # 自动挂 bsp/、拼 sun60i-a733-cubie-a7z.dts，出 Image + dtb
-```
-
-组合是官方配套的：`device-a733-v1.4.8/configs/cubie_a7z/linux-6.6/board.dts` +
-`allwinner-bsp@cubie-aiot-v1.4.8/configs/linux-6.6/sun60iw2p1.dtsi` + 6.6 内核。
-**已实测**：这套 dts 在 6.6 内核树上 `cpp + dtc` 编译通过（156365 字节 dtb，含 `ve@`/`codec`）。
-
-> 状态：A733 这层是参考 Radxa 文档搭的集成层，宿主机没有 Docker/A733 板子，
-> `make build` 与 `rsdk` 均未实跑；详见 `vendor/a733/README.md`。
+> 状态：6.6 的设备树已实测 `cpp + dtc` 编译通过（156365 字节 dtb，含 `ve@`/`codec`）；
+> u-boot 的 brandy 构建与真机启动尚未验证，详见 `vendor/a733/README.md`。
 
 ### 板级相关配置（与 SDK 对齐）
 
