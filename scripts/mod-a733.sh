@@ -181,7 +181,7 @@ cmd_a733_hal() {
 	check "ToF VL53L5CX @0x29" 'vl53l5cx'
 	check "BMI088 accel @0x19 / gyro @0x68" 'bmi088'
 	check "I2S0 音频（soundcard-mach）" 'i2s0_mach'
-	check "关机检测 PB3（gpio-keys）" 'hat-power-detect'
+	check "关机检测 PB2（gpio-keys）" 'hat-power-detect'
 	if [[ "${A733_WITH_CAMERA:-n}" == "y" ]]; then
 		check "摄像头 IMX219（VIN sensor0）" 'imx219'
 	fi

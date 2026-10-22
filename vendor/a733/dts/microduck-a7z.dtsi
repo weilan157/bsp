@@ -1,3 +1,14 @@
+/* 40-pin 排针（J11）映射——按原理图 40PIN Connector 页核对：
+ *   3/5    TWI7_SDA/TWI7_SCK        → &twi7（HAT I2C@400k）
+ *   7/11   PB0/PB1                   → 未用
+ *   13/15  PL6_3V3/PL7_3V3           → 未用（PL7 = BMI088 INT）
+ *   19/21/23/24 SPI1_MOSI/MISO/CLK/CS0 → 未用
+ *   27/28  TWI2-SDA/TWI2-SCK         → 未用（HAT ID EEPROM DNP）
+ *   31/33  PB2/PB3                   → PB2 = 关机检测；PB3 未用
+ *   8/10   CPUX-TX/RX（UART0）       → 舵机总线
+ *   12/35/36/38/40 I2S0 BCLK/LRCK/MCLK/DIN0/DOUT0 → 音频
+ *   16/18 PJ24/PJ25_3V3, 22 PL5_3V3, 32 PM5_3V3, 37 PM4_3V3 → 电源
+ */
 // microduck HAT 适配（Cubie A7Z / Allwinner A733）
 //
 // ./bsp kernel 会把官方 board.dts 存成 board-a7z.dts，生成：
@@ -123,9 +134,10 @@
 
 /* =====================================================================
  * 4. 离散 GPIO
- *    pin 31 = PB3：HAT 关机检测 → gpio-keys（KEY_POWER）
+ *    pin 31 = PB2：HAT 关机检测 → gpio-keys（KEY_POWER）
+ *    pin 33 = PB3：本设计未用
  *    pin 15 = PL7：BMI088 中断，软件不用，留空
- *    pin 27/28 = PD16/PD17：HAT ID I2C（EEPROM DNP），留空
+ *    pin 27/28 = TWI2-SDA/SCK：HAT ID I2C（EEPROM DNP），留空
  * ===================================================================== */
 / {
 	gpio-keys {
@@ -134,7 +146,7 @@
 
 		hat_power_detect: hat-power-detect {
 			label = "hat-power-detect";
-			gpios = <&pio PB 3 GPIO_ACTIVE_LOW>;
+			gpios = <&pio PB 2 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_POWER>;
 			wakeup-source;
 		};

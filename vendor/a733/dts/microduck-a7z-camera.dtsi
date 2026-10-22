@@ -8,6 +8,10 @@
 //   - MCLK：MCSIB-MCLK → C120 10pF → J5 CAM0-CLK（SoC 侧 MCLK0）
 //   - 供电：3V3_CAM1（FB1，2.5A）、5V_CAM1、VCC-PE、VCC5V0_SYS
 //
+// SoC ball map 提示：MCSI-SCK/SDA 经 33R（RV1）接到 PE2/PE3（球 B4/A4，
+// 可选功能分别是 TWI2-SDA / TWI3-SCK），MCSI-MCLK 是 PE5（CSI0-MCLK）。
+// PE2/PE3 上 TWI3 的复用还需要用 pinctrl 表确认后再写死。
+//
 // 全志 VIN 的传感器不是靠 port/endpoint 接的，而是在 &sensor0 里按
 // sensorN_mname 填驱动名（BSP: drivers/vin/modules/sensor/imx219.c，
 // SENSOR_NAME "imx219"、I2C_ADDR 0x20）。
