@@ -88,3 +88,25 @@ cp config.env.example config.env
   需要按 Allwinner longan 的方式补 `dramlib`/`arisc`/`tools` 后再编；
 - boot0/u-boot 的写入偏移（8 KiB / 128 KiB）按 Allwinner 惯例，需上板确认；
 - `boot.scr` 里的 `mmc 0:3`/`/dev/mmcblk0p4` 与分区表一致，但实际启动需真机验证。
+
+## u-boot 设备树
+
+u-boot 的板级 dts 在 **u-boot 源码里**，不是单独一份文件：
+
+```
+arch/arm/dts/sun60i-a733-cubie-a7z.dts      # 板级（model/compatible/外设）
+   └─ #include "../../../../device-a733/configs/cubie_a7z/uboot-board.dts"   # allwinner-device
+```
+
+那个 `../../../../` 是相对 **u-boot 源码的父目录**，所以 `./bsp uboot` 会先做两件事：
+
+1. `ln -sfn sources/a733/device sources/a733/device-a733` —— 让 include 能落到 device 仓库；
+2. 修 Allwinner 源码里的宏名拼写错误 `_SUNXI_PMIS_BUS_H` → `_SUNXI_PMIC_BUS_H`（新版 GCC 下会重定义）。
+
+**已实测**：按这个布局对 `sun60i-a733-cubie-a7z.dts` 做 `cpp + dtc`，通过，40669 字节 dtb，
+`uboot-board.dts` 的内容确实被 include 进来了。
+
+参考 [hqu-little-boy/archlinuxarm-a733](https://github.com/hqu-little-boy/archlinuxarm-a733)：
+它本身**不带** u-boot dts，也是用 `radxa/u-boot` + `allwinner-device` 这套源码；
+它的做法是把 `device-a733` 拷进 u-boot 树里再 `sed` 改 include 路径（我们用符号链接代替），
+另外还带了 8 个 ARISC 补丁让 stock 工具链能编 E902 固件（见 `mcu/README.md`）。

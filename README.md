@@ -155,6 +155,9 @@ cp config.env.example config.env
 `CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`
 （符号来自 `allwinner-bsp/drivers/ve/cedar-ve/Kconfig`）。
 
+u-boot 的板级 dts 在 u-boot 源码里（`arch/arm/dts/sun60i-a733-cubie-a7z.dts`），
+它 include 了 `device-a733/configs/cubie_a7z/uboot-board.dts`，`./bsp uboot` 会自动把 device 仓库挂成 `device-a733`。
+
 HAT 适配的设备树在 `vendor/a733/dts/microduck-a7z.dtsi`：UART0=PB9/PB10、TWI7=PJ22/PJ23（400 kHz）、
 I2S0=PB4/5/6/7/8 + TLV320AIC3104、关机检测 PB3，显示/HDMI 关掉。
 

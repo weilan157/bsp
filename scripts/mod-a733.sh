@@ -88,6 +88,20 @@ cmd_a733_uboot() {
 	local u="${A733_UBOOT_DIR}"
 	[[ -d "${u}" ]] || die "请先 ./bsp setup"
 
+	# u-boot 的板级 dts（arch/arm/dts/sun60i-a733-cubie-a7z.dts）最后一行是
+	#   #include "../../../../device-a733/configs/cubie_a7z/uboot-board.dts"
+	# 相对路径指到 u-boot 的父目录，所以把 device 仓库挂成 device-a733
+	# （archlinuxarm-a733 是把 device 目录拷进 u-boot 再 sed 路径，效果一样）。
+	[[ -f "${A733_DEVICE_DIR}/configs/cubie_a7z/uboot-board.dts" ]] || \
+		warn "device 仓库里没有 configs/cubie_a7z/uboot-board.dts"
+	ln -sfn "${A733_DEVICE_DIR}" "${A733_DIR}/device-a733"
+
+	# Allwinner 源码里的宏名拼写错误（PMIS→PMIC），新版 GCC 下会重定义报错
+	local h
+	for h in "${u}/arch/arm/include/asm/arch-sunxi/pmic_bus.h" \
+	         "${u}/arch/riscv/include/asm/arch-sunxi/pmic_bus.h"; do
+		[[ -f "${h}" ]] && sed -i 's/_SUNXI_PMIS_BUS_H/_SUNXI_PMIC_BUS_H/g' "${h}"
+	done
 	info "编译 u-boot + boot0（board=${A733_BRANDY_DEFCONFIG}）..."
 	if [[ -x "${u}/build.sh" ]]; then
 		(cd "${u}" && ./build.sh "${A733_BRANDY_DEFCONFIG}")
