@@ -27,11 +27,19 @@ A733_CROSS_COMPILE="${A733_CROSS_COMPILE:-aarch64-linux-gnu-}"
 A733_BRANDY_DEFCONFIG="${A733_BRANDY_DEFCONFIG:-sun60iw2p1_a733_defconfig}"
 A733_IMAGE_NAME="${A733_IMAGE_NAME:-a733-micro.img}"
 
+# ARISC（E902/E907 类 RV32E 核）固件：Allwinner 的 ar100s SDK
+A733_ARISC_REPO="${A733_ARISC_REPO:-https://gitlab.com/tina5.0_aiot/lichee/arisc.git}"
+A733_ARISC_BRANCH="${A733_ARISC_BRANCH:-product-aiot-stable}"
+A733_ARISC_DEFCONFIG="${A733_ARISC_DEFCONFIG:-sun60iw2p1_defconfig}"
+# 玄铁（XuanTie）riscv64-unknown-elf 工具链的 bin 目录（含 mtvt 等 ECLIC CSR 支持）
+A733_MCU_TOOLCHAIN="${A733_MCU_TOOLCHAIN:-}"
+
 A733_DIR="${SOURCES_DIR}/a733"
 A733_UBOOT_DIR="${A733_DIR}/uboot"
 A733_KERNEL_DIR="${A733_DIR}/k6.6"
 A733_BSP_DIR="${A733_DIR}/bsp"
 A733_DEVICE_DIR="${A733_DIR}/device"
+A733_ARISC_DIR="${A733_DIR}/arisc"
 A733_OUT="${OUT_DIR}/a733"
 
 a733_env() {
@@ -66,11 +74,13 @@ cmd_a733_setup() {
 	a733_clone "${A733_KERNEL_SRC_REPO}" "${A733_KERNEL_DIR}" "kernel（官方）" "${A733_KERNEL_SRC_BRANCH}"
 	a733_clone "${A733_BSP_REPO}" "${A733_BSP_DIR}" "allwinner-bsp" "${A733_BSP_BRANCH}"
 	a733_clone "${A733_DEVICE_REPO}" "${A733_DEVICE_DIR}" "allwinner-device" "${A733_DEVICE_BRANCH}"
+	a733_clone "${A733_ARISC_REPO}" "${A733_ARISC_DIR}" "arisc（ARISC/E902 固件）" "${A733_ARISC_BRANCH}"
 	info "源码就绪:"
 	info "  u-boot: ${A733_UBOOT_DIR}"
 	info "  kernel: ${A733_KERNEL_DIR}"
 	info "  bsp:    ${A733_BSP_DIR}"
 	info "  device: ${A733_DEVICE_DIR}"
+	info "  arisc:  ${A733_ARISC_DIR}"
 }
 
 # 官方 u-boot（2018.07 + brandy）：用仓库自带的 build.sh
@@ -154,6 +164,41 @@ cmd_a733_rootfs() {
 		cmd_rootfs_micro "$@"
 }
 
+# ARISC（E902/E907 类 RV32E 核）固件：Allwinner ar100s SDK
+a733_mcu_toolchain_ok() {
+	local gcc="$1"
+	command -v "${gcc}" >/dev/null 2>&1 || return 1
+	# ECLIC 的 mtvt 是玄铁私有 CSR，stock 工具链会报 unknown CSR
+	printf 'csrw mtvt, zero\n' | \
+		"${gcc}" -march=rv32emc -mabi=ilp32e -x assembler -c - -o /dev/null 2>/dev/null
+}
+
+cmd_a733_mcu() {
+	local gcc="riscv64-unknown-elf-gcc"
+
+	[[ -d "${A733_ARISC_DIR}/ar100s" ]] || die "请先 ./bsp setup（arisc 源码）"
+	[[ -n "${A733_MCU_TOOLCHAIN}" ]] && export PATH="${A733_MCU_TOOLCHAIN}:${PATH}"
+
+	if ! a733_mcu_toolchain_ok "${gcc}"; then
+		die "需要玄铁（XuanTie）riscv64-unknown-elf 工具链：
+ARISC 固件用了 ECLIC 的 mtvt 等 T-Head 私有 CSR，Ubuntu 自带的
+gcc-riscv64-unknown-elf 编不了（已实测报 unknown CSR 'mtvt'）。
+把玄铁工具链解压后指定 bin 目录：
+  ./bsp config A733_MCU_TOOLCHAIN=/path/to/riscv64-unknown-elf/bin
+  ./bsp mcu"
+	fi
+
+	info "编译 ARISC 固件（${A733_ARISC_DEFCONFIG}）..."
+	make -C "${A733_ARISC_DIR}/ar100s" "${A733_ARISC_DEFCONFIG}"
+	make -C "${A733_ARISC_DIR}/ar100s" -j"$(job_count)"
+
+	mkdir -p "${A733_OUT}/mcu"
+	cp -f "${A733_ARISC_DIR}/ar100s/scp.bin" "${A733_OUT}/mcu/" 2>/dev/null || \
+		die "没找到 scp.bin（看 ar100s 的构建输出）"
+	cp -f "${A733_ARISC_DIR}/ar100s/scp.elf" "${A733_OUT}/mcu/" 2>/dev/null || true
+	info "ARISC 固件: ${A733_OUT}/mcu/scp.bin"
+	info "（加载由 longan 的 boot package 负责，本仓库暂未打包）"
+}
 # 检查编出来的 dtb 是否满足 HAT 的 BSP/HAL 基本要求
 cmd_a733_hal() {
 	local dtb="${A733_OUT}/kernel/${A733_DTS_NAME}.dtb"

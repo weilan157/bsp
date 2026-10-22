@@ -1,0 +1,71 @@
+# ARISC / E902(E907) 微控制器固件
+
+## 这个核是什么
+
+A733（sun60iw2p1）里的 ARISC 是一个 **RV32E** 核，Allwinner SDK 里的编译参数：
+
+```
+-march=rv32emc -mabi=ilp32e -mtune=e906     # arch/riscv/cpu 下是 e907/
+```
+
+所以它属于 **E902 / E906 / E907 同一族**（E902 是最小的 RV32E，E907 是它的增强版）。
+它在 always-on 域里跑，职责是**待机/电源管理**，Linux 侧通过 `sunxi-smc` + msgbox 和它通信
+（BSP 里 `drivers/smc/sunxi-smc.c`、`include/sunxi-smc.h`）。
+
+内存很小：`arch/riscv/plat-sun60iw2p1/ram.ld` 里
+`dram o = 0x40004000, l = 0x2C000`（约 176 KB），栈在 `0x4002EC00–0x4002F000`。
+
+## 全志的公开 SDK
+
+```
+https://gitlab.com/tina5.0_aiot/lichee/arisc.git   (branch: product-aiot-stable)
+```
+
+- `ar100s/`：ARISC 固件（platform `plat-sun60iw2p1`，defconfig `sun60iw2p1_defconfig`）
+- `ar100s/system/`：daemon / debugger / message_manager / notifier —— **不是 FreeRTOS**，
+  是 Allwinner 自己的小系统
+- 产物：`scp.bin`（由 longan 的 boot package 打进启动镜像，本仓库的 `pack` 暂未打包）
+
+## 工具链（关键限制）
+
+ARISC 用了 ECLIC（T-Head 中断控制器）的私有 CSR：
+
+```
+csrw mtvt, zero    # 玄铁扩展，stock 工具链报 unknown CSR 'mtvt'
+```
+
+- Ubuntu 自带的 `gcc-riscv64-unknown-elf`（10.2）编不了（本仓库实测确认）；
+- 仓库里 `tools/riscv64-elf-x86_64-20201104.tar.gz` 是 >100 MB 的大文件，
+  公开 git 里没有，要靠 `RESTORE_LARGE_FILES.sh` 从 Allwinner 的归档拉；
+- 正确做法：用玄铁（XuanTie）发布的 `riscv64-unknown-elf` 工具链。
+
+## 用法
+
+```bash
+./bsp config PLATFORM=a733
+./bsp setup                                   # 会 clone arisc
+./bsp config A733_MCU_TOOLCHAIN=/path/to/xuantie/riscv64-unknown-elf/bin
+./bsp mcu                                     # -> out/a733/mcu/scp.bin
+```
+
+没有配工具链时 `./bsp mcu` 会直接报错并提示，不会产出一个编不过的固件。
+
+## FreeRTOS 移植评估
+
+**能移植，但不是“换个 RTOS 就完事”**：
+
+1. FreeRTOS 有 RISC-V port，但上游 port 面向 CLINT/PLIC；E902/E907 的中断是 ECLIC，
+   需要带 ECLIC 支持的 port（玄铁 SDK 里有参考实现，或者自己写 `portASM.S`）。
+2. ARISC 固件不是独立的：Linux 的 cpuidle/standby、DRAM 调频都走它的 msgbox/SMC 协议。
+   换成 FreeRTOS 后要么把这套 ABI 重新实现（工作量最大），要么在 DT/内核里关掉待机。
+3. ARISC 在 always-on 域，能碰的外设有限（r_pio/r_uart 等），
+   **不适合**直接去驱 40-pin 上的舵机/IMU —— 那些还是走 A 核的 Linux。
+4. 建议路径：先用玄铁工具链把 `ar100s` 原样编出来跑通（验证工具链+加载），
+   再替换调度器和中断 port，最后按需保留 msgbox 心跳。
+
+## 现状
+
+- `./bsp setup` 会拉 arisc 源码；`./bsp mcu` 会做工具链检查（`mtvt`）后再编译；
+- 本机（Ubuntu 22.04 + stock riscv64-unknown-elf + picolibc 头）实测：
+  能过 host 工具和大部分目标文件，**卡在 `mtvt`/CLIC** → 必须换玄铁工具链；
+- `scp.bin` 的打包/加载（longan boot package）不在本仓库范围内，需要真机验证。
