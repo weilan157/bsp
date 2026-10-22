@@ -1,40 +1,75 @@
-// microduck A7Z 摄像头（IMX219）——可选模板
+// microduck A7Z 摄像头（IMX219）——A733 VIN + 4 通道 MIPI CSI
 //
-// A733 的摄像头走全志 VIN（media controller），传感器挂在某一路 TWI 上，
-// 通过 port/endpoint 连到 csi0/csi1/csi2。A7Z 的 MIPI CSI 连接器用哪一路，
-// 需要看板子原理图确认后再取消注释。
+// 依据 A7Z 原理图 CAMERA 页（J5，31-pin 相机座）：
+//   - MIPI CSI：D0..D3 + 时钟对（4 通道），MCSIB-CKN/CKP
+//   - 相机 I2C：TWI3-SCK / TWI3-SDA（J5 SDA/SCL）
+//   - 复位：MCSIB-RST-R → R83 0R → J5 RESET
+//   - 待机/掉电：MCSIB-STBY-R → R49 0R → J5 CAM1-PDNN
+//   - MCLK：MCSIB-MCLK → C120 10pF → J5 CAM0-CLK（SoC 侧 MCLK0）
+//   - 供电：3V3_CAM1（FB1，2.5A）、5V_CAM1、VCC-PE、VCC5V0_SYS
 //
-// 全志 VIN 的典型接法（把 twi3/csi0、GPIO、lane 数按原理图改）：
+// 全志 VIN 的传感器不是靠 port/endpoint 接的，而是在 &sensor0 里按
+// sensorN_mname 填驱动名（BSP: drivers/vin/modules/sensor/imx219.c，
+// SENSOR_NAME "imx219"、I2C_ADDR 0x20）。
 //
-// &vind0 {
-// 	status = "okay";
-// };
-//
-// &twi3 {
-// 	status = "okay";
-//
-// 	imx219: camera@10 {
-// 		compatible = "sony,imx219";
-// 		reg = <0x10>;
-// 		#address-cells = <1>;
-// 		#size-cells = <0>;
-// 		reset-gpios = <&pio PJ 0 GPIO_ACTIVE_LOW>;	/* 按原理图改 */
-// 		port {
-// 			imx219_ep: endpoint {
-// 				remote-endpoint = <&csi0_ep>;
-// 				bus-type = <4>;			/* MIPI CSI-2 */
-// 				clock-lane = <0>;
-// 				data-lanes = <1 2>;
-// 			};
-// 		};
-// 	};
-// };
-//
-// &csi0 {
-// 	status = "okay";
-// 	port {
-// 		csi0_ep: endpoint {
-// 			remote-endpoint = <&imx219_ep>;
-// 		};
-// 	};
-// };
+// 由 A733_WITH_CAMERA=y 打开（./bsp kernel 会把它 include 进来）。
+
+&vind0 {
+	status = "okay";
+};
+
+&csi0 {
+	status = "okay";
+};
+
+&mipi0 {
+	status = "okay";
+};
+
+&sensor0 {
+	status = "okay";
+	sensor0_mname = "imx219";
+	sensor0_twi_cci_id = <3>;	/* 相机 I2C 走 TWI3 */
+	sensor0_twi_addr = <0x20>;	/* imx219 7-bit 0x10 → 8-bit 0x20 */
+	sensor0_mclk_id = <0>;		/* MCSIB-MCLK → MCLK0 */
+	sensor0_pos = "rear";
+	sensor0_isp_used = <0>;
+	sensor0_fmt = <0>;
+	sensor0_stby_mode = <0>;
+	sensor0_vflip = <0>;
+	sensor0_hflip = <0>;
+
+	/*
+	 * 复位/待机是 SoC GPIO（MCSIB-RST-R / MCSIB-STBY-R），
+	 * 具体引脚在原理图 GPIO 页，确认后取消注释并填 PX/n：
+	 * sensor0_reset = <&pio PJ 0 GPIO_ACTIVE_HIGH>;
+	 * sensor0_pwdn  = <&pio PJ 1 GPIO_ACTIVE_HIGH>;
+	 */
+};
+
+/*
+ * 相机 I2C：TWI3（J5 的 TWI3-SCK/TWI3-SDA，400 kHz）。
+ * 引脚 mux 需要按原理图 GPIO 页确认后再打开：
+ *
+ * &twi3 {
+ * 	status = "okay";
+ * 	clock-frequency = <400000>;
+ * 	pinctrl-names = "default", "sleep";
+ * 	pinctrl-0 = <&twi3_cam_pins>;
+ * 	pinctrl-1 = <&twi3_cam_sleep>;
+ * };
+ * &pio {
+ * 	twi3_cam_pins: twi3-cam-pins {
+ * 		pins = "PJ0", "PJ1";		// 按原理图改
+ * 		function = "twi3";
+ * 		bias-pull-up;
+ * 	};
+ * 	twi3_cam_sleep: twi3-cam-sleep {
+ * 		pins = "PJ0", "PJ1";
+ * 		function = "gpio_in";
+ * 	};
+ * };
+ *
+ * 注意：imx219 驱动默认 2 data lane（V4L2_MBUS_CSI2_2_LANE），
+ * 连接器是 4 通道；要跑 4 lane 需要把驱动切到 4 lane 的寄存器表。
+ */
