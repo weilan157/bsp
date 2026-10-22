@@ -150,6 +150,20 @@ cp config.env.example config.env
 `CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`
 （符号来自 `allwinner-bsp/drivers/ve/cedar-ve/Kconfig`）。
 
+### 可选：全志官方 6.6 内核
+
+全志 v1.4.8 已经为 6.6 提供 A7Z 的板级文件，把 `A733_KERNEL_VERSION` 改成 `6.6` 即可：
+
+```bash
+./bsp config A733_KERNEL_VERSION=6.6
+./bsp setup      # kernel@allwinner-aiot-linux-6.6 + bsp@v1.4.8 + device@v1.4.8
+./bsp kernel     # 自动挂 bsp/、拼 sun60i-a733-cubie-a7z.dts，出 Image + dtb
+```
+
+组合是官方配套的：`device-a733-v1.4.8/configs/cubie_a7z/linux-6.6/board.dts` +
+`allwinner-bsp@cubie-aiot-v1.4.8/configs/linux-6.6/sun60iw2p1.dtsi` + 6.6 内核。
+**已实测**：这套 dts 在 6.6 内核树上 `cpp + dtc` 编译通过（156365 字节 dtb，含 `ve@`/`codec`）。
+
 > 状态：A733 这层是参考 Radxa 文档搭的集成层，宿主机没有 Docker/A733 板子，
 > `make build` 与 `rsdk` 均未实跑；详见 `vendor/a733/README.md`。
 

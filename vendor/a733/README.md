@@ -25,6 +25,35 @@
   模块清单改成让用户按板载 WiFi 芯片填写（`/etc/microduck-modules`）。
 - `scripts/mod-a733.sh`：`./bsp env/setup/kernel/uboot/rootfs/os` 的包装。
 
+## 内核 6.6（全志官方最新）
+
+全志 v1.4.8 已经同时提供 6.6 的板级文件，所以「A7Z 设备树 + 最新内核」是官方组合，
+不是硬凑：
+
+| 文件 | 来源 |
+|---|---|
+| `sun60i-a733-cubie-a7z.dts` | `allwinner-device@device-a733-v1.4.8` 的 `configs/cubie_a7z/linux-6.6/board.dts` |
+| `sun60iw2p1.dtsi` 等 SoC dtsi | `allwinner-bsp@cubie-aiot-v1.4.8` 的 `configs/linux-6.6/*.dtsi` |
+| 内核 | `radxa/kernel@allwinner-aiot-linux-6.6`（6.6.98） |
+
+6.6 的内核顶层 Makefile 自带 `drivers-y += bsp/` 与 `-I$(srctree)/bsp/include`，
+所以把 `allwinner-bsp` 放到内核树根的 `bsp/` 就能编进 `drivers/ve`（cedar-ve）、
+`drivers/rt-media` 等 BSP 驱动。
+
+**已实测**：在 6.6 的 `dts/allwinner` 里放入 `board.dts` + BSP 的
+`sun60iw2p1.dtsi`/`sun60iw2p1-cpu-vf.dtsi`，用 6.6 的 `include` 加 BSP 的
+`include` 做 `cpp + dtc`，**编译通过**（156365 字节 dtb，含 `ve@`、`codec` 节点）。
+
+```bash
+./bsp config PLATFORM=a733
+./bsp config A733_KERNEL_VERSION=6.6
+./bsp env && ./bsp setup     # 拉 kernel 6.6 + bsp v1.4.8 + device v1.4.8
+./bsp kernel                 # 自动装 bsp/、拼 dts、defconfig+microduck.config、出 Image+dtb
+```
+
+与 5.15 路线的区别：6.6 不产 deb，产物是 `out/a733/kernel/{Image,*.dtb}`；
+u-boot/boot0 与内核版本无关，仍走 5.15 的打包仓库。
+
 ## 用法
 
 ```bash
