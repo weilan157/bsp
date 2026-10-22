@@ -1,0 +1,40 @@
+// microduck A7Z 摄像头（IMX219）——可选模板
+//
+// A733 的摄像头走全志 VIN（media controller），传感器挂在某一路 TWI 上，
+// 通过 port/endpoint 连到 csi0/csi1/csi2。A7Z 的 MIPI CSI 连接器用哪一路，
+// 需要看板子原理图确认后再取消注释。
+//
+// 全志 VIN 的典型接法（把 twi3/csi0、GPIO、lane 数按原理图改）：
+//
+// &vind0 {
+// 	status = "okay";
+// };
+//
+// &twi3 {
+// 	status = "okay";
+//
+// 	imx219: camera@10 {
+// 		compatible = "sony,imx219";
+// 		reg = <0x10>;
+// 		#address-cells = <1>;
+// 		#size-cells = <0>;
+// 		reset-gpios = <&pio PJ 0 GPIO_ACTIVE_LOW>;	/* 按原理图改 */
+// 		port {
+// 			imx219_ep: endpoint {
+// 				remote-endpoint = <&csi0_ep>;
+// 				bus-type = <4>;			/* MIPI CSI-2 */
+// 				clock-lane = <0>;
+// 				data-lanes = <1 2>;
+// 			};
+// 		};
+// 	};
+// };
+//
+// &csi0 {
+// 	status = "okay";
+// 	port {
+// 		csi0_ep: endpoint {
+// 			remote-endpoint = <&imx219_ep>;
+// 		};
+// 	};
+// };

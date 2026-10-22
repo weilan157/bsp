@@ -2,8 +2,9 @@
 id:2:initdefault:
 si::sysinit:/etc/init.d/rcS
 
-# A733 的调试串口是 ttyS0，115200
-ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100
+# UART0（PB9/PB10）是舵机总线，不能挂 getty/console。
+# 本地调试用 tty1（无显示时看不到，但不占串口）；需要串口时改成 ttyGS0（USB gadget）。
+tty1::respawn:/sbin/getty -L tty1 vt100
 
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r

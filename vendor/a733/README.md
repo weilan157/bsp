@@ -38,6 +38,28 @@ cp config.env.example config.env
 ./bsp pack         # 按 sys_partition.fex 组 MBR 镜像
 ```
 
+## 设备树（HAT 适配）
+
+`dts/microduck-a7z.dtsi` 叠在官方 `board.dts` 之后（`./bsp kernel` 生成
+`sun60i-a733-cubie-a7z.dts` = `#include "board-a7z.dts"` + `#include "microduck-a7z.dtsi"`），
+对应主控移植清单：
+
+| HAT 信号 | RK3566 | A733（本 dts） |
+|---|---|---|
+| 舵机串口 | `/dev/ttyS2` | `&uart0` = **PB9/PB10**（pin 8/10）；官方 `uart0_pins_active` 的 pins 是空的，这里换成真实引脚 |
+| console | ttyS2 | 移到 `tty1`（`vendor/a733/boot.cmd`），UART0 只给舵机 |
+| I2C（codec/IMU/Stemma） | `/dev/i2c-3` | `&twi7` = **PJ22/PJ23**（pin 3/5），400 kHz → `/dev/i2c-7` |
+| 音频 codec | i2s3_2ch | `&i2s0_plat`/`&i2s0_mach` = **PB4/5/6/7/8**（pin 36/12/35/40/38），soundcard-mach 挂 `tlv320aic3104@0x18` |
+| 关机检测 | GPIO6 | `gpio-keys` on **PB3**（pin 31）→ `KEY_POWER` |
+| BMI088 中断 | GPIO22 | PL7，软件不用（未配） |
+| HAT ID I2C | GPIO0/1 | PD16/PD17，EEPROM DNP（未配） |
+| 显示 | HDMI | 关掉 `&de`/`&hdmi0`/`&hdmi_codec`，HDMI 音频 `&i2s3_*` 也关 |
+| 摄像头 IMX219 | rpi-camera-v2 | 模板 `dts/microduck-a7z-camera.dtsi`，`A733_WITH_CAMERA=y` 时才包含；A7Z 的 CSI 走哪路 TWI/CSI 需按原理图确认 |
+
+**已实测**：这套 dts（官方 board.dts + 本 dtsi）在 6.6 内核树上 `cpp + dtc` 编译通过，
+157272 字节 dtb，`twi7`/`tlv320aic3104`/`i2s0_plat`/`i2s0_mach`/`hat-power-detect`/`PB3`
+都在。用户态节点名（`/dev/ttyAS0` 还是 `/dev/ttyS0`、`i2c-7`）以驱动实际枚举为准。
+
 ## 镜像布局（来自 `sys_partition.fex`）
 
 | 区域 | 大小 | 内容 |

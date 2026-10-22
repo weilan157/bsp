@@ -1,0 +1,129 @@
+// microduck HAT 适配（Cubie A7Z / Allwinner A733）
+//
+// ./bsp kernel 会把官方 board.dts 存成 board-a7z.dts，生成：
+//   #include "board-a7z.dts"
+//   #include "microduck-a7z.dtsi"
+// 所以这里可以安全地覆盖/追加节点，不改官方文件。
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+
+/* =====================================================================
+ * 1. 舵机串口：UART0 = PB9/PB10（排针 pin 8/10）
+ *    波特率 1 Mbps、半双工由 HAT 硬件处理，DT 只负责把引脚给 UART0。
+ *    官方 board.dts 里 uart0_pins_active 是空的（pins = "", ""），这里换成
+ *    真实引脚；node 名不同，避免和官方节点重名。
+ * ===================================================================== */
+&pio {
+	uart0_servo_pins: uart0-servo-pins {
+		pins = "PB9", "PB10";
+		function = "uart0";
+		drive-strength = <10>;
+	};
+
+	uart0_servo_sleep: uart0-servo-sleep {
+		pins = "PB9", "PB10";
+		function = "gpio_in";
+		drive-strength = <10>;
+	};
+};
+
+&uart0 {
+	status = "okay";
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&uart0_servo_pins>;
+	pinctrl-1 = <&uart0_servo_sleep>;
+};
+
+/* 注意：console 不能再用 uart0，见 vendor/a733/boot.cmd（console=tty1）。
+ * 用户态的 /dev/ttyAS0（部分 BSP 是 /dev/ttyS0）由 8250 驱动生成，
+ * 具体名字上板后 ls /dev/tty* 确认。 */
+
+/* =====================================================================
+ * 2. I2C：TWI7 = PJ22/PJ23（排针 pin 3/5）→ /dev/i2c-7
+ *    挂 HAT 上的 TLV320AIC3104（0x18）、BMI088、Stemma。
+ *    400 kHz 由 clock-frequency 指定。
+ * ===================================================================== */
+&twi7 {
+	status = "okay";
+	clock-frequency = <400000>;
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&twi7_pins_default>;
+	pinctrl-1 = <&twi7_pins_sleep>;
+
+	audio_codec: tlv320aic3104@18 {
+		compatible = "ti,tlv320aic3104";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
+};
+
+/* =====================================================================
+ * 3. 音频 I2S0：PB5/PB6/PB7/PB8 = 排针 pin 12/35/40/38（BCLK/LRCK/DOUT/DIN），
+ *    MCLK 在 PB4（pin 36）。用 Allwinner 的 soundcard-mach 把 codec 挂上。
+ * ===================================================================== */
+&i2s0_plat {
+	status = "okay";
+	tdm-num = <0>;
+	tx-pin = <0 1 2 3>;
+	tx-pin0-map0 = <0x76543210>;
+	tx-pin0-map1 = <0xFEDCBA98>;
+	rx-pin = <0>;
+	dai-type = "i2s";
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&i2s0_pins_a>, <&i2s0_pins_b>, <&i2s0_pins_c>,
+		    <&i2s0_pins_e>, <&i2s0_pins_d>;
+	pinctrl-1 = <&i2s0_pins_f>;
+};
+
+&i2s0_mach {
+	status = "okay";
+	soundcard-mach,codec {
+		sound-dai = <&audio_codec>;
+	};
+};
+
+/* HDMI 音频不再使用（micro 镜像无显示） */
+&i2s3_plat {
+	status = "disabled";
+};
+&i2s3_mach {
+	status = "disabled";
+};
+
+/* =====================================================================
+ * 4. 离散 GPIO
+ *    pin 31 = PB3：HAT 关机检测 → gpio-keys（KEY_POWER）
+ *    pin 15 = PL7：BMI088 中断，软件不用，留空
+ *    pin 27/28 = PD16/PD17：HAT ID I2C（EEPROM DNP），留空
+ * ===================================================================== */
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+		status = "okay";
+
+		hat_power_detect: hat-power-detect {
+			label = "hat-power-detect";
+			gpios = <&pio PB 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_POWER>;
+			wakeup-source;
+		};
+	};
+};
+
+/* =====================================================================
+ * 5. 显示：micro 镜像不需要，关掉 DE/HDMI，省启动时间
+ * ===================================================================== */
+&de {
+	status = "disabled";
+};
+&hdmi0 {
+	status = "disabled";
+};
+&hdmi_codec {
+	status = "disabled";
+};
+
+/* 摄像头（IMX219）单独放在 microduck-a7z-camera.dtsi，默认不启用：
+ * A7Z 的 MIPI CSI 连接器用哪路 TWI/CSI，需要按板子原理图确认。 */

@@ -153,6 +153,9 @@ cp config.env.example config.env
 `CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`
 （符号来自 `allwinner-bsp/drivers/ve/cedar-ve/Kconfig`）。
 
+HAT 适配的设备树在 `vendor/a733/dts/microduck-a7z.dtsi`：UART0=PB9/PB10、TWI7=PJ22/PJ23（400 kHz）、
+I2S0=PB4/5/6/7/8 + TLV320AIC3104、关机检测 PB3，显示/HDMI 关掉。
+
 镜像按板厂 `sys_partition.fex`：MBR 保留区 16 MB（boot0@8K、u-boot@128K）+
 boot-resource 32 MB + env 16 MB + boot 96 MB（FAT32：Image/dtb/boot.scr）+
 rootfs 7.27 GB（我们的 ext4）+ private 16 MB。

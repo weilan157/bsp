@@ -108,11 +108,21 @@ cmd_a733_kernel() {
 	# 1) 6.6 内核顶层 Makefile 已有 drivers-y += bsp/ 与 -I$(srctree)/bsp/include
 	ln -sfn "${b}" "${k}/bsp"
 
-	# 2) SoC dtsi（BSP）+ 板级 board.dts（device）
+	# 2) SoC dtsi（BSP）+ 板级 board.dts（device）+ microduck 的 HAT 适配
 	dstdir="${k}/arch/arm64/boot/dts/allwinner"
 	info "安装 dts: ${A733_DTS_NAME}"
 	cp -f "${b}"/configs/linux-6.6/*.dtsi "${dstdir}/"
-	cp -f "${d}/configs/cubie_a7z/linux-6.6/board.dts" "${dstdir}/${A733_DTS_NAME}.dts"
+	cp -f "${d}/configs/cubie_a7z/linux-6.6/board.dts" "${dstdir}/board-a7z.dts"
+	cp -f "${BSP_ROOT}/vendor/a733/dts/microduck-a7z.dtsi" "${dstdir}/"
+	{
+		echo "// 由 ./bsp kernel 生成：官方 board.dts + microduck HAT 适配"
+		echo '#include "board-a7z.dts"'
+		echo '#include "microduck-a7z.dtsi"'
+		if [[ "${A733_WITH_CAMERA:-n}" == "y" ]]; then
+			cp -f "${BSP_ROOT}/vendor/a733/dts/microduck-a7z-camera.dtsi" "${dstdir}/"
+			echo '#include "microduck-a7z-camera.dtsi"'
+		fi
+	} > "${dstdir}/${A733_DTS_NAME}.dts"
 	grep -q "${A733_DTS_NAME}.dtb" "${dstdir}/Makefile" || \
 		echo "dtb-\$(CONFIG_ARCH_SUNXI) += ${A733_DTS_NAME}.dtb" >> "${dstdir}/Makefile"
 
