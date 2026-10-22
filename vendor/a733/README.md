@@ -35,6 +35,7 @@ cp config.env.example config.env
 ./bsp uboot        # 官方 u-boot + boot0（走仓库自带 build.sh）
 ./bsp kernel       # 挂 bsp/、拼 A7Z dts、defconfig+microduck.config、出 Image+dtb
 ./bsp rootfs       # micro 精简 rootfs
+./bsp hal          # 检查 dtb 是否满足 HAT 的 BSP/HAL 基本要求
 ./bsp pack         # 按 sys_partition.fex 组 MBR 镜像
 ```
 
@@ -48,7 +49,7 @@ cp config.env.example config.env
 |---|---|---|
 | 舵机串口 | `/dev/ttyS2` | `&uart0` = **PB9/PB10**（pin 8/10）；官方 `uart0_pins_active` 的 pins 是空的，这里换成真实引脚 |
 | console | ttyS2 | 移到 `tty1`（`vendor/a733/boot.cmd`），UART0 只给舵机 |
-| I2C（codec/IMU/Stemma） | `/dev/i2c-3` | `&twi7` = **PJ22/PJ23**（pin 3/5），400 kHz → `/dev/i2c-7` |
+| I2C（codec/IMU/Stemma） | `/dev/i2c-3` | `&twi7` = **PJ22/PJ23**（pin 3/5），400 kHz → `/dev/i2c-7`；设备：`tlv320aic3104@0x18`、`vl53l5cx@0x29`、`bmi088-accel@0x19` / `bmi088-gyro@0x68`（D1 版的 `lsm6dsv16x@0x6a` 注释着） |
 | 音频 codec | i2s3_2ch | `&i2s0_plat`/`&i2s0_mach` = **PB4/5/6/7/8**（pin 36/12/35/40/38），soundcard-mach 挂 `tlv320aic3104@0x18` |
 | 关机检测 | GPIO6 | `gpio-keys` on **PB3**（pin 31）→ `KEY_POWER` |
 | BMI088 中断 | GPIO22 | PL7，软件不用（未配） |

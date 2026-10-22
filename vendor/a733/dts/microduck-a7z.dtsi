@@ -41,8 +41,11 @@
 
 /* =====================================================================
  * 2. I2C：TWI7 = PJ22/PJ23（排针 pin 3/5）→ /dev/i2c-7
- *    挂 HAT 上的 TLV320AIC3104（0x18）、BMI088、Stemma。
- *    400 kHz 由 clock-frequency 指定。
+ *    HAT 上的设备（RPI Robot HAT，400 kHz）：
+ *      0x18 TLV320AIC3104  音频 codec（I2S 数据 + I2C 控制）
+ *      0x29 VL53L5CX       ToF（Stemma 座）
+ *      0x19 BMI088 加速度计 / 0x68 陀螺（焊了但官方软件不用，声明出来给 HAL）
+ *      0x6A LSM6DSV16X     D1 版 HAT 用它替代 BMI088（默认不打开）
  * ===================================================================== */
 &twi7 {
 	status = "okay";
@@ -57,6 +60,32 @@
 		#sound-dai-cells = <0>;
 		status = "okay";
 	};
+
+	tof: vl53l5cx@29 {
+		compatible = "st,vl53l5cx";
+		reg = <0x29>;
+		status = "okay";
+	};
+
+	bmi088_accel: bmi088-accel@19 {
+		compatible = "bosch,bmi088-accel";
+		reg = <0x19>;
+		status = "okay";
+	};
+
+	bmi088_gyro: bmi088-gyro@68 {
+		compatible = "bosch,bmi088-gyro";
+		reg = <0x68>;
+		status = "okay";
+	};
+
+	/* D1 版 HAT：BMI088 换成 LSM6DSV16X（0x6A），需要时取消注释
+	lsm6dsv16x@6a {
+		compatible = "st,lsm6dsv16x";
+		reg = <0x6a>;
+		status = "okay";
+	};
+	*/
 };
 
 /* =====================================================================

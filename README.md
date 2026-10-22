@@ -146,6 +146,7 @@ cp config.env.example config.env
 ./bsp uboot        # 官方 u-boot + boot0
 ./bsp kernel       # 挂 bsp/、拼 A7Z dts、defconfig+microduck.config -> Image + dtb
 ./bsp rootfs       # micro 精简 rootfs
+./bsp hal          # 检查 dtb 是否满足 HAT 的 BSP/HAL 基本要求
 ./bsp pack         # 按 sys_partition.fex 组 MBR 镜像
 ```
 

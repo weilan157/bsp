@@ -154,6 +154,40 @@ cmd_a733_rootfs() {
 		cmd_rootfs_micro "$@"
 }
 
+# 检查编出来的 dtb 是否满足 HAT 的 BSP/HAL 基本要求
+cmd_a733_hal() {
+	local dtb="${A733_OUT}/kernel/${A733_DTS_NAME}.dtb"
+	local txt fail=0
+
+	[[ -f "${dtb}" ]] || die "请先 ./bsp kernel（找不到 ${dtb}）"
+	txt="$(mktemp)"
+	dtc -I dtb -O dts "${dtb}" > "${txt}" 2>/dev/null || die "反编译 dtb 失败: ${dtb}"
+
+	check() {
+		local name="$1" pat="$2"
+		if grep -qE "${pat}" "${txt}"; then
+			printf '  [ok]   %s\n' "${name}"
+		else
+			printf '  [FAIL] %s\n' "${name}"
+			fail=1
+		fi
+	}
+
+	info "HAT BSP/HAL 检查: ${dtb}"
+	# 舵机：UART0 PB9/PB10，不被 console 占用（console 在 bootargs 里，见 boot.cmd）
+	check "舵机串口 uart0 = PB9/PB10" 'pins = "PB9'
+	check "I2C twi7 = PJ22/PJ23, 400 kHz" '0x61a80'
+	check "codec TLV320AIC3104 @0x18" 'tlv320aic3104'
+	check "ToF VL53L5CX @0x29" 'vl53l5cx'
+	check "BMI088 accel @0x19 / gyro @0x68" 'bmi088'
+	check "I2S0 音频（soundcard-mach）" 'i2s0_mach'
+	check "关机检测 PB3（gpio-keys）" 'hat-power-detect'
+
+	rm -f "${txt}"
+	[[ ${fail} -eq 0 ]] || die "HAT 检查有失败项（见上）"
+	info "HAT 基本要求全部满足"
+}
+
 # 按官方 sys_partition.fex 组 MBR 镜像：boot0@8K、u-boot@128K、分区从 16MB 开始
 cmd_a733_pack() {
 	local fex="${BSP_ROOT}/vendor/a733/sys_partition.fex"
