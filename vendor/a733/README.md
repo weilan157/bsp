@@ -158,4 +158,6 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 （那会把 mainline 的 dts 全编一遍，1-2 分钟）；增量构建整体约 11 秒。
 
 可选 `A733_KERNEL_COMPRESS=lz4`：额外生成 `Image.lz4`（37.7 MB → 14.7 MB，39%，
-`lz4 -l` legacy 格式），配合 u-boot 的 lz4 命令使用；默认仍是未压缩 `Image`。
+`lz4 -l` legacy 格式）。**注意**：radxa/u-boot 2018.07 的 `cmd/` 里没有 `lz4` 命令，
+也没有 lz4 的解压路径，所以这个产物目前只是留档/实验；要真用必须改 u-boot（加 lz4 命令或
+在 bootm 里解压），和“完全用官方 u-boot”的前提冲突。默认启动仍走未压缩 `Image`。
