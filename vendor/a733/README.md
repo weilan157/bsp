@@ -61,37 +61,47 @@ cp config.env.example config.env
 157272 字节 dtb，`twi7`/`tlv320aic3104`/`i2s0_plat`/`i2s0_mach`/`hat-power-detect`/`PB3`
 都在。用户态节点名（`/dev/ttyAS0` 还是 `/dev/ttyS0`、`i2c-7`）以驱动实际枚举为准。
 
-## 镜像布局（来自 `sys_partition.fex`）
+## 镜像布局（rsdk 官方布局）
+
+依据 `RadxaOS-SDK/rsdk` 的 `src/share/rsdk/build/image.jsonnet` 与
+`configs/socs.json`（a733：`partition_table_type=gpt`、`firmware_type=u-boot`），
+bootloader 偏移来自 u-boot 包里的 `setup.sh update_bootloader`（等价于
+`radxa-pkg/u-boot-aw2501` 的 `setup/u-boot_setup-allwinner-a733.sh`）：
 
 | 区域 | 大小 | 内容 |
 |---|---|---|
-| MBR 保留区 | 16 MB | **boot0 @128 KiB**、**`boot_package.fex` @12 MiB**（u-boot 的 TOC1 包） |
-| boot-resource | 32 MB | 留空（不放 logo） |
-| env | 16 MB | 留空（用 u-boot 默认环境） |
-| boot | 96 MB | FAT32：`Image`、`sun60i-a733-cubie-a7z.dtb`、`boot.scr` |
-| rootfs | 7.27 GB | `out/rootfs.ext4`（micro，开机 `resize2fs` 自适应） |
-| private | 16 MB | 留空（MBR 只有 4 个主分区槽位，这个分区只在镜像尾部占位） |
+| 0..16 MiB | 16 MiB | **boot0 @128 KiB**、boot0_ufs @2064 扇区、**`boot_package.fex` @12 MiB** |
+| p1 `config` | 16 MiB | FAT16，空分区（rsdk 的 `/config`，fstab 用 `UUID=` 挂载） |
+| p2 `rootfs` | 32 MiB..末尾 | ext4；`/boot/Image`、`/boot/<dtb>`、`/boot/boot.scr`、`/boot/extlinux/extlinux.conf` |
 
-镜像用 `truncate` 生成稀疏文件，`A733_IMAGE_NAME` 可改。
+`sys_partition.fex`（boot-resource/env/boot/rootfs/private 的板厂 MBR 布局）保留作参考，
+`./bsp pack` 已不再使用。
+
+`root=` 用 rootfs 的 `UUID=`（rsdk 的 image.jsonnet 也是把 extlinux.conf / cmdline 里的
+root 换成 `UUID=<rootfs>`）。这颗 u-boot 没有 `sysboot`/extlinux 支持，实际启动靠
+`distro_bootcmd` 扫描到 `/boot.scr` 后 `source`。
 
 ## 状态
 
 **已验证**（2026-10-23，WSL2 Ubuntu 22.04.5）：
 
-- A7Z 的 6.6 设备树（device 的 `board.dts` + BSP 的 `sun60iw2p1*.dtsi`）在 6.6 内核树上
-  `cpp + dtc` 编译通过（154 KiB dtb，含 `ve@`/`codec` 节点）；
-- `./bsp uboot`：官方 u-boot（AArch32，`ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-`）
-  编出 `u-boot.bin` 1.2 MB + `u-boot.dtb` 40 KB（`model = "Radxa Cubie A7Z"`），
+- A7Z 的 6.6 设备树（device 的 `board.dts` + BSP 的 `sun60iw2p1*.dtsi` + 我们的
+  `microduck-a7z.dtsi`）`cpp + dtc` 编译通过（154 KiB dtb，含 `ve@`/`codec` 节点）；
+- `./bsp uboot`：官方 u-boot（AArch32，`ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-`，
+  与官方打包仓库一致；告警用官方的 `EXTRA_CFLAGS="-Wno-…"` 关掉）编出
+  `u-boot.bin` 1.2 MB + `u-boot.dtb` 40 KB（`model = "Radxa Cubie A7Z"`），
   再用 `vendor/a733/mk_boot_package.py` 打成 TOC1 的 `boot_package.fex`（1.5 MB，
   结构与 Radxa 官方包逐字节对齐，除 `add_sum`）；
-- `./bsp pack`：生成 7.5 GB 稀疏 `a733-micro.img`，boot0@128 KiB、`boot_package.fex`@12 MiB、
-  MBR 四分区（boot-resource/env/boot/rootfs）、FAT32 boot 分区与 ext4 rootfs 都能正常挂载读取。
+- `./bsp pack`：按 rsdk 布局生成 379 MB 的 `a733-micro.img`——GPT、
+  boot0@128 KiB / boot0_ufs@2064 扇区 / `boot_package.fex`@12 MiB、
+  p1 `config` FAT16 @16 MiB、p2 `rootfs` ext4 @32 MiB，`/boot.scr` 与 extlinux.conf
+  都在 rootfs 的 `/boot` 下，fstab 的 UUID 与实际卷 UUID 一致。
 
 **未验证**（本机没有 A733 板子）：
 
-- boot0 → `boot_package.fex` 的实际加载（12 MiB 这个偏移来自板厂镜像 / OpenWrt 的
-  `radxa-cubie-a7z` setup 脚本，不是官方文档）；
-- `boot.scr` 里 `fatload mmc 0:3` / `root=/dev/mmcblk0p4` 的实机启动。
+- boot0 → `boot_package.fex` 的实际加载（12 MiB 偏移与 rsdk/厂商 setup 脚本一致，
+  但没有上板）；
+- `distro_bootcmd` 扫到 `/boot.scr` 后 `load mmc 0:2` / `booti` 的实机启动。
 
 ## u-boot 设备树
 

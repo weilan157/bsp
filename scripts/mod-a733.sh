@@ -109,10 +109,12 @@ cmd_a733_uboot() {
 	[[ -f "${u}/configs/${defconfig}" ]] || \
 		die "u-boot 里没有 configs/${defconfig}"
 
-	# GCC 11/12 会对 2018.07 的老代码报新的 -Werror 项，这里只降级为警告
-	local kcflags="-Wno-error=attributes -Wno-error=array-bounds -Wno-error=stringop-overflow"
-	kcflags="${kcflags} -Wno-error=maybe-uninitialized -Wno-error=stringop-truncation"
-	kcflags="${kcflags} -Wno-error=address-of-packed-member -Wno-error=misleading-indentation"
+	# GCC 11/12 会对 2018.07 的老代码报新的 -Werror 项。官方打包仓库
+	# （radxa-pkg/u-boot-aw2501 的 Makefile.local）用的是 EXTRA_CFLAGS 关掉这些告警，
+	# 这里保持一致。
+	local extra_cflags="-Wno-attributes -Wno-array-bounds -Wno-address-of-packed-member"
+	extra_cflags="${extra_cflags} -Wno-maybe-uninitialized -Wno-misleading-indentation"
+	extra_cflags="${extra_cflags} -Wno-stringop-overflow -Wno-stringop-truncation"
 
 	info "配置 u-boot: ${defconfig}（dt=${dt}）"
 	# u-boot 的 Makefile 以当前目录为 objtree，必须 cd 进去（make -C 会把
@@ -127,7 +129,7 @@ cmd_a733_uboot() {
 
 		info "编译 u-boot（ARCH=arm CROSS_COMPILE=${cc}）..."
 		make ARCH=arm CROSS_COMPILE="${cc}" -j"$(job_count)" \
-			DEVICE_TREE="${dt}" KCFLAGS="${kcflags}"
+			DEVICE_TREE="${dt}" EXTRA_CFLAGS="${extra_cflags}"
 	)
 
 	local out="${A733_OUT}/uboot"
@@ -320,126 +322,130 @@ cmd_a733_hal() {
 	info "HAT 基本要求全部满足"
 }
 
-# 按官方 sys_partition.fex 组 MBR 镜像：
-#   boot0 @128 KiB、boot_package.fex（TOC1 包）@12 MiB、分区从 16 MiB 开始
-# 这几个偏移来自板厂镜像（OpenWrt 的 radxa-cubie-a7z setup.sh：
-#   dd boot0_sdcard.bin seek=256、boot_package.fex seek=24576）
+# 按 rsdk 官方布局生成 SD 卡镜像（A733：GPT + config + rootfs）
+#   0..16 MiB      boot0 @128 KiB（setup.sh: seek=256）、boot0_ufs @2064 扇区、
+#                  boot_package.fex @12 MiB（seek=24576）
+#   16..32 MiB     p1 FAT "config"（16 MiB，rsdk 的 /config）
+#   32 MiB..末尾    p2 ext4 "rootfs"（内核/设备树/启动脚本都在 rootfs 的 /boot 下）
+# 依据：rsdk src/share/rsdk/build/image.jsonnet（part-add 32768 65535 / 65536 -34）
+#       与 configs/socs.json（a733: partition_table_type=gpt, firmware_type=u-boot）；
+#       boot0/boot_package 偏移来自 u-boot 包里的 setup.sh update_bootloader。
 cmd_a733_pack() {
-	local fex="${BSP_ROOT}/vendor/a733/sys_partition.fex"
 	local img="${A733_OUT}/${A733_IMAGE_NAME}"
-	local pkg_bin="" boot0_bin="" mkimage_bin=""
-	local -a pname=() psize=() pfile=()
-	local line mbr_kb total off i name size file
+	local rootdir="${OUT_DIR}/rootfs"
+	local boot0="${A733_OUT}/uboot/boot0.bin"
+	local boot0ufs="${A733_DEVICE_DIR}/bin/boot0_ufs_sun60iw2p1.bin"
+	local pkg="${A733_OUT}/uboot/boot_package.fex"
+	local kernel="${A733_OUT}/kernel/Image"
+	local dtb="${A733_OUT}/kernel/${A733_DTS_NAME}.dtb"
+	local mkimage_bin="${A733_UBOOT_DIR}/tools/mkimage"
+	local cfg_start=32768 cfg_size=32768 root_start=65536
+	local rootfs_uuid cfg_id cfg_uuid img_size fs_mb tmp_cfg pt
+	local bootargs
 
-	[[ -f "${fex}" ]] || die "缺少 ${fex}"
-	[[ -f "${A733_OUT}/kernel/Image" ]] || die "请先 ./bsp kernel"
-	[[ -f "${OUT_DIR}/rootfs.ext4" ]] || die "请先 ./bsp rootfs"
+	[[ -f "${boot0}" ]] || die "缺少 ${boot0}，请先 ./bsp uboot"
+	[[ -f "${pkg}" ]] || die "缺少 ${pkg}，请先 ./bsp uboot"
+	[[ -f "${kernel}" && -f "${dtb}" ]] || die "请先 ./bsp kernel"
+	[[ -d "${rootdir}" ]] || die "缺少 ${rootdir}，请先 ./bsp rootfs"
+	command -v mkfs.vfat >/dev/null 2>&1 || die "缺少 mkfs.vfat（dosfstools）"
+	command -v mkfs.ext4 >/dev/null 2>&1 || die "缺少 mkfs.ext4（e2fsprogs）"
+	if [[ ! -x "${mkimage_bin}" ]]; then
+		mkimage_bin="$(command -v mkimage || true)"
+		[[ -n "${mkimage_bin}" ]] || die "缺少 mkimage（u-boot-tools）"
+	fi
 
-	boot0_bin="${A733_OUT}/uboot/boot0.bin"
-	pkg_bin="${A733_OUT}/uboot/boot_package.fex"
-	[[ -f "${boot0_bin}" ]] || die "缺少 ${boot0_bin}，请先 ./bsp uboot"
-	[[ -f "${pkg_bin}" ]] || die "缺少 ${pkg_bin}，请先 ./bsp uboot"
+	rootfs_uuid="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+	cfg_id="$(printf '%s' "${rootfs_uuid}" | cut -c1-8 | tr 'a-f' 'A-F')"
+	cfg_uuid="${cfg_id:0:4}-${cfg_id:4:4}"
+	bootargs="console=tty1 root=UUID=${rootfs_uuid} rw cma=8M loglevel=3"
 
-	# 解析 fex
-	mbr_kb="$(awk -F= '/^\[mbr\]/{f=1;next} f&&/^[ \t]*size/{gsub(/[^0-9]/,"",$2);print $2;exit}' "${fex}")"
-	[[ -n "${mbr_kb}" ]] || mbr_kb=16384
+	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
+	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
+	info "安装内核与启动脚本到 rootfs /boot"
+	run_root mkdir -p "${rootdir}/boot/extlinux" "${rootdir}/etc/kernel" "${rootdir}/config"
+	run_root cp -f "${kernel}" "${rootdir}/boot/Image"
+	run_root cp -f "${dtb}" "${rootdir}/boot/${A733_DTS_NAME}.dtb"
 
-	while IFS='|' read -r name size file; do
-		[[ -n "${name}" ]] || continue
-		pname+=("${name}"); psize+=("${size}"); pfile+=("${file}")
-	done < <(awk '
-		/^\[partition\]/ {
-			if (n != "") print n "|" s "|" f
-			n=""; s=""; f=""; inpart=1; next
-		}
-		/^\[/ { if (inpart && n != "") print n "|" s "|" f; inpart=0; n=""; next }
-		inpart {
-			line=$0; sub(/;.*/, "", line)
-			if (line ~ /^[ \t]*name[ \t]*=/) { sub(/^[^=]*=/, "", line); gsub(/[ \t]/, "", line); n=line }
-			else if (line ~ /^[ \t]*size[ \t]*=/) { sub(/^[^=]*=/, "", line); gsub(/[ \t]/, "", line); s=line }
-			else if (line ~ /^[ \t]*downloadfile[ \t]*=/) { sub(/^[^=]*=/, "", line); gsub(/[ \t"]/, "", line); f=line }
-		}
-		END { if (inpart && n != "") print n "|" s "|" f }
-	' "${fex}")
-	[[ ${#pname[@]} -gt 0 ]] || die "解析 ${fex} 失败"
+	sed -e "s|@BOOTARGS@|${bootargs}|" \
+		-e "s|@DTB@|${A733_DTS_NAME}.dtb|" \
+		"${BSP_ROOT}/vendor/a733/boot.cmd" > "${A733_OUT}/boot.cmd"
+	"${mkimage_bin}" -C none -A arm64 -T script -d "${A733_OUT}/boot.cmd" \
+		"${rootdir}/boot/boot.scr" >/dev/null || die "生成 boot.scr 失败"
 
-	# 总大小
-	total=$(( mbr_kb * 1024 ))
-	for size in "${psize[@]}"; do total=$(( total + size * 512 )); done
+	# extlinux.conf / cmdline：rsdk 会给内核 deb 里的这两个文件改 root=UUID，
+	# 本 u-boot 没有 sysboot 命令（没有 CONFIG_CMD_SYSBOOT），实际启动走 boot.scr，
+	# 这里仍按官方格式生成，方便换成支持 extlinux 的 u-boot 时直接生效
+	cat > "${A733_OUT}/extlinux.conf" <<EOF
+default l0
+menu title Boot menu
+label l0
+	menu label Debian GNU/Linux
+	linux /boot/Image
+	fdt /boot/${A733_DTS_NAME}.dtb
+	append ${bootargs}
+EOF
+	run_root cp -f "${A733_OUT}/extlinux.conf" "${rootdir}/boot/extlinux/extlinux.conf"
+	printf '%s\n' "${bootargs}" > "${A733_OUT}/cmdline"
+	run_root cp -f "${A733_OUT}/cmdline" "${rootdir}/etc/kernel/cmdline"
 
-	mkdir -p "${A733_OUT}"
-	rm -f "${img}"
-	truncate -s "${total}" "${img}"
+	# fstab：按 rsdk 的做法用文件系统 UUID（config + rootfs）
+	cat > "${A733_OUT}/fstab" <<EOF
+# rsdk 布局：p1 config（FAT）/ p2 rootfs（ext4）
+UUID=${cfg_uuid}  /config  vfat  defaults  0 2
+UUID=${rootfs_uuid}  /  ext4  defaults,noatime  0 1
+EOF
+	run_root cp -f "${A733_OUT}/fstab" "${rootdir}/etc/fstab"
 
-	# boot0 @128 KiB（BROM 读 boot0 的位置），u-boot 的 TOC1 包 @12 MiB
-	dd if="${boot0_bin}" of="${img}" bs=512 seek=256 conv=notrunc status=none
-	dd if="${pkg_bin}" of="${img}" bs=512 seek=24576 conv=notrunc status=none
-	info "boot0: $(basename "${boot0_bin}") @128KiB, boot_package.fex @12MiB"
+	# 2) 重打 ext4（带 /boot 内容），文件系统 UUID 固定成 fstab 里那个
+	fs_mb="$(run_root du --apparent-size -sm "${rootdir}" | cut -f1)"
+	local file_count
+	file_count="$(run_root find "${rootdir}" | wc -l)"
+	fs_mb=$(( fs_mb + file_count * 4 / 1024 + 64 ))
+	fs_mb=$(( fs_mb * 110 / 100 ))
+	img_size=$(( root_start * 512 + fs_mb * 1024 * 1024 ))
+	info "rootfs.ext4: ${fs_mb} MiB，UUID=${rootfs_uuid}"
+	run_root rm -f "${OUT_DIR}/rootfs.ext4"
+	run_root mkfs.ext4 -d "${rootdir}" -L rootfs -U "${rootfs_uuid}" \
+		"${OUT_DIR}/rootfs.ext4" "${fs_mb}M" >/dev/null || die "mkfs.ext4 失败"
 
-	# boot 分区：FAT，放 Image + dtb + boot.scr
-	mkimage_bin="${A733_UBOOT_DIR}/tools/mkimage"
-	[[ -x "${mkimage_bin}" ]] || mkimage_bin="$(command -v mkimage || true)"
+	# 3) config 分区（16 MiB FAT）
+	tmp_cfg="${A733_OUT}/config.fat"
+	run_root rm -f "${tmp_cfg}"
+	run_root mkfs.vfat -F 16 -n config -i "${cfg_id}" -C "${tmp_cfg}" \
+		"$(( cfg_size / 2 ))" >/dev/null || die "mkfs.vfat 失败"
 
-	off=$(( mbr_kb * 1024 ))
-	for i in "${!pname[@]}"; do
-		name="${pname[$i]}"; size="${psize[$i]}"
-		case "${name}" in
-		boot)
-			local bstaging="${A733_OUT}/boot.fex" bdir="${A733_OUT}/bootdir"
-			rm -rf "${bdir}"; mkdir -p "${bdir}"
-			cp -f "${A733_OUT}/kernel/Image" "${bdir}/"
-			cp -f "${A733_OUT}/kernel/${A733_DTS_NAME}.dtb" "${bdir}/"
-			cp -f "${BSP_ROOT}/vendor/a733/boot.cmd" "${bdir}/"
-			[[ -n "${mkimage_bin}" ]] && \
-				"${mkimage_bin}" -C none -A arm64 -T script -d "${BSP_ROOT}/vendor/a733/boot.cmd" "${bdir}/boot.scr" 2>/dev/null || \
-				warn "mkimage 不可用，boot 分区里只有 boot.cmd（没有 boot.scr）"
-			rm -f "${bstaging}"
-			mkfs.vfat -F 32 -n boot -C "${bstaging}" $(( size / 2 )) >/dev/null
-			mcopy -i "${bstaging}" -s "${bdir}"/* ::/ >/dev/null
-			dd if="${bstaging}" of="${img}" bs=512 seek=$(( off / 512 )) conv=notrunc,sparse status=none
-			;;
-		rootfs)
-			dd if="${OUT_DIR}/rootfs.ext4" of="${img}" bs=512 seek=$(( off / 512 )) conv=notrunc,sparse status=none
-			;;
-		*)
-			# boot-resource/env/private 留空
-			;;
-		esac
-		off=$(( off + size * 512 ))
-	done
+	# 4) 组镜像
+	info "生成镜像: ${img}（GPT，config@16MiB，rootfs@32MiB）"
+	run_root mkdir -p "${A733_OUT}"
+	run_root rm -f "${img}"
+	run_root truncate -s "${img_size}" "${img}"
+	run_root dd if="${boot0}" of="${img}" bs=512 seek=256 conv=notrunc status=none
+	if [[ -f "${boot0ufs}" ]]; then
+		# setup.sh 同时写一份 UFS 用的 boot0（seek=2064），照做
+		run_root dd if="${boot0ufs}" of="${img}" bs=512 seek=2064 conv=notrunc status=none
+	fi
+	run_root dd if="${pkg}" of="${img}" bs=512 seek=24576 conv=notrunc status=none
+	run_root dd if="${tmp_cfg}" of="${img}" bs=512 seek="${cfg_start}" conv=notrunc,sparse status=none
+	run_root dd if="${OUT_DIR}/rootfs.ext4" of="${img}" bs=512 seek="${root_start}" \
+		conv=notrunc,sparse status=none
 
-	# ---- MBR 分区表 ----
-	# sys_partition.fex 有 5 个分区，但 MBR 只有 4 个主分区槽位。rootfs 必须是 p4
-	# （boot.cmd 的 `fatload mmc 0:3` 和 bootargs 的 `root=/dev/mmcblk0p4` 都按
-	# 这个顺序），所以只给前 4 个分区建表；第 5 个 private 是空的，仅在镜像尾部
-	# 保留其空间。没有分区表的话内核根本看不到 mmcblk0p3/p4，镜像等于不能启动。
-	local pt pidx=0 pstart ptype
+	# 5) GPT（两个分区：config 16 MiB、rootfs 到末尾）
 	pt="$(mktemp)"
 	{
-		echo "label: dos"
+		echo "label: gpt"
 		echo "unit: sectors"
 		echo
-		pstart=$(( mbr_kb * 2 ))    # [mbr] size 单位是 KByte，分区表按 512B 扇区
-		for i in "${!pname[@]}"; do
-			name="${pname[$i]}"; size="${psize[$i]}"
-			if (( pidx >= 4 )); then
-				warn "MBR 仅 4 个主分区槽位，跳过 ${name}（镜像尾部保留 ${size} 扇区）"
-				pstart=$(( pstart + size ))
-				continue
-			fi
-			pidx=$(( pidx + 1 ))
-			ptype=83
-			[[ "${name}" == "boot" ]] && ptype=0c
-			echo "start=${pstart}, size=${size}, type=${ptype}"
-			pstart=$(( pstart + size ))
-		done
+		echo "start=${cfg_start}, size=${cfg_size}, name=\"config\""
+		echo "start=${root_start}, name=\"rootfs\""
 	} > "${pt}"
-	sfdisk --no-tell-kernel --force --quiet "${img}" < "${pt}" || die "写 MBR 分区表失败"
+	run_root sfdisk --no-tell-kernel --force --quiet "${img}" < "${pt}" || die "写 GPT 失败"
 	rm -f "${pt}"
 
 	info "镜像: ${img}"
 	ls -lh "${img}"
-	info "分区（按 sys_partition.fex）: ${pname[*]}"
 	sfdisk -d "${img}" 2>/dev/null | sed 's/^/  /'
-	info "注意：boot0@128KiB、boot_package.fex@12MiB 按板厂镜像布局，需上板验证。"
+	info "boot0@128KiB、boot0_ufs@2064 扇区、boot_package.fex@12MiB"
+	info "p1 config(FAT)@16MiB、p2 rootfs(ext4)@32MiB；u-boot 从 p2 的 /boot.scr 启动"
+	info "注意：与 rsdk 布局对齐，但仍需上板验证"
 }
+
