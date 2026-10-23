@@ -2,8 +2,10 @@
 id:2:initdefault:
 si::sysinit:/etc/init.d/rcS
 
-# UART0（PB9/PB10）是舵机总线，不能挂 getty/console。
-# 本地调试用 tty1（无显示时看不到，但不占串口）；需要串口时改成 ttyGS0（USB gadget）。
+# UART0（PB9/PB10）现在拿来做调试 console：内核 console=ttyAS0,115200，
+# 这里同时给 ttyAS0 挂 getty，板子起来就能在串口上直接登录。
+# （舵机总线的事后面再做，届时把 console 改回 tty1 即可）
+ttyAS0::respawn:/sbin/getty -L ttyAS0 115200 vt100
 tty1::respawn:/sbin/getty -L tty1 vt100
 
 ::ctrlaltdel:/sbin/reboot

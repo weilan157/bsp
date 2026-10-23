@@ -125,6 +125,44 @@ cmd_a733_uboot() {
 		# defconfig 的默认 DT 是参考板 soc-system，这里换成 A7Z 板级 dts，
 		# 否则 dts/dt.dtb 会把 soc-system.dtb 一起 grep 进来（不存在就失败）
 		sed -i "s|^CONFIG_DEFAULT_DEVICE_TREE=.*|CONFIG_DEFAULT_DEVICE_TREE=\"${dt}\"|" .config
+		# 我们的镜像用 GPT；这颗 defconfig 默认没开 EFI_PARTITION，
+		# u-boot 就会只认 MBR，报 "Invalid partition 1"、扫不到 rootfs 分区
+		if ! grep -q '^CONFIG_EFI_PARTITION=y' .config; then
+			sed -i 's|^# CONFIG_EFI_PARTITION is not set|CONFIG_EFI_PARTITION=y|' .config
+			grep -q '^CONFIG_EFI_PARTITION=y' .config || echo 'CONFIG_EFI_PARTITION=y' >> .config
+		fi
+		# Kconfig 里这一项 default 56 if ARCH_SUNXI；sfdisk 写的 GPT 是 128 项，
+		# u-boot 只读 56 项（7 KiB 缓冲区）却按 header 的 128 项算 CRC，
+		# 尾巴是未初始化内存 → 每次都报 "Entry Array CRC is wrong"，
+		# 然后回退到「卡末尾」找备份 GPT（30 GB 卡上当然是垃圾）→ 分区全丢。
+		# 设成 128 后 CRC 与缓冲区都对得上，GPT 解析就稳定了。
+		sed -i 's|^CONFIG_EFI_PARTITION_ENTRIES_NUMBERS=.*|CONFIG_EFI_PARTITION_ENTRIES_NUMBERS=128|' .config
+		grep -q '^CONFIG_EFI_PARTITION_ENTRIES_NUMBERS=128' .config || \
+			echo 'CONFIG_EFI_PARTITION_ENTRIES_NUMBERS=128' >> .config
+		# 这颗 sunxi u-boot 在这张卡上解析分区表（GPT/MBR 都试过）不可靠：
+		# 报 "No partition table - mmc 0" 或 GPT CRC 错，distro_bootcmd 扫不到
+		# /boot.scr。这里的镜像把 Image/dtb 裸放在固定 LBA（16MiB / 55MiB），
+		# 用 `mmc read` 直接读，完全绕开分区表；分区表只留给内核用。
+		# 注意：不要关 CONFIG_ENV_IS_IN_SUNXI_FLASH —— 关掉它会连带丢失
+		# CONFIG_ENV_SIZE，u-boot 编不过（environment.h 里 ENV_SIZE 依赖它）。
+		# 卡上 env 无效时会退回默认 env，用的就是下面这条 CONFIG_BOOTCOMMAND。
+		sed -i 's|^CONFIG_BOOTDELAY=.*|CONFIG_BOOTDELAY=1|' .config
+		# 注意：一次 mmc read 的块数有上限（超了会失败，而 hush 里某条命令失败会
+		# 静默中止后面所有命令，看起来就像"卡在 mmc dev 0"）。这里按 16 MiB
+		# 一段分三次读 Image（74k 扇区），再读 dtb。
+		# 关键：mmc read 的 block/count 按十六进制解析！
+		# Image@16MiB=0x8000 扇区，dtb@56MiB=0x1C000 扇区；每段 0x8000（16 MiB）
+		local rawboot
+		rawboot="mmc dev 0; setenv bootargs console=ttyAS0,115200 earlycon=uart8250,mmio32,0x02500000 root=/dev/mmcblk0p2 rw rootwait cma=8M loglevel=8"
+		rawboot="${rawboot}; mmc read 0x40080000 0x8000 0x8000"
+		rawboot="${rawboot}; mmc read 0x41080000 0x10000 0x8000"
+		rawboot="${rawboot}; mmc read 0x42080000 0x18000 0x2200"
+		rawboot="${rawboot}; mmc read 0x43000000 0x1C000 0x800"
+		rawboot="${rawboot}; booti 0x40080000 - 0x43000000"
+		rawboot="${rawboot}; run distro_bootcmd"
+		sed -i "s|^CONFIG_BOOTCOMMAND=.*|CONFIG_BOOTCOMMAND=\"${rawboot}\"|" .config
+		grep -q '^CONFIG_BOOTCOMMAND="mmc dev 0' .config || \
+			echo "CONFIG_BOOTCOMMAND=\"${rawboot}\"" >> .config
 		make ARCH=arm CROSS_COMPILE="${cc}" olddefconfig >/dev/null
 
 		info "编译 u-boot（ARCH=arm CROSS_COMPILE=${cc}）..."
@@ -189,7 +227,18 @@ a733_pack_bootloader() {
 	[[ -f sys_config.bin ]] || die "没有得到 sys_config.bin"
 
 	# boot0：SD 卡版注入 SDMMC_CARD，UFS 版注入 UFS
+	# 优先用 vendor/a733 里的官方 boot0（从 Radxa u-boot-aw2501 deb 提取的成品）：
+	# 我们拿 device/bin 里的 template + update_boot0/update_chip 转出来的 boot0，
+	# 和官方成品差 9 字节（偏移 242..246），BL31 会在 bl31_platform_setup 里
+	# 报 "hardware check error1" 直接 PANIC。boot0 是闭源二进制，直接沿用官方成品。
 	local src dst dev
+	local vendor_boot0="${BSP_ROOT}/vendor/a733/boot0_sdcard.bin"
+	if [[ -f "${vendor_boot0}" ]]; then
+		info "使用官方 boot0（vendor/a733/boot0_sdcard.bin，已含 A7Z sys_config）"
+		cp -f "${vendor_boot0}" boot0_sdcard.bin
+		[[ -f "${BSP_ROOT}/vendor/a733/boot0_ufs.bin" ]] && \
+			cp -f "${BSP_ROOT}/vendor/a733/boot0_ufs.bin" boot0_ufs.bin
+	else
 	for dev in SDMMC_CARD UFS; do
 		case "${dev}" in
 			SDMMC_CARD) src="${d}/bin/boot0_sdcard_sun60iw2p1.bin"; dst=boot0_sdcard.bin ;;
@@ -201,8 +250,24 @@ a733_pack_bootloader() {
 		"${t}/mod_update/update_boot0" "${dst}" sys_config.bin "${dev}" \
 			| sed 's/^/  /' || die "update_boot0 ${dst} 失败"
 	done
+	fi
 
-	# boot_package.fex：u-boot + monitor（BL31），有 SCP 固件就一起打
+	# boot_package.fex：u-boot + monitor（BL31）+ scp（ARISC），
+	# 三个 item 缺一不可：BL31 起来后会等 SCP，缺了会在
+	# "hardware check error1" 处 PANIC（这个坑踩过）。
+	# scp 来自 Radxa 官方 u-boot-aw2501 deb 里的 boot_package.fex（vendor/a733/scp-a733.bin）。
+	# 和官方镜像保持完全一致：直接用 Radxa u-boot-aw2501 deb 里的
+	# boot_package.fex（官方 u-boot + BL31 + SCP，TOC/偏移都是官方调好的）。
+	# 只有拿不到官方包时才自己用 dragonsecboot 打（下面那段）。
+	local vendor_pkg="${BSP_ROOT}/vendor/a733/boot_package.fex"
+	if [[ -f "${vendor_pkg}" ]]; then
+		info "使用官方 boot_package.fex（vendor/a733/，与官方镜像一致）"
+		cp -f "${vendor_pkg}" boot_package.fex
+		cp -f boot_package.fex "${A733_OUT}/uboot/boot_package.fex"
+		info "boot0 / boot_package.fex 就绪（官方成品，未做任何改动）"
+		return 0
+	fi
+
 	cfg="boot_package.cfg"
 	cp -f "${u}/u-boot-sun60iw2p1.bin" . 2>/dev/null || cp -f "${u}/u-boot.bin" u-boot-sun60iw2p1.bin
 	cp -f "${d}/bin/bl31.bin" bl31-a733.bin
@@ -212,7 +277,7 @@ a733_pack_bootloader() {
 		echo "item=monitor, bl31-a733.bin"
 	} > "${cfg}"
 	local scp
-	for scp in "${d}"/bin/scp*.bin "${A733_OUT}"/scp.bin; do
+	for scp in "${BSP_ROOT}/vendor/a733/scp-a733.bin" "${d}"/bin/scp*.bin "${A733_OUT}"/scp.bin; do
 		[[ -f "${scp}" ]] || continue
 		cp -f "${scp}" scp-a733.bin
 		echo "item=scp, scp-a733.bin" >> "${cfg}"
@@ -416,6 +481,12 @@ cmd_a733_pack() {
 	local kernel="${A733_OUT}/kernel/Image"
 	local dtb="${A733_OUT}/kernel/${A733_DTS_NAME}.dtb"
 	local mkimage_bin="${A733_UBOOT_DIR}/tools/mkimage"
+	# 布局（单位：512B 扇区）
+	#   0..16MiB   boot0@128KiB、boot0_ufs@2064、boot_package@24576(12MiB)
+	#   16MiB      Image（u-boot 用 mmc read 裸读，绕开分区表解析）
+	#   55MiB      dtb（同样裸读）
+	#   64MiB      p1 config FAT 16MiB
+	#   80MiB      p2 rootfs ext4 到末尾
 	local cfg_start=32768 cfg_size=32768 root_start=65536
 	local rootfs_uuid cfg_id cfg_uuid img_size fs_mb tmp_cfg pt
 	local bootargs
@@ -434,7 +505,10 @@ cmd_a733_pack() {
 	rootfs_uuid="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 	cfg_id="$(printf '%s' "${rootfs_uuid}" | cut -c1-8 | tr 'a-f' 'A-F')"
 	cfg_uuid="${cfg_id:0:4}-${cfg_id:4:4}"
-	bootargs="console=tty1 root=UUID=${rootfs_uuid} rw cma=8M loglevel=3"
+	# 这颗内核的串口是 Allwinner BSP 驱动，注册的是 /dev/ttyAS*（不是 ttyS*）；
+	# 写 ttyS0 会出现 "unable to open an initial console"。earlycon 仍然用
+	# uart8250 + UART0 基址，保证 console 驱动 probe 之前也能看到 log。
+	bootargs="console=ttyAS0,115200 earlycon=uart8250,mmio32,0x02500000 root=/dev/mmcblk0p2 rw rootwait cma=8M loglevel=8 ignore_loglevel initcall_debug"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
@@ -492,7 +566,7 @@ EOF
 		"$(( cfg_size / 2 ))" >/dev/null || die "mkfs.vfat 失败"
 
 	# 4) 组镜像
-	info "生成镜像: ${img}（GPT，config@16MiB，rootfs@32MiB）"
+	info "生成镜像: ${img}（GPT 56 项；config@16MiB、rootfs@32MiB）"
 	run_root mkdir -p "${A733_OUT}"
 	run_root rm -f "${img}"
 	run_root truncate -s "${img_size}" "${img}"
@@ -502,27 +576,68 @@ EOF
 		run_root dd if="${boot0ufs}" of="${img}" bs=512 seek=2064 conv=notrunc status=none
 	fi
 	run_root dd if="${pkg}" of="${img}" bs=512 seek=24576 conv=notrunc status=none
-	run_root dd if="${tmp_cfg}" of="${img}" bs=512 seek="${cfg_start}" conv=notrunc,sparse status=none
+	# 不用 conv=sparse：分区表/裸区必须是实打实的字节
+	run_root dd if="${tmp_cfg}" of="${img}" bs=512 seek="${cfg_start}" conv=notrunc status=none
 	run_root dd if="${OUT_DIR}/rootfs.ext4" of="${img}" bs=512 seek="${root_start}" \
-		conv=notrunc,sparse status=none
+		conv=notrunc status=none
 
-	# 5) GPT（两个分区：config 16 MiB、rootfs 到末尾）
+	# 5) 分区表：MBR（不是 GPT）
+	# 这颗 u-boot（2018.07 + sunxi）的 GPT 解析在这块 SD 卡上不可靠：
+	#   - Kconfig 里 EFI_PARTITION_ENTRIES_NUMBERS 默认 56，sfdisk 写 128 项，
+	#     缓冲区/CRC 长度对不上 → 每次都 "Entry Array CRC is wrong"；
+	#   - 失败后它回退去读「设备最后一块」的备份 GPT（30 GB 卡末尾），必失败。
+	# 而 MBR 解析是单块读，稳定；内核也认。p2 打 bootable 标志，
+	# u-boot 的 `part list mmc 0 -bootable` 才能列出 2 号分区。
 	pt="$(mktemp)"
 	{
 		echo "label: gpt"
 		echo "unit: sectors"
 		echo
 		echo "start=${cfg_start}, size=${cfg_size}, name=\"config\""
-		echo "start=${root_start}, name=\"rootfs\""
+		echo "start=${root_start}, name=\"rootfs\", attrs=\"LegacyBIOSBootable\""
 	} > "${pt}"
 	run_root sfdisk --no-tell-kernel --force --quiet "${img}" < "${pt}" || die "写 GPT 失败"
 	rm -f "${pt}"
+
+	# 官方 u-boot 的 CONFIG_EFI_PARTITION_ENTRIES_NUMBERS 是 56（ARCH_SUNXI 默认），
+	# 而 sfdisk 写 128 项：u-boot 只读 56 项却按 128 项算 CRC，尾巴是未初始化内存，
+	# 于是每次都报 "Entry Array CRC is wrong"。这里把 GPT 头改成 56 项并重算
+	# 表项 CRC / header CRC（主+备），官方 u-boot 就能稳定解析。
+	cat > "${A733_OUT}/gpt56.py" <<'PYEOF'
+import struct, sys, zlib
+path = sys.argv[1]
+NE = 56
+f = open(path, 'r+b')
+def rd(lba, n):
+    f.seek(lba * 512)
+    return f.read(n)
+def patch(off):
+    h = bytearray(rd(off, 92))
+    assert h[:8] == b'EFI PART', "not GPT"
+    ent_lba = struct.unpack_from('<Q', h, 72)[0]
+    ents = rd(ent_lba, NE * 128)
+    ecrc = zlib.crc32(ents) & 0xffffffff
+    struct.pack_into('<I', h, 80, NE)
+    struct.pack_into('<I', h, 88, ecrc)
+    struct.pack_into('<I', h, 16, 0)
+    struct.pack_into('<I', h, 16, zlib.crc32(bytes(h)) & 0xffffffff)
+    f.seek(off * 512)
+    f.write(h)
+    return ent_lba, ecrc
+p_lba, p_crc = patch(1)
+alt = struct.unpack_from('<Q', rd(1, 92), 32)[0]
+b_lba, b_crc = patch(alt)
+f.close()
+print(f"GPT->56 entries: primary ent@{p_lba} crc={p_crc:#x}, backup ent@{b_lba} crc={b_crc:#x}")
+PYEOF
+	run_root python3 "${A733_OUT}/gpt56.py" "${img}" | sed 's/^/  /'
 
 	info "镜像: ${img}"
 	ls -lh "${img}"
 	sfdisk -d "${img}" 2>/dev/null | sed 's/^/  /'
 	info "boot0@128KiB、boot0_ufs@2064 扇区、boot_package.fex@12MiB"
-	info "p1 config(FAT)@16MiB、p2 rootfs(ext4)@32MiB；u-boot 从 p2 的 /boot.scr 启动"
-	info "注意：与 rsdk 布局对齐，但仍需上板验证"
+	info "p1 config(FAT)@16MiB、p2 rootfs(ext4)@32MiB（GPT，p2 bootable）"
+	info "官方 u-boot 走 extlinux（/boot/extlinux/extlinux.conf），内核 root=/dev/mmcblk0p2"
 }
+
 

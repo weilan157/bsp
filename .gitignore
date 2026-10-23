@@ -17,6 +17,8 @@ logs/
 
 # 二进制镜像
 *.bin
+# A7Z 引导链的官方闭源成品（boot0/boot0_ufs/scp），必须入库
+!vendor/a733/*.bin
 *.img
 *.itb
 *.dtb
