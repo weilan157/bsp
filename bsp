@@ -9,6 +9,13 @@ SCRIPT_DIR="${BSP_ROOT}/scripts"
 CONFIG_FILE="${BSP_ROOT}/config.env"
 CONFIG_EXAMPLE="${BSP_ROOT}/config.env.example"
 
+# Windows 检出的工作区可能是 CRLF（.gitattributes 写的是 LF）。
+# 脚本按 LF 写，这里自愈一次，免得 sed/bash 到处报 `$'\r'`。
+if grep -rqs $'\r' "${SCRIPT_DIR}" 2>/dev/null; then
+	find "${SCRIPT_DIR}" "${BSP_ROOT}/vendor" -type f -name '*.sh' \
+		-exec sed -i 's/\r$//' {} + 2>/dev/null || true
+fi
+
 usage() {
 	cat <<'EOF'
 用法: ./bsp <command> [options]

@@ -139,3 +139,19 @@ u-boot 解压（`Image.lz4` + u-boot lz4 支持），选 LZ4/LZO。
 
 不适用：**2.1 boot0 裁剪、2.2 uboot 裁剪/压缩** —— 都在 longan 的 boot package 里做，
 我们的 `pack` 不生成 boot0/u-boot，这两块仍用官方产物。
+## 内核构建的坑（6.6 BSP）
+
+Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接 `make` 会踩这些：
+
+| 现象 | 原因 | `./bsp kernel` 的处理 |
+|---|---|---|
+| `bsp/Kconfig: can't open file "platform/Kconfig"` | Kconfig 用 `$(BSP_TOP)` 拼路径 | `export BSP_TOP=<kernel>/bsp/`（结尾斜杠） |
+| `KERNEL_SRC_DIR not setup` | `modules/nand/Makefile` 要 `LICHEE_KERN_DIR` | `export LICHEE_KERN_DIR=<kernel>` |
+| `/work/bsp/drivers/ve/... 不是目录` | cedar-ve 的 codec Makefile 用 `$(PWD)` 拼绝对路径 | 先 `cd <kernel>` 再 make |
+| `sunxi-autogen.h: No such file` | 由 longan 的 `mkkernel.sh` 生成，内容只有 `AW_BSP_VERSION` | 生成到 `bsp/include/` 和 `drivers/clk/sunxi-ng/` |
+| `ve_plat_common.c: cedar_ve.h: No such file` | 没选 SoC，`drivers/ve` 走了 common 分支 | 打开 `AW_BSP/ARCH_SUN60I/ARCH_SUN60IW2/ARCH_SUN60IW2P1` |
+| `multiple definition of ccu_*` | 主线和 BSP 各有一套 sunxi-ng | 关掉主线的 `CONFIG_SUNXI_CCU` |
+| rt-media 报 `field 'tv' 不完整`、`../vin/vin-video/vin_video.h` 缺失 | 6.6 BSP 里 rt-media 还引用旧 VIN 布局 | 关掉 `CONFIG_VIDEO_RT_MEDIA`（编解码用 cedar-ve） |
+| `dt-bindings/clock/sun60iw2-ccu.h: No such file` | BSP 的 dt-bindings 不在内核 include 里 | 编 dts 时把 `bsp/include` 加进 `DTC_INCLUDE` |
+
+`Image` 编出来后（37 MB），dtbs 会顺带编一遍 mainline 的 dts，约 1-2 分钟。

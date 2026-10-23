@@ -32,6 +32,7 @@ rockchip-bsp/
 │   ├── mod-rootfs.sh
 │   ├── mod-pack.sh
 │   └── mod-a733.sh          # A733：包装 Radxa 的 debian 打包流程
+├── docker/                  # 编译环境镜像（A733）
 ├── out/                     # 产物（不入库）
 └── sources/                 # 克隆的源码（不入库）
 ```
@@ -163,6 +164,19 @@ I2S0=PB4/5/6/7/8 + TLV320AIC3104、关机检测 PB3，显示/HDMI 关掉。
 镜像按板厂 `sys_partition.fex`：MBR 保留区 16 MB（boot0@8K、u-boot@128K）+
 boot-resource 32 MB + env 16 MB + boot 96 MB（FAT32：Image/dtb/boot.scr）+
 rootfs 7.27 GB（我们的 ext4）+ private 16 MB。
+
+### Docker 编译
+
+依赖固化在镜像里（等价于 `./bsp env`）：
+
+```bash
+docker build --network host -t microduck-a733 -f docker/Dockerfile .
+docker run --rm --network host \
+    -v "$PWD":/work -v /tmp/a733src:/work/sources -w /work microduck-a733 \
+    bash -lc './bsp config PLATFORM=a733 && ./bsp setup && ./bsp kernel'
+```
+
+`out/a733/kernel/` 出 `Image` 和 dtb；细节见 `docker/README.md`。
 
 > 状态：6.6 的设备树已实测 `cpp + dtc` 编译通过（156365 字节 dtb，含 `ve@`/`codec`）；
 > u-boot 的 brandy 构建与真机启动尚未验证，详见 `vendor/a733/README.md`。

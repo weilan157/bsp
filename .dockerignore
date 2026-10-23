@@ -1,0 +1,5 @@
+.git/
+out/
+sources/
+*.img
+*.ext4
