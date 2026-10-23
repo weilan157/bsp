@@ -168,3 +168,15 @@
 
 /* 摄像头（IMX219）单独放在 microduck-a7z-camera.dtsi，默认不启用：
  * A7Z 的 MIPI CSI 连接器用哪路 TWI/CSI，需要按板子原理图确认。 */
+
+/* =====================================================================
+ * R-PIO（PL/PM 区）先关掉
+ * 这颗 BSP pinctrl 驱动在 r_pinctrl probe 时会 Oops：
+ *   sunxi_bsp_pinctrl_init_with_variant+0x47c
+ *   sun60iw2_r_pinctrl_probe
+ * 直接把系统打死（kworker 里 deferred probe 时崩溃），连 ttyAS0/SD 都起不来。
+ * microduck 用不到 PL/PM 引脚（HAT 全在 PB/PJ/PI 上），先 disabled。
+ * ===================================================================== */
+&r_pio {
+	status = "disabled";
+};
