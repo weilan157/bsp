@@ -137,19 +137,96 @@ cmd_a733_uboot() {
 	cp -f "${u}/u-boot.bin" "${out}/u-boot.bin"
 	[[ -f "${u}/u-boot.dtb" ]] && cp -f "${u}/u-boot.dtb" "${out}/u-boot.dtb"
 
-	# boot0（SD 卡版）来自 device 仓库；A733 的 BROM 从 128 KiB 读 boot0
-	local boot0="${d}/bin/boot0_sdcard_sun60iw2p1.bin"
-	[[ -f "${boot0}" ]] || die "缺少 ${boot0}"
-	cp -f "${boot0}" "${out}/boot0.bin"
-
-	# u-boot 要按 Allwinner 的 TOC1 包（boot_package.fex）放到 12 MiB，
-	# boot0 只认这种带头的包，裸 u-boot.bin 不行
-	info "打包 boot_package.fex ..."
-	python3 "${BSP_ROOT}/vendor/a733/mk_boot_package.py" \
-		"${out}/u-boot.bin" "${out}/u-boot.dtb" "${out}/boot_package.fex" \
-		--text-base 0x4a000000
+	# ---- boot0 + boot_package.fex：必须用 Allwinner 的官方工具处理 ----
+	# 1) device/bin 里的 boot0_sdcard_*.bin 只是「模板」，出厂前要用
+	#    update_boot0 把板子的 sys_config.bin（DRAM 参数、GPIO）注进去；
+	#    不注入就是错误的 DDR 时序，BROM 跳过去直接死，串口一个字都没有。
+	# 2) u-boot 不能裸放，要 dragonsecboot 打成 TOC1 包，且里面必须有
+	#    monitor（BL31/ATF），boot0 先跳 BL31 再跳 u-boot。
+	a733_ensure_tools
+	a733_pack_bootloader "${u}" "${d}" "${out}"
 
 	ls -lh "${out}/"
+}
+
+# 官方打包工具（update_boot0 / script / dragonsecboot）
+A733_TOOLS_REPO="${A733_TOOLS_REPO:-https://gitlab.com/tina5.0_aiot/lichee/tools.git}"
+A733_TOOLS_BRANCH="${A733_TOOLS_BRANCH:-product-aiot-stable}"
+A733_TOOLS_DIR="${A733_TOOLS_DIR:-${A733_DIR}/awtools}"
+
+a733_ensure_tools() {
+	local t="${A733_TOOLS_DIR}"
+	if [[ ! -x "${t}/pack/pctools/linux/mod_update/update_boot0" ]]; then
+		info "拉取 Allwinner 打包工具（${A733_TOOLS_BRANCH}）..."
+		rm -rf "${t}"
+		git clone --depth 1 --filter=blob:none --sparse \
+			-b "${A733_TOOLS_BRANCH}" "${A733_TOOLS_REPO}" "${t}" || \
+			die "克隆打包工具失败: ${A733_TOOLS_REPO}"
+		git -C "${t}" sparse-checkout set \
+			pack/pctools/linux/mod_update pack/pctools/linux/openssl
+	fi
+	local f
+	for f in mod_update/update_boot0 mod_update/script openssl/dragonsecboot; do
+		[[ -x "${t}/pack/pctools/linux/${f}" ]] || die "打包工具缺 ${f}（${t}）"
+	done
+}
+
+# 生成 boot0.bin（已注入 sys_config）与 boot_package.fex（u-boot + BL31）
+a733_pack_bootloader() {
+	local u="$1" d="$2" out="$3"
+	local t="${A733_TOOLS_DIR}/pack/pctools/linux"
+	local work tmp cfg
+
+	work="${A733_OUT}/bootloader"
+	rm -rf "${work}"
+	mkdir -p "${work}"
+	cd "${work}" || die "无法进入 ${work}"
+
+	# sys_config.fex -> sys_config.bin（fex 需要 CRLF，官方用 unix2dos）
+	cp -f "${d}/configs/cubie_a7z/sys_config.fex" sys_config.fex
+	sed -i 's/\r$//; s/$/\r/' sys_config.fex
+	"${t}/mod_update/script" sys_config.fex >/dev/null || die "sys_config.fex 转换失败"
+	[[ -f sys_config.bin ]] || die "没有得到 sys_config.bin"
+
+	# boot0：SD 卡版注入 SDMMC_CARD，UFS 版注入 UFS
+	local src dst dev
+	for dev in SDMMC_CARD UFS; do
+		case "${dev}" in
+			SDMMC_CARD) src="${d}/bin/boot0_sdcard_sun60iw2p1.bin"; dst=boot0_sdcard.bin ;;
+			UFS)        src="${d}/bin/boot0_ufs_sun60iw2p1.bin";   dst=boot0_ufs.bin ;;
+		esac
+		[[ -f "${src}" ]] || { warn "缺少 ${src}"; continue; }
+		cp -f "${src}" "${dst}"
+		info "update_boot0 ${dst}（${dev}）"
+		"${t}/mod_update/update_boot0" "${dst}" sys_config.bin "${dev}" \
+			| sed 's/^/  /' || die "update_boot0 ${dst} 失败"
+	done
+
+	# boot_package.fex：u-boot + monitor（BL31），有 SCP 固件就一起打
+	cfg="boot_package.cfg"
+	cp -f "${u}/u-boot-sun60iw2p1.bin" . 2>/dev/null || cp -f "${u}/u-boot.bin" u-boot-sun60iw2p1.bin
+	cp -f "${d}/bin/bl31.bin" bl31-a733.bin
+	{
+		echo "[package]"
+		echo "item=u-boot, u-boot-sun60iw2p1.bin"
+		echo "item=monitor, bl31-a733.bin"
+	} > "${cfg}"
+	local scp
+	for scp in "${d}"/bin/scp*.bin "${A733_OUT}"/scp.bin; do
+		[[ -f "${scp}" ]] || continue
+		cp -f "${scp}" scp-a733.bin
+		echo "item=scp, scp-a733.bin" >> "${cfg}"
+		break
+	done
+	info "dragonsecboot -pack（$(grep -c '^item=' "${cfg}") 个 item）"
+	"${t}/openssl/dragonsecboot" -pack "${cfg}" >/dev/null || die "dragonsecboot 打包失败"
+	[[ -f boot_package.fex ]] || die "没有得到 boot_package.fex"
+
+	cp -f boot0_sdcard.bin "${out}/boot0.bin"
+	[[ -f boot0_ufs.bin ]] && cp -f boot0_ufs.bin "${out}/boot0_ufs.bin"
+	cp -f boot_package.fex "${out}/boot_package.fex"
+	cp -f sys_config.bin "${out}/sys_config.bin"
+	info "boot0 / boot_package.fex 就绪（sys_config 已注入）"
 }
 
 cmd_a733_kernel() {
@@ -334,7 +411,7 @@ cmd_a733_pack() {
 	local img="${A733_OUT}/${A733_IMAGE_NAME}"
 	local rootdir="${OUT_DIR}/rootfs"
 	local boot0="${A733_OUT}/uboot/boot0.bin"
-	local boot0ufs="${A733_DEVICE_DIR}/bin/boot0_ufs_sun60iw2p1.bin"
+	local boot0ufs="${A733_OUT}/uboot/boot0_ufs.bin"
 	local pkg="${A733_OUT}/uboot/boot_package.fex"
 	local kernel="${A733_OUT}/kernel/Image"
 	local dtb="${A733_OUT}/kernel/${A733_DTS_NAME}.dtb"

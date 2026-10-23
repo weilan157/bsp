@@ -81,17 +81,33 @@ bootloader 偏移来自 u-boot 包里的 `setup.sh update_bootloader`（等价�
 root 换成 `UUID=<rootfs>`）。这颗 u-boot 没有 `sysboot`/extlinux 支持，实际启动靠
 `distro_bootcmd` 扫描到 `/boot.scr` 后 `source`。
 
+## boot0 与 boot_package.fex（官方工具）
+
+`device/bin` 里的 `boot0_sdcard_sun60iw2p1.bin` **只是模板**，直接用会死在 BROM →
+boot0 阶段（错误 DDR 时序，串口一个字都没有）。官方打包时必须做两步：
+
+1. `sys_config.fex` → `sys_config.bin`（`tools/pack/pctools/linux/mod_update/script`）；
+2. `update_boot0 boot0_sdcard.bin sys_config.bin SDMMC_CARD` 把板级 DRAM/GPIO 注进去
+   （官方还会跑 `update_chip` 写 awbs 的芯片信息）；
+3. u-boot 不能裸放：用 `dragonsecboot -pack` 按 `[package]` 清单打成 TOC1 包，
+   里面必须有 **monitor（BL31/ATF）**，boot0 先跳 BL31 再跳 u-boot。
+
+`./bsp uboot` 现在会自己稀疏克隆 `gitlab.com/tina5.0_aiot/lichee/tools`
+（`A733_TOOLS_DIR`，默认 `sources/a733/awtools`）并完成上面三步，
+产物是 `out/a733/uboot/{boot0.bin,boot0_ufs.bin,boot_package.fex,sys_config.bin}`。
+注入后的 boot0 与模板差 ~200 字节，`boot_package.fex` 里有 `u-boot` + `monitor` 两个 item。
+
 ## 状态
 
-**已验证**（2026-10-23，WSL2 Ubuntu 22.04.5）：
+**已验证**（2026-10-24，WSL2 Ubuntu 22.04.5）：
 
 - A7Z 的 6.6 设备树（device 的 `board.dts` + BSP 的 `sun60iw2p1*.dtsi` + 我们的
   `microduck-a7z.dtsi`）`cpp + dtc` 编译通过（154 KiB dtb，含 `ve@`/`codec` 节点）；
 - `./bsp uboot`：官方 u-boot（AArch32，`ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-`，
   与官方打包仓库一致；告警用官方的 `EXTRA_CFLAGS="-Wno-…"` 关掉）编出
   `u-boot.bin` 1.2 MB + `u-boot.dtb` 40 KB（`model = "Radxa Cubie A7Z"`），
-  再用 `vendor/a733/mk_boot_package.py` 打成 TOC1 的 `boot_package.fex`（1.5 MB，
-  结构与 Radxa 官方包逐字节对齐，除 `add_sum`）；
+  再用官方 `update_boot0` / `dragonsecboot` 生成注入过 sys_config 的 boot0 和
+  带 BL31 的 `boot_package.fex`（1.3 MB）；
 - `./bsp pack`：按 rsdk 布局生成 379 MB 的 `a733-micro.img`——GPT、
   boot0@128 KiB / boot0_ufs@2064 扇区 / `boot_package.fex`@12 MiB、
   p1 `config` FAT16 @16 MiB、p2 `rootfs` ext4 @32 MiB，`/boot.scr` 与 extlinux.conf
@@ -99,8 +115,8 @@ root 换成 `UUID=<rootfs>`）。这颗 u-boot 没有 `sysboot`/extlinux 支持�
 
 **未验证**（本机没有 A733 板子）：
 
-- boot0 → `boot_package.fex` 的实际加载（12 MiB 偏移与 rsdk/厂商 setup 脚本一致，
-  但没有上板）；
+- 真机启动：之前用「未注入 sys_config 的 boot0 + 没有 BL31 的包」是**完全无输出**
+  的，现在这两处都按官方做法修正了，但还没上板复测；
 - `distro_bootcmd` 扫到 `/boot.scr` 后 `load mmc 0:2` / `booti` 的实机启动。
 
 ## u-boot 设备树

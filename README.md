@@ -198,8 +198,8 @@ docker run --rm --network host \
 | `out/a733/kernel/Image` | 37 MB | 6.6.98-g61f3fe291c7a-dirty，defconfig + microduck.config |
 | `out/a733/kernel/sun60i-a733-cubie-a7z.dtb` | 154 KB | cpp + dtc 单编（device 的 board.dts + 我们的 microduck-a7z.dtsi） |
 | `out/a733/uboot/u-boot.bin` / `u-boot.dtb` | 1.2 MB / 40 KB | AArch32 u-boot，`model = "Radxa Cubie A7Z"` |
-| `out/a733/uboot/boot_package.fex` | 1.5 MB | TOC1 包（`sunxi-package` + spare_boot_head + u-boot） |
-| `out/a733/uboot/boot0.bin` | 240 KB | device 仓库的 `boot0_sdcard_sun60iw2p1.bin` |
+| `out/a733/uboot/boot_package.fex` | 1.3 MB | `dragonsecboot -pack` 打的 TOC1 包：`u-boot` + `monitor`(BL31) |
+| `out/a733/uboot/boot0.bin` | 240 KB | `boot0_sdcard_sun60iw2p1.bin` 经 `update_boot0` 注入 `sys_config.bin`（DRAM/GPIO） |
 | `out/rootfs.ext4` | 347 MB | micro rootfs + 929 个 `.ko` + `/boot` |
 | `out/a733/a733-micro.img` | 379 MB | GPT：config@16 MiB + rootfs@32 MiB，可 dd 到 SD 卡 |
 
@@ -223,27 +223,33 @@ docker run --rm --network host \
 4. **GCC 11 的新告警**：老 u-boot 代码会踩 `attributes`、`address-of-packed-member`、
    `misleading-indentation` 等新告警；现在按官方打包仓库（`radxa-pkg/u-boot-aw2501`
    的 `Makefile.local`）的做法用 `EXTRA_CFLAGS="-Wno-attributes …"` 关掉。
-5. **`boot_package.fex` 得自己打**：这棵树没有 build.sh/brandy，boot0 只认
-   Allwinner 的 TOC1 包。`vendor/a733/mk_boot_package.py` 按官方包逐字段生成
-   （head 的 `check_sum` 是固定戳 `0x5F0A6C39`），已用 Radxa 官方包做过逐字节比对。
-6. **分区表/启动方式和官方对齐**：原来照板厂 `sys_partition.fex` 做 MBR
+5. **boot0 只是模板，必须注入 sys_config**：`device/bin/boot0_sdcard_*.bin` 出厂前要用
+   `update_boot0 … SDMMC_CARD` 把板子的 `sys_config.bin`（DRAM 参数、GPIO）写进去；
+   不注入就是错的 DDR 时序，BROM 跳过去直接死，**串口一个字都没有**（第一次上板
+   就是这个现象）。`sys_config.fex` → `sys_config.bin` 用
+   `tools/pack/pctools/linux/mod_update/script`。
+6. **`boot_package.fex` 必须带 BL31**：这颗 u-boot 没有 build.sh/brandy，boot0 只认
+   Allwinner 的 TOC1 包，而且包里要有 `u-boot` + `monitor`(BL31)，boot0 先跳 BL31
+   再跳 u-boot。现在用官方 `dragonsecboot -pack` 生成（`./bsp uboot` 会稀疏克隆
+   `gitlab.com/tina5.0_aiot/lichee/tools`，默认放 `sources/a733/awtools`）。
+7. **分区表/启动方式和官方对齐**：原来照板厂 `sys_partition.fex` 做 MBR
    （boot-resource/env/boot/rootfs/private），与 rsdk 不一致。现在按 rsdk 的
    `image.jsonnet` + `socs.json`（a733：GPT / u-boot）出 **GPT**：p1 `config` FAT
    16 MiB、p2 `rootfs` ext4 从 32 MiB 起；内核不再放独立 boot 分区，和官方一样
    放在 rootfs 的 `/boot` 下，`root=` 用 `UUID=`。
-7. **启动脚本**：这颗 u-boot 没有 `CONFIG_CMD_SYSBOOT`（源码里也没有
+8. **启动脚本**：这颗 u-boot 没有 `CONFIG_CMD_SYSBOOT`（源码里也没有
    `boot/extlinux`），rsdk 的 extlinux 路径在这里走不通；`pack` 因此生成
    `/boot.scr` 给 `distro_bootcmd` 扫描 → `source`，同时仍按官方格式写
    `extlinux.conf` 和 `/etc/kernel/cmdline`。
-8. **模块装不进 rootfs**：`install_kernel_modules` 只认 `sources/kernel` +
+9. **模块装不进 rootfs**：`install_kernel_modules` 只认 `sources/kernel` +
    `out/kernel/Image`，A733 两者都不同；新增
    `rootfs_install_platform_modules` hook，`./bsp rootfs` 会把 A733 模块
    `modules_install` + `depmod` 进 rootfs。
-9. **`AW_INPUT_SENSORINIT` 编不过**：`bsp/drivers/input/init-input.ko` 引用未导出的
-   `irq_to_desc`，modpost 报 `undefined!`；microduck 本来不要输入设备，已关掉。
+10. **`AW_INPUT_SENSORINIT` 编不过**：`bsp/drivers/input/init-input.ko` 引用未导出的
+    `irq_to_desc`，modpost 报 `undefined!`；microduck 本来不要输入设备，已关掉。
 
-> 仍未验证：真机启动（boot0→12 MiB 的 `boot_package.fex`、`/boot.scr` 里的
-> `load mmc 0:2` 都要上板确认）。依据与状态见 `vendor/a733/README.md`。
+> 仍未验证：修完 boot0 注入和 BL31 后的真机启动（上一版是**完全无输出**的），
+> 以及 `/boot.scr` 里 `load mmc 0:2` 的实机启动。依据与状态见 `vendor/a733/README.md`。
 
 ### 板级相关配置（与 SDK 对齐）
 
