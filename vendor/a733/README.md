@@ -65,29 +65,33 @@ cp config.env.example config.env
 
 | 区域 | 大小 | 内容 |
 |---|---|---|
-| MBR 保留区 | 16 MB | boot0 写在 8 KiB、u-boot 写在 128 KiB |
+| MBR 保留区 | 16 MB | **boot0 @128 KiB**、**`boot_package.fex` @12 MiB**（u-boot 的 TOC1 包） |
 | boot-resource | 32 MB | 留空（不放 logo） |
 | env | 16 MB | 留空（用 u-boot 默认环境） |
 | boot | 96 MB | FAT32：`Image`、`sun60i-a733-cubie-a7z.dtb`、`boot.scr` |
 | rootfs | 7.27 GB | `out/rootfs.ext4`（micro，开机 `resize2fs` 自适应） |
-| private | 16 MB | 留空 |
+| private | 16 MB | 留空（MBR 只有 4 个主分区槽位，这个分区只在镜像尾部占位） |
 
 镜像用 `truncate` 生成稀疏文件，`A733_IMAGE_NAME` 可改。
 
 ## 状态
 
-**已验证**：
+**已验证**（2026-10-23，WSL2 Ubuntu 22.04.5）：
 
 - A7Z 的 6.6 设备树（device 的 `board.dts` + BSP 的 `sun60iw2p1*.dtsi`）在 6.6 内核树上
-  `cpp + dtc` 编译通过（156365 字节 dtb，含 `ve@`/`codec` 节点）；
-- `sys_partition.fex` 解析、打包脚本流程（boot0@8K、u-boot@128K、分区偏移累加）。
+  `cpp + dtc` 编译通过（154 KiB dtb，含 `ve@`/`codec` 节点）；
+- `./bsp uboot`：官方 u-boot（AArch32，`ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-`）
+  编出 `u-boot.bin` 1.2 MB + `u-boot.dtb` 40 KB（`model = "Radxa Cubie A7Z"`），
+  再用 `vendor/a733/mk_boot_package.py` 打成 TOC1 的 `boot_package.fex`（1.5 MB，
+  结构与 Radxa 官方包逐字节对齐，除 `add_sum`）；
+- `./bsp pack`：生成 7.5 GB 稀疏 `a733-micro.img`，boot0@128 KiB、`boot_package.fex`@12 MiB、
+  MBR 四分区（boot-resource/env/boot/rootfs）、FAT32 boot 分区与 ext4 rootfs 都能正常挂载读取。
 
-**未验证**（本机没有 A733 板子，也没有完整的 Allwinner brandy 工具链）：
+**未验证**（本机没有 A733 板子）：
 
-- `./bsp uboot` 依赖官方 u-boot 仓库自带的 `build.sh`；若该分支没带 brandy 构建脚本，
-  需要按 Allwinner longan 的方式补 `dramlib`/`arisc`/`tools` 后再编；
-- boot0/u-boot 的写入偏移（8 KiB / 128 KiB）按 Allwinner 惯例，需上板确认；
-- `boot.scr` 里的 `mmc 0:3`/`/dev/mmcblk0p4` 与分区表一致，但实际启动需真机验证。
+- boot0 → `boot_package.fex` 的实际加载（12 MiB 这个偏移来自板厂镜像 / OpenWrt 的
+  `radxa-cubie-a7z` setup 脚本，不是官方文档）；
+- `boot.scr` 里 `fatload mmc 0:3` / `root=/dev/mmcblk0p4` 的实机启动。
 
 ## u-boot 设备树
 

@@ -35,12 +35,14 @@ A733_BSP_DIR="${A733_DIR}/bsp"
 A733_DEVICE_DIR="${A733_DIR}/device"
 A733_OUT="${OUT_DIR}/a733"
 
-a733_env() {
+cmd_a733_env() {
 	command -v apt-get >/dev/null 2>&1 || die "A733 构建按 Ubuntu/Debian 写的，需要 apt"
 	local pkgs=(
 		build-essential bc bison flex libssl-dev libelf-dev
 		device-tree-compiler dpkg-dev debhelper fakeroot
 		gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+		# A733 的 u-boot 是 AArch32，必须用 soft-float 的 gnueabi 工具链
+		gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
 		python3 python3-setuptools swig rsync curl wget git
 		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio
 		dosfstools mtools u-boot-tools binutils-aarch64-linux-gnu lz4
@@ -76,16 +78,16 @@ cmd_a733_setup() {
 
 # 官方 u-boot（2018.07 + brandy）：用仓库自带的 build.sh
 cmd_a733_uboot() {
-	local u="${A733_UBOOT_DIR}"
+	local u="${A733_UBOOT_DIR}" d="${A733_DEVICE_DIR}"
 	[[ -d "${u}" ]] || die "请先 ./bsp setup"
+	[[ -f "${d}/configs/cubie_a7z/uboot-board.dts" ]] || \
+		die "缺少 allwinner-device 的 configs/cubie_a7z/uboot-board.dts"
 
 	# u-boot 的板级 dts（arch/arm/dts/sun60i-a733-cubie-a7z.dts）最后一行是
 	#   #include "../../../../device-a733/configs/cubie_a7z/uboot-board.dts"
 	# 相对路径指到 u-boot 的父目录，所以把 device 仓库挂成 device-a733
 	# （archlinuxarm-a733 是把 device 目录拷进 u-boot 再 sed 路径，效果一样）。
-	[[ -f "${A733_DEVICE_DIR}/configs/cubie_a7z/uboot-board.dts" ]] || \
-		warn "device 仓库里没有 configs/cubie_a7z/uboot-board.dts"
-	ln -sfn "${A733_DEVICE_DIR}" "${A733_DIR}/device-a733"
+	ln -sfn "${d}" "${A733_DIR}/device-a733"
 
 	# Allwinner 源码里的宏名拼写错误（PMIS→PMIC），新版 GCC 下会重定义报错
 	local h
@@ -93,22 +95,59 @@ cmd_a733_uboot() {
 	         "${u}/arch/riscv/include/asm/arch-sunxi/pmic_bus.h"; do
 		[[ -f "${h}" ]] && sed -i 's/_SUNXI_PMIS_BUS_H/_SUNXI_PMIC_BUS_H/g' "${h}"
 	done
-	info "编译 u-boot + boot0（board=${A733_BRANDY_DEFCONFIG}）..."
-	if [[ -x "${u}/build.sh" ]]; then
-		(cd "${u}" && ./build.sh "${A733_BRANDY_DEFCONFIG}")
-	elif [[ -f "${u}/Makefile" ]]; then
-		die "官方 u-boot 没有 build.sh；Allwinner 的 boot0/brandy 由 longan 的打包仓库驱动，
-请改用 u-boot-aw2501 打包仓库，或把 brandy 工具链放进 sources/a733/uboot"
-	else
-		die "u-boot 源码不完整: ${u}"
-	fi
 
-	mkdir -p "${A733_OUT}/uboot"
-	local f
-	for f in "${u}"/boot0*.bin "${u}"/u-boot*.bin "${u}"/u-boot-sunxi-with-spl.bin; do
-		[[ -f "${f}" ]] && cp -f "${f}" "${A733_OUT}/uboot/"
-	done
-	ls -lh "${A733_OUT}/uboot/" 2>/dev/null || warn "没找到 boot0/u-boot 产物（看 build.sh 的输出目录）"
+	# 这棵官方 u-boot 只有标准 Makefile（没有 build.sh / brandy 目录）：
+	# boot0 用 device 仓库自带的预编译 boot0_sdcard_*.bin，u-boot 自己编。
+	# 注意 A733 的 u-boot 是 AArch32（CONFIG_SUNXI_ARM64 仍走 armv7-a + 64 位物理地址），
+	# 必须用 soft-float 的 arm-linux-gnueabi-；armhf 工具链会因为默认
+	# -mfloat-abi=hard 在 -march=armv7-a 下报 "architecture lacks an FPU"。
+	local cc="${A733_UBOOT_CROSS_COMPILE:-arm-linux-gnueabi-}"
+	command -v "${cc}gcc" >/dev/null 2>&1 || \
+		die "缺少 ${cc}gcc（apt install gcc-arm-linux-gnueabi）"
+	local dt="${A733_UBOOT_DTS:-sun60i-a733-cubie-a7z}"
+	local defconfig="${A733_BRANDY_DEFCONFIG}"
+	[[ -f "${u}/configs/${defconfig}" ]] || \
+		die "u-boot 里没有 configs/${defconfig}"
+
+	# GCC 11/12 会对 2018.07 的老代码报新的 -Werror 项，这里只降级为警告
+	local kcflags="-Wno-error=attributes -Wno-error=array-bounds -Wno-error=stringop-overflow"
+	kcflags="${kcflags} -Wno-error=maybe-uninitialized -Wno-error=stringop-truncation"
+	kcflags="${kcflags} -Wno-error=address-of-packed-member -Wno-error=misleading-indentation"
+
+	info "配置 u-boot: ${defconfig}（dt=${dt}）"
+	# u-boot 的 Makefile 以当前目录为 objtree，必须 cd 进去（make -C 会把
+	# arch/arm/dts 之类的路径解析到工作区根上）
+	(
+		cd "${u}" || die "无法进入 ${u}"
+		make ARCH=arm CROSS_COMPILE="${cc}" "${defconfig}" >/dev/null
+		# defconfig 的默认 DT 是参考板 soc-system，这里换成 A7Z 板级 dts，
+		# 否则 dts/dt.dtb 会把 soc-system.dtb 一起 grep 进来（不存在就失败）
+		sed -i "s|^CONFIG_DEFAULT_DEVICE_TREE=.*|CONFIG_DEFAULT_DEVICE_TREE=\"${dt}\"|" .config
+		make ARCH=arm CROSS_COMPILE="${cc}" olddefconfig >/dev/null
+
+		info "编译 u-boot（ARCH=arm CROSS_COMPILE=${cc}）..."
+		make ARCH=arm CROSS_COMPILE="${cc}" -j"$(job_count)" \
+			DEVICE_TREE="${dt}" KCFLAGS="${kcflags}"
+	)
+
+	local out="${A733_OUT}/uboot"
+	mkdir -p "${out}"
+	cp -f "${u}/u-boot.bin" "${out}/u-boot.bin"
+	[[ -f "${u}/u-boot.dtb" ]] && cp -f "${u}/u-boot.dtb" "${out}/u-boot.dtb"
+
+	# boot0（SD 卡版）来自 device 仓库；A733 的 BROM 从 128 KiB 读 boot0
+	local boot0="${d}/bin/boot0_sdcard_sun60iw2p1.bin"
+	[[ -f "${boot0}" ]] || die "缺少 ${boot0}"
+	cp -f "${boot0}" "${out}/boot0.bin"
+
+	# u-boot 要按 Allwinner 的 TOC1 包（boot_package.fex）放到 12 MiB，
+	# boot0 只认这种带头的包，裸 u-boot.bin 不行
+	info "打包 boot_package.fex ..."
+	python3 "${BSP_ROOT}/vendor/a733/mk_boot_package.py" \
+		"${out}/u-boot.bin" "${out}/u-boot.dtb" "${out}/boot_package.fex" \
+		--text-base 0x4a000000
+
+	ls -lh "${out}/"
 }
 
 cmd_a733_kernel() {
@@ -210,6 +249,40 @@ cmd_a733_rootfs() {
 		cmd_rootfs_micro "$@"
 }
 
+# 把 A733 内核树编出的模块装进 rootfs：rk3566 的 install_kernel_modules 只看
+# ${KERNEL_DIR}（sources/kernel）与 out/kernel/Image，A733 两者都不是。
+# 由 mod-rootfs.sh 的 cmd_rootfs_micro 通过 hook 调用。
+rootfs_install_platform_modules() {
+	local rootfs="$1" k="${A733_KERNEL_DIR}" b="${A733_BSP_DIR}" rel
+	[[ "${KERNEL_MODULES_INSTALL}" == "y" ]] || return 0
+	[[ -d "${k}" ]] || return 0
+	[[ -f "${A733_OUT}/kernel/Image" ]] || return 0
+
+	info "编译并安装 A733 内核模块 -> ${rootfs}/lib/modules"
+	(
+		cd "${k}" || exit 1
+		export BSP_TOP="${b%/}/"
+		export LICHEE_KERN_DIR="${k}"
+		export KCFLAGS="-I${b}/drivers/ve/cedar-ve"
+		make ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}" -j"$(job_count)" modules
+	)
+	run_root rm -rf "${rootfs}/lib/modules"
+	(
+		cd "${k}" || exit 1
+		export BSP_TOP="${b%/}/"
+		export LICHEE_KERN_DIR="${k}"
+		run_root env INSTALL_MOD_STRIP=1 \
+			make ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+			INSTALL_MOD_PATH="${rootfs}" modules_install
+	)
+	rel="$(make -s -C "${k}" ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+		kernelrelease 2>/dev/null | tr -d '[:space:]')"
+	if [[ -n "${rel}" ]] && command -v depmod >/dev/null 2>&1; then
+		run_root depmod -b "${rootfs}" -a "${rel}" || warn "depmod 失败"
+	fi
+	info "模块数: $(run_root find "${rootfs}/lib/modules" -name '*.ko*' | wc -l)"
+}
+
 # 检查编出来的 dtb 是否满足 HAT 的 BSP/HAL 基本要求
 cmd_a733_hal() {
 	local dtb="${A733_OUT}/kernel/${A733_DTS_NAME}.dtb"
@@ -247,11 +320,14 @@ cmd_a733_hal() {
 	info "HAT 基本要求全部满足"
 }
 
-# 按官方 sys_partition.fex 组 MBR 镜像：boot0@8K、u-boot@128K、分区从 16MB 开始
+# 按官方 sys_partition.fex 组 MBR 镜像：
+#   boot0 @128 KiB、boot_package.fex（TOC1 包）@12 MiB、分区从 16 MiB 开始
+# 这几个偏移来自板厂镜像（OpenWrt 的 radxa-cubie-a7z setup.sh：
+#   dd boot0_sdcard.bin seek=256、boot_package.fex seek=24576）
 cmd_a733_pack() {
 	local fex="${BSP_ROOT}/vendor/a733/sys_partition.fex"
 	local img="${A733_OUT}/${A733_IMAGE_NAME}"
-	local uboot_bin="" boot0_bin="" mkimage_bin=""
+	local pkg_bin="" boot0_bin="" mkimage_bin=""
 	local -a pname=() psize=() pfile=()
 	local line mbr_kb total off i name size file
 
@@ -259,15 +335,10 @@ cmd_a733_pack() {
 	[[ -f "${A733_OUT}/kernel/Image" ]] || die "请先 ./bsp kernel"
 	[[ -f "${OUT_DIR}/rootfs.ext4" ]] || die "请先 ./bsp rootfs"
 
-	for line in "${A733_OUT}"/uboot/*; do
-		[[ -f "${line}" ]] || continue
-		case "$(basename "${line}")" in
-			boot0*) boot0_bin="${line}" ;;
-			*loader*|u-boot*) uboot_bin="${line}" ;;
-		esac
-	done
-	[[ -n "${boot0_bin}" ]] || warn "没有 boot0，镜像里 boot0 位置留空"
-	[[ -n "${uboot_bin}" ]] || warn "没有 u-boot，镜像里 u-boot 位置留空"
+	boot0_bin="${A733_OUT}/uboot/boot0.bin"
+	pkg_bin="${A733_OUT}/uboot/boot_package.fex"
+	[[ -f "${boot0_bin}" ]] || die "缺少 ${boot0_bin}，请先 ./bsp uboot"
+	[[ -f "${pkg_bin}" ]] || die "缺少 ${pkg_bin}，请先 ./bsp uboot"
 
 	# 解析 fex
 	mbr_kb="$(awk -F= '/^\[mbr\]/{f=1;next} f&&/^[ \t]*size/{gsub(/[^0-9]/,"",$2);print $2;exit}' "${fex}")"
@@ -300,8 +371,10 @@ cmd_a733_pack() {
 	rm -f "${img}"
 	truncate -s "${total}" "${img}"
 
-	[[ -n "${boot0_bin}" ]] && dd if="${boot0_bin}" of="${img}" bs=1 seek=8192 conv=notrunc status=none
-	[[ -n "${uboot_bin}" ]] && dd if="${uboot_bin}" of="${img}" bs=1 seek=131072 conv=notrunc status=none
+	# boot0 @128 KiB（BROM 读 boot0 的位置），u-boot 的 TOC1 包 @12 MiB
+	dd if="${boot0_bin}" of="${img}" bs=512 seek=256 conv=notrunc status=none
+	dd if="${pkg_bin}" of="${img}" bs=512 seek=24576 conv=notrunc status=none
+	info "boot0: $(basename "${boot0_bin}") @128KiB, boot_package.fex @12MiB"
 
 	# boot 分区：FAT，放 Image + dtb + boot.scr
 	mkimage_bin="${A733_UBOOT_DIR}/tools/mkimage"
@@ -335,8 +408,38 @@ cmd_a733_pack() {
 		off=$(( off + size * 512 ))
 	done
 
+	# ---- MBR 分区表 ----
+	# sys_partition.fex 有 5 个分区，但 MBR 只有 4 个主分区槽位。rootfs 必须是 p4
+	# （boot.cmd 的 `fatload mmc 0:3` 和 bootargs 的 `root=/dev/mmcblk0p4` 都按
+	# 这个顺序），所以只给前 4 个分区建表；第 5 个 private 是空的，仅在镜像尾部
+	# 保留其空间。没有分区表的话内核根本看不到 mmcblk0p3/p4，镜像等于不能启动。
+	local pt pidx=0 pstart ptype
+	pt="$(mktemp)"
+	{
+		echo "label: dos"
+		echo "unit: sectors"
+		echo
+		pstart=$(( mbr_kb * 2 ))    # [mbr] size 单位是 KByte，分区表按 512B 扇区
+		for i in "${!pname[@]}"; do
+			name="${pname[$i]}"; size="${psize[$i]}"
+			if (( pidx >= 4 )); then
+				warn "MBR 仅 4 个主分区槽位，跳过 ${name}（镜像尾部保留 ${size} 扇区）"
+				pstart=$(( pstart + size ))
+				continue
+			fi
+			pidx=$(( pidx + 1 ))
+			ptype=83
+			[[ "${name}" == "boot" ]] && ptype=0c
+			echo "start=${pstart}, size=${size}, type=${ptype}"
+			pstart=$(( pstart + size ))
+		done
+	} > "${pt}"
+	sfdisk --no-tell-kernel --force --quiet "${img}" < "${pt}" || die "写 MBR 分区表失败"
+	rm -f "${pt}"
+
 	info "镜像: ${img}"
 	ls -lh "${img}"
 	info "分区（按 sys_partition.fex）: ${pname[*]}"
-	info "注意：boot0/u-boot 的写入偏移按 Allwinner 惯例 8K/128K，需上板验证。"
+	sfdisk -d "${img}" 2>/dev/null | sed 's/^/  /'
+	info "注意：boot0@128KiB、boot_package.fex@12MiB 按板厂镜像布局，需上板验证。"
 }

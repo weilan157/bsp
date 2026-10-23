@@ -288,6 +288,10 @@ cmd_rootfs_micro() {
 	if [[ "${KERNEL_MODULES_INSTALL}" == "y" ]] && [[ -f "${OUT_DIR}/kernel/Image" ]]; then
 		rootfs_install_kernel_modules "${rootfs}"
 	fi
+	# 平台自己的模块安装（A733 的内核树不在 sources/kernel，路径不同）
+	if declare -F rootfs_install_platform_modules >/dev/null; then
+		rootfs_install_platform_modules "${rootfs}"
+	fi
 
 	# apt 装 sysvinit/busybox 时可能覆盖 /etc/inittab、/etc/init.d/rcS、fstab，
 	# 这里再铺一次 overlay，保证我们的启动脚本最后生效

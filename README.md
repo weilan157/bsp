@@ -161,7 +161,7 @@ u-boot 的板级 dts 在 u-boot 源码里（`arch/arm/dts/sun60i-a733-cubie-a7z.
 HAT 适配的设备树在 `vendor/a733/dts/microduck-a7z.dtsi`：UART0=PB9/PB10、TWI7=PJ22/PJ23（400 kHz）、
 I2S0=PB4/5/6/7/8 + TLV320AIC3104、关机检测 PB3，显示/HDMI 关掉。
 
-镜像按板厂 `sys_partition.fex`：MBR 保留区 16 MB（boot0@8K、u-boot@128K）+
+镜像按板厂 `sys_partition.fex`：MBR 保留区 16 MB（**boot0@128 KiB、boot_package.fex@12 MiB**）+
 boot-resource 32 MB + env 16 MB + boot 96 MB（FAT32：Image/dtb/boot.scr）+
 rootfs 7.27 GB（我们的 ext4）+ private 16 MB。
 
@@ -178,8 +178,53 @@ docker run --rm --network host \
 
 `out/a733/kernel/` 出 `Image` 和 dtb；细节见 `docker/README.md`。
 
-> 状态：6.6 的设备树已实测 `cpp + dtc` 编译通过（156365 字节 dtb，含 `ve@`/`codec`）；
-> u-boot 的 brandy 构建与真机启动尚未验证，详见 `vendor/a733/README.md`。
+### 实测：整条链到 SD 卡镜像（2026-10-23）
+
+`env → setup → kernel → uboot → rootfs → pack` 全部跑通，产物：
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `out/a733/kernel/Image` | 37 MB | 6.6.98-g61f3fe291c7a-dirty，defconfig + microduck.config |
+| `out/a733/kernel/sun60i-a733-cubie-a7z.dtb` | 154 KB | cpp + dtc 单编 |
+| `out/a733/uboot/u-boot.bin` / `u-boot.dtb` | 1.2 MB / 40 KB | AArch32 u-boot，`model = "Radxa Cubie A7Z"` |
+| `out/a733/uboot/boot_package.fex` | 1.5 MB | TOC1 包（`sunxi-package` + spare_boot_head + u-boot） |
+| `out/a733/uboot/boot0.bin` | 240 KB | device 仓库的 `boot0_sdcard_sun60iw2p1.bin` |
+| `out/rootfs.ext4` | 308 MB | micro rootfs + 929 个 `.ko` |
+| `out/a733/a733-micro.img` | 7.5 GB（稀疏 215 MB） | 可 dd 到 SD 卡 |
+
+镜像自检：boot0 在 128 KiB（`eGON.BT0`）、`boot_package.fex` 在 12 MiB
+（`sunxi-package` + magic `0x89119800`）、MBR 四个主分区
+（boot-resource/env/boot/rootfs，`rootfs` 正好是 p4）、FAT32 boot 分区里有
+`Image`/dtb/`boot.scr`、ext4 分区里 `inittab`/模块都在。
+
+#### 这次修的坑
+
+1. **u-boot 是 AArch32**：`sun60iw2p1_a733_defconfig` 里 `CONFIG_MACH_SUN60IW2`
+   选的是 `CPU_V7A`（不是 `CONFIG_ARM64`），必须
+   `ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-`；用 armhf 工具链会因为默认
+   `-mfloat-abi=hard` 在 `-march=armv7-a` 下报 “architecture lacks an FPU”。
+2. **`make -C <u-boot>` 不行**：u-boot 的 Makefile 以当前目录为 objtree，必须
+   `cd` 进去，否则 `arch/arm/dts/...` 会解析到工作区根上（`dts/dt.dtb` 报
+   `Couldn't open .../sun60i-a733-cubie-a7z.dtb`）。
+3. **默认 DT 是参考板**：defconfig 里 `CONFIG_DEFAULT_DEVICE_TREE="sun60iw2p1-soc-system"`，
+   要改成 `sun60i-a733-cubie-a7z`，否则 FDTGREP 阶段找不到 soc-system.dtb。
+4. **GCC 11 的 -Werror**：老 u-boot 代码会踩 `attributes`、`address-of-packed-member`、
+   `misleading-indentation` 等新告警，`./bsp uboot` 已用 `KCFLAGS=-Wno-error=...` 降级。
+5. **`boot_package.fex` 得自己打**：这棵树没有 build.sh/brandy，boot0 只认
+   Allwinner 的 TOC1 包。`vendor/a733/mk_boot_package.py` 按官方包逐字段生成
+   （head 的 `check_sum` 是固定戳 `0x5F0A6C39`），已用 Radxa 官方包做过逐字节比对。
+6. **MBR 之前根本没写**：原来的 `cmd_a733_pack` 只 `truncate` + dd，没有分区表，
+   内核看不到 `mmcblk0p3/p4`。现在用 `sfdisk` 写 4 个主分区（`private` 放不下，
+   只保留尾部空间）。
+7. **模块装不进 rootfs**：`install_kernel_modules` 只认 `sources/kernel` +
+   `out/kernel/Image`，A733 两者都不同；新增
+   `rootfs_install_platform_modules` hook，`./bsp rootfs` 会把 A733 模块
+   `modules_install` + `depmod` 进 rootfs。
+8. **`AW_INPUT_SENSORINIT` 编不过**：`bsp/drivers/input/init-input.ko` 引用未导出的
+   `irq_to_desc`，modpost 报 `undefined!`；microduck 本来不要输入设备，已关掉。
+
+> 仍未验证：真机启动（boot0→u-boot 的 12 MiB 包、`boot.scr` 的 `mmc 0:3` 都要上板确认）。
+> 状态与偏移依据见 `vendor/a733/README.md`。
 
 ### 板级相关配置（与 SDK 对齐）
 
