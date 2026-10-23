@@ -55,7 +55,10 @@ dockerd --iptables=false --ip6tables=false --bridge=none \
   - `out/a733/kernel/sun60i-a733-cubie-a7z.dtb`：**157536 字节**
 
 首次 clone（u-boot 200MB + kernel 6.6 1.5GB + bsp 80MB + device 5MB）加全量内核编译
-约 25 分钟；之后增量编译 1-2 分钟。
+约 25 分钟；之后增量编译 **约 11 秒**（dtb 改成 cpp+dtc，不再 make dtbs）。
+
+`A733_KERNEL_COMPRESS=lz4` 时额外产出 `Image.lz4`（37.7 MB → **14.7 MB**，39%），
+给带 lz4 命令的 u-boot 用。
 
 构建过程中 `./bsp kernel` 会自动处理 6.6 BSP 的几个构建前提（详见
 `vendor/a733/README.md` 的「内核构建的坑」）：`BSP_TOP`、`LICHEE_KERN_DIR`、

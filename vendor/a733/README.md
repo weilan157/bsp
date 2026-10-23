@@ -154,4 +154,8 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 | rt-media 报 `field 'tv' 不完整`、`../vin/vin-video/vin_video.h` 缺失 | 6.6 BSP 里 rt-media 还引用旧 VIN 布局 | 关掉 `CONFIG_VIDEO_RT_MEDIA`（编解码用 cedar-ve） |
 | `dt-bindings/clock/sun60iw2-ccu.h: No such file` | BSP 的 dt-bindings 不在内核 include 里 | 编 dts 时把 `bsp/include` 加进 `DTC_INCLUDE` |
 
-`Image` 编出来后（37 MB），dtbs 会顺带编一遍 mainline 的 dts，约 1-2 分钟。
+`Image` 编出来后（37 MB），dtb 用 **cpp + dtc 单独编**（几十毫秒），不再 `make dtbs`
+（那会把 mainline 的 dts 全编一遍，1-2 分钟）；增量构建整体约 11 秒。
+
+可选 `A733_KERNEL_COMPRESS=lz4`：额外生成 `Image.lz4`（37.7 MB → 14.7 MB，39%，
+`lz4 -l` legacy 格式），配合 u-boot 的 lz4 命令使用；默认仍是未压缩 `Image`。

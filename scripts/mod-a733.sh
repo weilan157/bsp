@@ -43,7 +43,7 @@ a733_env() {
 		gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 		python3 python3-setuptools swig rsync curl wget git
 		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio
-		dosfstools mtools u-boot-tools binutils-aarch64-linux-gnu
+		dosfstools mtools u-boot-tools binutils-aarch64-linux-gnu lz4
 	)
 	info "安装 A733 构建依赖（需要 sudo）..."
 	run_root apt-get update
@@ -172,14 +172,33 @@ cmd_a733_kernel() {
 	# 4) 编译
 	info "编译 Image 与 ${A733_DTS_NAME}.dtb (jobs=$(job_count))"
 	"${kmake[@]}" -j"$(job_count)" Image
-	# Kbuild 的 dtb 目标要相对 dts 目录，直接 make dtbs（会顺带编 mainline 的 dts）
-	# BSP 的 dt-bindings 头（如 sun60iw2-ccu.h）不在内核 include 里，编译 dts 时
-	# 把 bsp/include 加进 DTC_INCLUDE。
-	"${kmake[@]}" DTC_INCLUDE="${b}/include ${k}/scripts/dtc/include-prefixes" dtbs
+	# 只编我们这一个 dtb：make dtbs 会把 mainline 的 dts 全编一遍（1-2 分钟），
+	# 这里直接用 cpp + dtc，几十毫秒。BSP 的 dt-bindings 头靠 -I bsp/include。
+	info "编译 dtb: ${A733_DTS_NAME}.dtb"
+	cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp \
+		-I "${k}/include" -I "${b}/include" \
+		-I "${k}/arch/arm64/boot/dts" -I "${dstdir}" \
+		-I "${k}/scripts/dtc/include-prefixes" \
+		-o "${dstdir}/${A733_DTS_NAME}.dtb.pp" "${dstdir}/${A733_DTS_NAME}.dts" || \
+		die "dts cpp 失败"
+	dtc -I dts -O dtb -o "${dstdir}/${A733_DTS_NAME}.dtb" \
+		"${dstdir}/${A733_DTS_NAME}.dtb.pp" || die "dtc 失败"
+	rm -f "${dstdir}/${A733_DTS_NAME}.dtb.pp"
 
 	mkdir -p "${A733_OUT}/kernel"
 	cp -f "${k}/arch/arm64/boot/Image" "${A733_OUT}/kernel/"
 	cp -f "${k}/arch/arm64/boot/dts/allwinner/${A733_DTS_NAME}.dtb" "${A733_OUT}/kernel/"
+
+	# 可选：压一份 Image.lz4（arm64 内核不自解压，要 u-boot 带 lz4 命令才能用）。
+	# Tina 裁剪指南实测总时间 LZO 159ms、LZ4 170ms、GZIP 213ms、XZ 771ms。
+	if [[ "${A733_KERNEL_COMPRESS:-}" == "lz4" ]]; then
+		if command -v lz4 >/dev/null 2>&1; then
+			info "生成 Image.lz4（legacy 格式，给 u-boot lz4 用）"
+			lz4 -l -9 -f "${A733_OUT}/kernel/Image" "${A733_OUT}/kernel/Image.lz4" >/dev/null
+		else
+			warn "没有 lz4 命令，跳过 Image.lz4（apt install lz4）"
+		fi
+	fi
 }
 
 cmd_a733_rootfs() {

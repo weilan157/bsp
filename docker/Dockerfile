@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git rsync curl wget ca-certificates patch zstd cpio kmod \
         python3 python3-setuptools swig \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-        e2fsprogs dosfstools mtools debootstrap qemu-user-static sudo \
+        e2fsprogs dosfstools mtools lz4 debootstrap qemu-user-static sudo \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
