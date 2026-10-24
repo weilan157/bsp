@@ -1,9 +1,11 @@
-# Cubie A7Z（A733）开机要加载的模块，microduck-wifi 里逐个 modprobe。
+# Cubie A7Z（A733）开机要加载的模块，由 /etc/rc2.d/S99microduck-modules 逐个 modprobe。
 #
-# 板载 WiFi/BT 芯片对应的驱动在 allwinner-bsp/drivers/net/wireless/ 下
-# （bcmdhd / aic8800 / rtl8xxx / xr829 / uwe5622 之一），
-# 具体模块名由 Radxa 的 kernel deb 决定，拿到板子后用
-#   ls /lib/modules/$(uname -r)/kernel/drivers/net/wireless/
-# 确认后取消注释，例如：
-# aic8800_fdrv
-# bcmdhd
+# 板载 WiFi/BT 是 FCU760K 模块，走 USB1（USB2.0），驱动在 allwinner-bsp 的
+# drivers/net/wireless/aic8800：
+#   aic8800_bsp   —— 总线抽象层（USB/SDIO 共用），obj-m，必须先加载
+#   aic8800_fdrv  —— WiFi 主驱动（cfg80211）
+#
+# 蓝牙 aic8800_btusb 在 6.6 上编不过（厂商代码用了已移除的 get_fs/set_fs、
+# mm_segment_t/KERNEL_DS 以及旧的 class_create 签名），移植前先不加载。
+aic8800_bsp
+aic8800_fdrv

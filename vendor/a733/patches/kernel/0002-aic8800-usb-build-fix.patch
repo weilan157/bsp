@@ -1,0 +1,85 @@
+diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
+index d3a3371..49b2aa8 100644
+--- a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
++++ b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
+@@ -399,7 +399,12 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
+ 	}
+ 	rd_version_val = rd_patch_addr_cfm.memdata;
+ 	printk("rd_version_val=%08X\n", rd_version_val);
++	/* AIC8800 USB FIX (d80): fw_version_uint 只定义在 SDIO 的 struct priv_dev
++	 * (aicsdio.h)，USB 版 (aicusb.h) 没有该成员，无条件赋值会让 USB 构建失败。
++	 * 这个字段只用于版本记录，USB 路径跳过即可。 */
++#ifdef AICWF_SDIO_SUPPORT
+ 	aicdev->fw_version_uint = rd_version_val;
++#endif
+ 	if (rd_version_val > 0x06090100) {
+ 		patch_buff_addr = rd_patch_addr + 12;
+ 		ret = rwnx_send_dbg_mem_read_req(aicdev, patch_buff_addr, &rd_patch_addr_cfm);
+diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
+index 71998d8..eda0f2f 100644
+--- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
++++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
+@@ -69,7 +69,13 @@ void *aicbsp_get_drvdata(void *args)
+ static int aicbsp_platform_power_on(void)
+ {
+ #ifdef CONFIG_PLATFORM_ALLWINNER
++	/* AIC8800 USB FIX (power): sunxi_wlan_set_power() 在本 BSP 快照里只有
++	 * extern 声明、没有实现（原实现属于板级支持包）。USB 路径不需要它：
++	 * board.dts 里 wifi_power_en/wifi_chip_en 都是 regulator-always-on +
++	 * regulator-boot-on，上电即常开。SDIO 路径保持原样。 */
++#ifdef AICWF_SDIO_SUPPORT
+ 	sunxi_wlan_set_power(1);
++#endif
+ 	mdelay(50);
+ #endif
+ 	return 0;
+@@ -78,7 +84,9 @@ static int aicbsp_platform_power_on(void)
+ static void aicbsp_platform_power_off(void)
+ {
+ #ifdef CONFIG_PLATFORM_ALLWINNER
++#ifdef AICWF_SDIO_SUPPORT
+ 	sunxi_wlan_set_power(0);
++#endif
+ 	mdelay(100);
+ #endif
+ 	bsp_dbg("%s\n", __func__);
+diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
+index ef198ee..ac52be0 100644
+--- a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
++++ b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
+@@ -10,6 +10,13 @@
+ #include <linux/kthread.h>
+ #include "aicwf_txrxif.h"
+ #include "aicwf_usb.h"
++
++/* AIC8800 USB FIX (feature): aicwf_feature 只在 aicwf_sdio.c（SDIO 构建）
++ * 里定义，但 aicwf_8800dc.c 无条件 extern 引用它，USB 构建会 undefined。
++ * 这里在 USB 构建下补一个定义。 */
++#ifdef AICWF_USB_SUPPORT
++struct aicbsp_feature_t aicwf_feature;
++#endif
+ #include "rwnx_tx.h"
+ #include "rwnx_defs.h"
+ #include "usb_host.h"
+diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
+index 8ee19ec..2998eb5 100644
+--- a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
++++ b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
+@@ -2329,9 +2329,17 @@ static int rwnx_do_ioctl(struct net_device *net, struct ifreq *req, void __user
+ 		break;
+ 	case (SIOCDEVPRIVATE+1):
+ 		printk("IOCTL PRIVATE\n");
++		/* AIC8800 USB FIX: ws_irqrx 只存在于 SDIO 的 rwnx_plat->sdiodev，
++		 * USB 构建（AIC_INTF_USB）下该成员不存在，直接编译失败。
++		 * 这两行只是私有 ioctl 的唤醒锁，Linux 路径不需要，按接口条件编译。
++		 */
++#if IS_ENABLED(CONFIG_AIC_INTF_SDIO)
+ 		rwnx_wakeup_lock(g_rwnx_plat->sdiodev->rwnx_hw->ws_irqrx);
++#endif
+ 		ret = android_priv_cmd(net, req, cmd);
++#if IS_ENABLED(CONFIG_AIC_INTF_SDIO)
+ 		rwnx_wakeup_unlock(g_rwnx_plat->sdiodev->rwnx_hw->ws_irqrx);
++#endif
+ 		break;
+ 	default:
+ 		ret = -EOPNOTSUPP;

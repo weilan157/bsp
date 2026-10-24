@@ -1,0 +1,21 @@
+#!/bin/sh
+# 加载板载 WiFi/BT（FCU760K / aic8800，USB1 接口）。
+#
+# 模块清单在 /etc/microduck-modules（每行一个，# 开头是注释）。
+# aic8800_bsp 必须先于 aic8800_fdrv / aic8800_btusb 加载。
+#
+# 说明：rc2.d 的脚本由 sysvinit 的 /etc/init.d/rc 在进入 runlevel 2 时执行，
+# 此时 rootfs 已 rw、/lib/modules 可用。
+
+[ -r /etc/microduck-modules ] || exit 0
+
+while read -r mod; do
+	case "${mod}" in
+	''|\#*) continue ;;
+	esac
+	modprobe "${mod}" 2>/dev/null \
+		&& logger -t microduck-modules "loaded ${mod}" \
+		|| logger -t microduck-modules "skip ${mod}"
+done < /etc/microduck-modules
+
+exit 0

@@ -303,6 +303,7 @@ cmd_rootfs_micro() {
 		fi
 		rootfs_fix_perms "${rootfs}"
 		run_root chmod 755 "${rootfs}/etc/init.d/rcS" "${rootfs}"/usr/sbin/microduck-* \
+			"${rootfs}/etc/rc2.d/S99microduck-modules" \
 			"${rootfs}/usr/share/udhcpc/default.script" 2>/dev/null || true
 	fi
 
