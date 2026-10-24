@@ -570,6 +570,17 @@ cmd_a733_pack() {
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
+	# WiFi/BT（aic8800）需要 /lib/firmware/aic8800dc 与 aic8800d80 下的固件，
+	# 厂商 BSP 不带这些 bin，这里从 vendor/a733/firmware 铺进 rootfs。
+	a733_install_firmware() {
+		local fw="${BSP_ROOT}/vendor/a733/firmware"
+		[[ -d "${fw}" ]] || return 0
+		run_root mkdir -p "${rootdir}/lib/firmware"
+		run_root cp -a "${fw}/." "${rootdir}/lib/firmware/"
+		info "安装 aic8800 固件: $(run_root find "${rootdir}/lib/firmware" -type f | wc -l) 个文件"
+	}
+	a733_install_firmware
+
 	info "安装内核与启动脚本到 rootfs /boot"
 	run_root mkdir -p "${rootdir}/boot/extlinux" "${rootdir}/etc/kernel" "${rootdir}/config"
 	run_root cp -f "${kernel}" "${rootdir}/boot/Image"
