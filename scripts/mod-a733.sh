@@ -163,6 +163,38 @@ cmd_a733_uboot() {
 		sed -i "s|^CONFIG_BOOTCOMMAND=.*|CONFIG_BOOTCOMMAND=\"${rawboot}\"|" .config
 		grep -q '^CONFIG_BOOTCOMMAND="mmc dev 0' .config || \
 			echo "CONFIG_BOOTCOMMAND=\"${rawboot}\"" >> .config
+
+		# ---- 快速启动（A733_UBOOT_FAST=y，默认开）----
+		# 实测上电到内核的时间几乎全在 u-boot：PCIe 链路训练两次 timeout(~2.4s)、
+		# UFS 无设备仍做 4 次校准(~2-3s)、USB 双总线扫描 + usb burn(~1s)。
+		# 本板从 SD 卡启动，这些都用不到，直接关掉；bootcmd 改成直接 sysboot
+		# 到 extlinux.conf，跳过 distro_bootcmd 的设备枚举（失败再回退）。
+		if [[ "${A733_UBOOT_FAST:-y}" == "y" ]]; then
+			local sym fastboot
+			# 说明：只关驱动本体不够——board/sunxi 与 cmd/ 里还有无条件引用，
+			# 会链接失败（sunxi_pcie_exit / sunxi_usb_dev_register /
+			# sunxi_fastboot_status_read）。所以把"使用者"也一起关掉：
+			#   CONFIG_PCI               -> board_quiesce_devices 里的 sunxi_pcie_exit
+			#   CONFIG_CMD_FASTBOOT      -> cmd_fastboot.c 的 sunxi_usb_*
+			#   CONFIG_CMD_SPRITE        -> sunxi_sprite.c 的 sunxi_usb_*
+			#   CONFIG_SUNXI_ANDROID_BOOT-> board_late_init 的 sunxi_fastboot_status_read
+			for sym in CONFIG_UFS CONFIG_SUNXI_UFS \
+				   CONFIG_PCI CONFIG_PCIE_ALLWINNER_RC \
+				   CONFIG_USB CONFIG_CMD_USB CONFIG_USB_EHCI_HCD \
+				   CONFIG_USB_STORAGE CONFIG_SUNXI_USB CONFIG_DM_USB \
+				   CONFIG_CMD_FASTBOOT CONFIG_CMD_SUNXI_SPRITE \
+				   CONFIG_SUNXI_ANDROID_BOOT; do
+				sed -i "s|^${sym}=.*|# ${sym} is not set|" .config
+				grep -q "^# ${sym} is not set" .config || \
+					echo "# ${sym} is not set" >> .config
+			done
+			sed -i 's|^CONFIG_BOOTDELAY=.*|CONFIG_BOOTDELAY=0|' .config
+			# 单引号：${scriptaddr} 要留给 u-boot 运行时展开
+			fastboot='mmc dev 0; sysboot mmc 0:2 ${scriptaddr} /boot/extlinux/extlinux.conf'
+			fastboot="${fastboot}; run distro_bootcmd"
+			sed -i "s|^CONFIG_BOOTCOMMAND=.*|CONFIG_BOOTCOMMAND=\"${fastboot}\"|" .config
+			info "u-boot 快速启动：关 PCIe/UFS/USB，bootdelay=0，直接 sysboot extlinux"
+		fi
 		make ARCH=arm CROSS_COMPILE="${cc}" olddefconfig >/dev/null
 
 		info "编译 u-boot（ARCH=arm CROSS_COMPILE=${cc}）..."
@@ -260,7 +292,10 @@ a733_pack_bootloader() {
 	# boot_package.fex（官方 u-boot + BL31 + SCP，TOC/偏移都是官方调好的）。
 	# 只有拿不到官方包时才自己用 dragonsecboot 打（下面那段）。
 	local vendor_pkg="${BSP_ROOT}/vendor/a733/boot_package.fex"
-	if [[ -f "${vendor_pkg}" ]]; then
+	# A733_UBOOT_FAST=y 时 u-boot 里带了快速启动配置（关 PCIe/UFS/USB、
+	# bootdelay=0、直连 extlinux），必须用我们编的 u-boot 重打包；
+	# boot0 仍然用官方成品，BL31/SCP 也用官方二进制，只有 u-boot 这一项是新的。
+	if [[ -f "${vendor_pkg}" && "${A733_UBOOT_FAST:-y}" != "y" ]]; then
 		info "使用官方 boot_package.fex（vendor/a733/，与官方镜像一致）"
 		cp -f "${vendor_pkg}" boot_package.fex
 		cp -f boot_package.fex "${A733_OUT}/uboot/boot_package.fex"
@@ -529,7 +564,9 @@ cmd_a733_pack() {
 	# 这颗内核的串口是 Allwinner BSP 驱动，注册的是 /dev/ttyAS*（不是 ttyS*）；
 	# 写 ttyS0 会出现 "unable to open an initial console"。earlycon 仍然用
 	# uart8250 + UART0 基址，保证 console 驱动 probe 之前也能看到 log。
-	bootargs="console=ttyAS0,115200 earlycon=uart8250,mmio32,0x02500000 root=/dev/mmcblk0p2 rw rootwait cma=8M loglevel=8 ignore_loglevel initcall_debug"
+	# loglevel=4：只保留 warning 以上。115200 下日志本身要占掉几百毫秒，
+	# 调试时临时改成 7/8 即可。
+	bootargs="console=ttyAS0,115200 root=/dev/mmcblk0p2 rw rootwait cma=8M loglevel=4"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
@@ -544,14 +581,14 @@ cmd_a733_pack() {
 	"${mkimage_bin}" -C none -A arm64 -T script -d "${A733_OUT}/boot.cmd" \
 		"${rootdir}/boot/boot.scr" >/dev/null || die "生成 boot.scr 失败"
 
-	# extlinux.conf / cmdline：rsdk 会给内核 deb 里的这两个文件改 root=UUID，
-	# 本 u-boot 没有 sysboot 命令（没有 CONFIG_CMD_SYSBOOT），实际启动走 boot.scr，
-	# 这里仍按官方格式生成，方便换成支持 extlinux 的 u-boot 时直接生效
+	# extlinux.conf：u-boot 的 pxe/extlinux 解析器在没有 "menu title" 时不会画菜单，
+	# 只按 default + timeout 直接启动；timeout 0 = 立刻启动，不需要按键选择。
+	# 注意：本 u-boot 的 bootcmd 是 distro_bootcmd，先扫 USB 再扫 mmc，
+	# 所以这里必须是"无菜单 + 0 延时"，否则每次上电都要等交互。
 	cat > "${A733_OUT}/extlinux.conf" <<EOF
 default l0
-menu title Boot menu
+timeout 0
 label l0
-	menu label Debian GNU/Linux
 	linux /boot/Image
 	fdt /boot/${A733_DTS_NAME}.dtb
 	append ${bootargs}
@@ -574,11 +611,17 @@ EOF
 	file_count="$(run_root find "${rootdir}" | wc -l)"
 	fs_mb=$(( fs_mb + file_count * 4 / 1024 + 64 ))
 	fs_mb=$(( fs_mb * 110 / 100 ))
-	img_size=$(( root_start * 512 + fs_mb * 1024 * 1024 ))
 	info "rootfs.ext4: ${fs_mb} MiB，UUID=${rootfs_uuid}"
 	run_root rm -f "${OUT_DIR}/rootfs.ext4"
 	run_root mkfs.ext4 -d "${rootdir}" -L rootfs -U "${rootfs_uuid}" \
 		"${OUT_DIR}/rootfs.ext4" "${fs_mb}M" >/dev/null || die "mkfs.ext4 失败"
+	# 镜像大小按"实际生成的 rootfs.ext4"算，再留 8 MiB 给磁盘末尾的 GPT 备份
+	# 头/分区表（34 个扇区）。少了这段余量，p2 会比文件系统小几块，内核报
+	# "EXT4-fs: bad geometry: block count ... exceeds size of device"，rootfs 挂不上。
+	local fs_bytes
+	fs_bytes=$(run_root stat -c%s "${OUT_DIR}/rootfs.ext4")
+	img_size=$(( root_start * 512 + fs_bytes + 8 * 1048576 ))
+	img_size=$(( (img_size + 1048576 - 1) / 1048576 * 1048576 ))
 
 	# 3) config 分区（16 MiB FAT）
 	tmp_cfg="${A733_OUT}/config.fat"
