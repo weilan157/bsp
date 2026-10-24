@@ -1,5 +1,5 @@
 diff --git a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c
-index 51e2f23..e578c6b 100644
+index 51e2f23..acb5f6c 100644
 --- a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c
 @@ -1205,7 +1205,9 @@ static int btchr_init(void)
@@ -13,6 +13,16 @@ index 51e2f23..e578c6b 100644
  	if (IS_ERR(bt_char_class)) {
  		AICBT_ERR("Failed to create bt char class");
  		return PTR_ERR(bt_char_class);
+@@ -1403,6 +1405,9 @@ static struct usb_driver btusb_driver;
+ 
+ static struct usb_device_id btusb_table[] = {
+ 	{USB_DEVICE_AND_INTERFACE_INFO(0xa69c, 0x8801, 0xe0, 0x01, 0x01)},
++	/* AIC8800 USB D80 FIX: D80 模组的蓝牙接口同为 class 0xe0/子类 0x01/协议 0x01 */
++	{USB_DEVICE_AND_INTERFACE_INFO(0xa69c, 0x8d80, 0xe0, 0x01, 0x01)},
++	{USB_DEVICE_AND_INTERFACE_INFO(0xa69c, 0x8d81, 0xe0, 0x01, 0x01)},
+ 	{}
+ };
+ 
 diff --git a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h
 index 0a68808..5a92985 100644
 --- a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h

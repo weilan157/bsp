@@ -16,10 +16,22 @@ index d3a3371..49b2aa8 100644
  		patch_buff_addr = rd_patch_addr + 12;
  		ret = rwnx_send_dbg_mem_read_req(aicdev, patch_buff_addr, &rd_patch_addr_cfm);
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-index 71998d8..eda0f2f 100644
+index 71998d8..bd12256 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-@@ -69,7 +69,13 @@ void *aicbsp_get_drvdata(void *args)
+@@ -50,6 +50,11 @@ void aicbsp_device_exit(void)
+ 
+ static struct device_match_entry aicdev_match_table[] = {
+ 	{0xa69c, 0x8800, PRODUCT_ID_AIC8800D,   "aic8800d",   0, 0}, // 8800d in bootloader mode
++	/* AIC8800 USB D80 FIX: FCU760K 模块的 USB PID 是 0x8d80（bootloader 模式）。
++	 * 这颗芯片在 SDIO 表里是 0x0182 -> PRODUCT_ID_AIC8800D80，但 USB 表原本没这一项，
++	 * 导致设备枚举成功却没有任何驱动绑定（实测 a69c:8d80）。 */
++	{0xa69c, 0x8d80, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
++	{0xa69c, 0x8d81, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
+ };
+ 
+ static struct device_match_entry *aic_matched_ic;
+@@ -69,7 +74,13 @@ void *aicbsp_get_drvdata(void *args)
  static int aicbsp_platform_power_on(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -33,7 +45,7 @@ index 71998d8..eda0f2f 100644
  	mdelay(50);
  #endif
  	return 0;
-@@ -78,7 +84,9 @@ static int aicbsp_platform_power_on(void)
+@@ -78,7 +89,9 @@ static int aicbsp_platform_power_on(void)
  static void aicbsp_platform_power_off(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -43,8 +55,17 @@ index 71998d8..eda0f2f 100644
  	mdelay(100);
  #endif
  	bsp_dbg("%s\n", __func__);
+@@ -1012,6 +1025,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+ static struct usb_device_id aicwf_usb_id_table[] = {
+ 	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC)},
+ 	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC_8801)},
++	{USB_DEVICE(USB_VENDOR_ID_AIC, 0x8d80)},
++	{USB_DEVICE(USB_VENDOR_ID_AIC, 0x8d81)},
+ 	{}
+ };
+ 
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
-index ef198ee..ac52be0 100644
+index ef198ee..c4ef63f 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
 @@ -10,6 +10,13 @@
@@ -61,6 +82,15 @@ index ef198ee..ac52be0 100644
  #include "rwnx_tx.h"
  #include "rwnx_defs.h"
  #include "usb_host.h"
+@@ -945,6 +952,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+ static struct usb_device_id aicwf_usb_id_table[] = {
+ #ifndef CONFIG_USB_BT
+ 	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_PRODUCT_ID_AIC)},
++	{USB_DEVICE(USB_VENDOR_ID_AIC, 0x8d80)},
++	{USB_DEVICE(USB_VENDOR_ID_AIC, 0x8d81)},
+ #else
+ 	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDOR_ID_AIC, USB_PRODUCT_ID_AIC, 0xff, 0xff, 0xff)},
+ #endif
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
 index 8ee19ec..2998eb5 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
