@@ -1,0 +1,15 @@
+diff --git a/drivers/usb/host/Makefile b/drivers/usb/host/Makefile
+index abef33f..5c3fcc7 100644
+--- a/drivers/usb/host/Makefile
++++ b/drivers/usb/host/Makefile
+@@ -3,6 +3,10 @@
+ # Makefile for the usb host drivers.
+ #
+ ccflags-y += -I $(srctree)/drivers/usb/host
++# USBFIX include: sunxi-hci.h 里是 #include <../sunxi_usb/include/...>
++# （尖括号只查 -I 路径，不会相对当前文件解析），必须把 host/ 自己也
++# 加进搜索路径，../sunxi_usb 才能落到 bsp/drivers/usb/sunxi_usb。
++ccflags-y += -I $(srctree)/$(src)
+ 
+ obj-$(CONFIG_USB_EHCI_HCD_SUNXI)	+= ehci-sunxi.o
+ obj-$(CONFIG_USB_OHCI_HCD_SUNXI)	+= ohci-sunxi.o
