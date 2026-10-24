@@ -13,6 +13,10 @@ mount -t tmpfs  tmpfs  /run     2>/dev/null
 mount -t tmpfs  tmpfs  /tmp     2>/dev/null
 printf 'microduck: mounts done at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 
+# busybox init 的 inittab id 只能 1~4 字符，而调试串口是 ttyAS0（6 字符）：
+# 建一个 4 字符别名，inittab 里用 tS0 起 getty。
+ln -sf /dev/ttyAS0 /dev/tS0 2>/dev/null
+
 # ZRAM swap：前台，毫秒级
 /usr/sbin/microduck-zram
 printf 'microduck: zram at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null

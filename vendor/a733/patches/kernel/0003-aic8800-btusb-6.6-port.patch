@@ -1,0 +1,51 @@
+diff --git a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c
+index 51e2f23..e578c6b 100644
+--- a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c
++++ b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.c
+@@ -1205,7 +1205,9 @@ static int btchr_init(void)
+ 	init_waitqueue_head(&btchr_read_wait);
+ 	init_waitqueue_head(&bt_dlfw_wait);
+ 
+-	bt_char_class = class_create(THIS_MODULE, BT_CHAR_DEVICE_NAME);
++	/* AIC BT FIX (class_create): 6.x 起 class_create() 只有一个 name 参数，
++	 * THIS_MODULE 由 class 内部持有。 */
++	bt_char_class = class_create(BT_CHAR_DEVICE_NAME);
+ 	if (IS_ERR(bt_char_class)) {
+ 		AICBT_ERR("Failed to create bt char class");
+ 		return PTR_ERR(bt_char_class);
+diff --git a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h
+index 0a68808..5a92985 100644
+--- a/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h
++++ b/drivers/net/wireless/aic8800/aic8800_btusb/aic_btusb.h
+@@ -589,7 +589,7 @@ static inline int getmacaddr(uint8_t *vnd_local_bd_addr)
+ #endif
+ #else
+ 	struct file  *bdaddr_file;
+-	mm_segment_t oldfs;
++	loff_t pos = 0;
+ 	char buf[FACTORY_BT_BDADDR_STORAGE_LEN];
+ 	memset(buf, 0, FACTORY_BT_BDADDR_STORAGE_LEN);
+ 	bdaddr_file = filp_open(BDADDR_FILE, O_RDONLY, 0);
+@@ -597,9 +597,9 @@ static inline int getmacaddr(uint8_t *vnd_local_bd_addr)
+ 		AICBT_INFO("No Mac Config for BT\n");
+ 		return -1;
+ 	}
+-	oldfs = get_fs(); set_fs(KERNEL_DS);
+-	bdaddr_file->f_op->llseek(bdaddr_file, 0, 0);
+-	bdaddr_file->f_op->read(bdaddr_file, buf, FACTORY_BT_BDADDR_STORAGE_LEN, &bdaddr_file->f_pos);
++	/* AIC BT FIX (getmacaddr): 6.x 移除了 get_fs/set_fs/mm_segment_t 与
++	 * file->f_op->read()/llseek()，统一用 kernel_read() 读 MAC 文件。 */
++	kernel_read(bdaddr_file, buf, FACTORY_BT_BDADDR_STORAGE_LEN, &pos);
+ 	for (i = 0; i < 6; i++) {
+ 		if (buf[3*i] > '9') {
+ 			if (buf[3*i] > 'Z')
+@@ -613,7 +613,8 @@ static inline int getmacaddr(uint8_t *vnd_local_bd_addr)
+ 		}
+ 		mac_addr[i] = ((uint8_t)buf[3*i] - '0') * 16 + ((uint8_t)buf[3*i+1] - '0');
+ 	}
+-	set_fs(oldfs);
++	/* AIC BT FIX (getmacaddr tail): set_fs 已移除，kernel_read() 自己处理
++	 * 用户/内核地址空间，这里不需要再恢复。 */
+ 	filp_close(bdaddr_file, NULL);
+ #endif
+ 

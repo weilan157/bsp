@@ -1,13 +1,13 @@
 # microduck（Cubie A7Z / A733）inittab
 #
-# busybox init 的 id 字段最多 4 个字符，且非空时会被当成 /dev/<id> 打开。
-# 我们的调试串口叫 ttyAS0（6 字符），所以这里用空 id，让 getty 自己打开设备。
+# busybox init 的 id 字段必须非空且 <=4 字符，init 会用它去打开 /dev/<id>。
+# 调试串口是 ttyAS0（6 字符），所以用 4 字符别名 tS0，rcS 里建
+# /dev/tS0 -> /dev/ttyAS0 的软链接。
 id:2:initdefault:
 si::sysinit:/etc/init.d/rcS
 
 # UART0（PB9/PB10）= 内核 console（console=ttyAS0,115200），串口直接登录
-::respawn:/sbin/getty -L ttyAS0 115200 vt100
+tS0::respawn:/sbin/getty -L ttyAS0 115200 vt100
 tty1::respawn:/sbin/getty -L tty1 vt100
 
 ca::ctrlaltdel:/sbin/reboot
-sd::shutdown:/bin/umount -a -r

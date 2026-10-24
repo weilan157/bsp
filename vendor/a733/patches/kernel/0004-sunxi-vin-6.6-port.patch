@@ -1,0 +1,31 @@
+diff --git a/drivers/vin/platform/platform_cfg.h b/drivers/vin/platform/platform_cfg.h
+index a7d16d4..a9b50fd 100644
+--- a/drivers/vin/platform/platform_cfg.h
++++ b/drivers/vin/platform/platform_cfg.h
+@@ -21,8 +21,12 @@
+ 
+ /* #define FPGA_VER */
+ #if !defined(CONFIG_AW_KERNEL_ORIGIN)
++#if 0 /* VIN FIX (SUNXI_MEM): 6.6 内核里 dma_heap_find()/dma_heap_buffer_alloc()
++       * 已被移除，SUNXI_MEM 分支编不过。改成不定义它，走 vin_os.c 的
++       * dma_alloc_coherent() 分支（CMA 连续内存），VIN/ISP 语义不变。 */
+ #define SUNXI_MEM
+ #endif
++#endif
+ #define disp_sync_video 1
+ 
+ #if IS_ENABLED(CONFIG_ARCH_SUN8IW15P1) || IS_ENABLED(CONFIG_ARCH_SUN8IW17P1) || IS_ENABLED(CONFIG_ARCH_SUN50IW3P1) || IS_ENABLED(CONFIG_ARCH_SUN50IW6P1)
+diff --git a/drivers/vin/vin-cci/cci_helper.c b/drivers/vin/vin-cci/cci_helper.c
+index 3842b1c..15c882e 100644
+--- a/drivers/vin/vin-cci/cci_helper.c
++++ b/drivers/vin/vin-cci/cci_helper.c
+@@ -291,7 +291,8 @@ EXPORT_SYMBOL_GPL(cci_unlock);
+ int cci_dev_init_helper(struct i2c_driver *sensor_driver)
+ {
+ #ifdef USE_SPECIFIC_CCI
+-	return sensor_driver->probe(NULL, NULL);
++	/* VIN FIX (cci probe): 6.x 的 i2c_driver.probe 只接受一个 i2c_client 参数。 */
++	return sensor_driver->probe(NULL);
+ #else
+ 	return i2c_add_driver(sensor_driver);
+ #endif
