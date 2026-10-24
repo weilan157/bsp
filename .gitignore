@@ -30,3 +30,7 @@ logs/
 .vscode/
 .idea/
 *~
+
+# aic8800 WiFi/BT 固件（驱动 request_firmware 必需，体积小，必须入库保证可复现）
+!vendor/a733/firmware/
+!vendor/a733/firmware/**
