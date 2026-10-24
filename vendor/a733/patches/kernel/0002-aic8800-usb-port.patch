@@ -1,38 +1,33 @@
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-index d3a3371..063328e 100644
+index d3a3371..9332ec6 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-@@ -399,7 +399,12 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
+@@ -399,7 +399,11 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
  	}
  	rd_version_val = rd_patch_addr_cfm.memdata;
  	printk("rd_version_val=%08X\n", rd_version_val);
 +	/* AIC8800 USB FIX (d80): fw_version_uint 只定义在 SDIO 的 struct priv_dev
-+	 * (aicsdio.h)，USB 版 (aicusb.h) 没有该成员，无条件赋值会让 USB 构建失败。
-+	 * 这个字段只用于版本记录，USB 路径跳过即可。 */
++	 * (aicsdio.h)，USB 版 (aicusb.h) 没有该成员，无条件赋值会让 USB 构建失败。*/
 +#ifdef AICWF_SDIO_SUPPORT
  	aicdev->fw_version_uint = rd_version_val;
 +#endif
  	if (rd_version_val > 0x06090100) {
  		patch_buff_addr = rd_patch_addr + 12;
  		ret = rwnx_send_dbg_mem_read_req(aicdev, patch_buff_addr, &rd_patch_addr_cfm);
-@@ -600,10 +605,17 @@ int aicbsp_8800d80_fw_init(struct priv_dev *aicdev)
- 			aicbsp_firmware_list = fw_u02;
- 	}
+@@ -602,8 +606,15 @@ int aicbsp_8800d80_fw_init(struct priv_dev *aicdev)
  #elif defined(AICWF_USB_SUPPORT)
--	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02)
--		 aicbsp_firmware_list = fw_u02;
+ 	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02)
+ 		 aicbsp_firmware_list = fw_u02;
 -	else if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03)
 -		aicbsp_firmware_list = fw_u03;
-+	/* AIC8800 USB FIX (u03 fw): USB 分支原本让 U03 用 fw_u03[]
-+	 * （fw_adid_u03.bin / fw_patch_u03.bin / fw_patch_table_u03.bin /
-+	 *  fmacfw_usb.bin），但这套固件不随 BSP 发布，实测直接
-+	 * "Direct firmware load for fw_patch_table_u03.bin failed with error -2"。
-+	 *
-+	 * 同一份代码的 SDIO 分支是把 U03 当 U02 处理（rev == U02 || U03 → fw_u02），
-+	 * 这里照做：U03 也用 fw_u02 表（aic8800d80/*_u02.bin，我们已有）。
++	/* AIC8800 USB FIX (fw table): 这根 FCU760K（aic8800d80，rev 0x7）会落到
++	 * fw_u01[]，而 u01 表没有 .bt_ext_patch 字段，aicbt_ext_patch_data_load()
++	 * 拼出 "(null)0.bin" 直接失败；fw_u03 的固件又不随 BSP 发布。
++	 * 手上只有 u02 那套（aic8800d80/*_u02.bin，含 _ext0），且同一份代码的
++	 * SDIO 分支本来就把 U03 当 U02，这里统一用 fw_u02。
 +	 */
-+	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02 ||
-+	    aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03)
++	else if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03 ||
++		 aicbsp_info.chipinfo->rev == CHIP_REV_ID_U01)
 +		aicbsp_firmware_list = fw_u02;
  #endif
  
