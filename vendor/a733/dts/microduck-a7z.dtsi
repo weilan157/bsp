@@ -339,3 +339,22 @@
 	flash_handle = <>;
 	act_handle = <>;
 };
+
+/* =====================================================================
+ * 8. 关掉 board.dts 漏掉的 scaler 节点
+ *
+ * board.dts 只 disable 了 scaler00-03/10/20/30/40/50，漏了
+ * scaler11/12/13/21/22/23/31/32/33。这些节点默认 okay 会去 probe，
+ * 其中 scaler11(59103fc) 在 deferred probe 里空指针崩溃（scaler_probe+0x2b8），
+ * 把 deferred-probe 的 kworker 打死，导致后面 VIN/sensor 探测全部中断。
+ * microduck 不用 VIN 的硬件缩放，直接全部关掉。
+ * ===================================================================== */
+&scaler11 { status = "disabled"; };
+&scaler12 { status = "disabled"; };
+&scaler13 { status = "disabled"; };
+&scaler21 { status = "disabled"; };
+&scaler22 { status = "disabled"; };
+&scaler23 { status = "disabled"; };
+&scaler31 { status = "disabled"; };
+&scaler32 { status = "disabled"; };
+&scaler33 { status = "disabled"; };
