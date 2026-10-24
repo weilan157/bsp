@@ -225,3 +225,34 @@
 	max-frequency = <25000000>;
 	interrupt-parent = <&gic>;
 };
+
+/* =====================================================================
+ * 7. 摄像头 VIN（原理图 J5：31-pin CAM，MIPI CSI 2-lane）
+ *
+ * board.dts 默认把整个 VIN 树关掉（vind0、csiN、mipiN、ispN、vincN）。
+ * 这里按 MCSIB（D0/D1 + CLKA/CLKB）那组打开最小集合：
+ *   vind0 = VIN 顶层（时钟/中断/寄存器）
+ *   csi1  = MCSIB 通道；mipi1 = 对应 MIPI 接收
+ *   isp00 = ISP；vinc00 = 视频输入捕获口（/dev/video* 从这里出）
+ * 传感器驱动还需要按实际模组在 bsp/drivers/vin/modules/sensor 里选型，
+ * 并把 sensor_list 配置补上，否则只有 VIN 设备、没有可用 video 节点。
+ * ===================================================================== */
+&vind0 {
+	status = "okay";
+};
+
+&csi1 {
+	status = "okay";
+};
+
+&mipi1 {
+	status = "okay";
+};
+
+&isp00 {
+	status = "okay";
+};
+
+&vinc00 {
+	status = "okay";
+};
