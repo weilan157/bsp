@@ -255,4 +255,87 @@
 
 &vinc00 {
 	status = "okay";
+	/* MCSIB（MIPI CSI B）→ csi1 + mipi1；isp0；sensor_list0 */
+	vinc0_csi_sel = <1>;
+	vinc0_mipi_sel = <1>;
+	vinc0_isp_sel = <0>;
+	vinc0_isp_tx_ch = <0>;
+	vinc0_rear_sensor_sel = <0>;
+	vinc0_front_sensor_sel = <0>;
+	vinc0_sensor_list = <0>;
+};
+
+/* ---------------------------------------------------------------------
+ * IMX219（31-pin CAM，MIPI 2-lane，I2C = TWI3/PE3+PE4，地址 0x10）
+ *
+ * BSP VIN 的传感器不是在 i2c 节点下声明，而是：
+ *   sensor_list0  —— 候选传感器列表（VIN 按顺序探测，能读 ID 的那个胜出）
+ *   sensor0       —— 探测成功后使用的详细配置（mname/twi/时钟/GPIO/电源）
+ * mname 必须等于驱动里的 SENSOR_NAME（imx219.c 里是 "imx219"）。
+ * twi_addr 是 8 位地址：IMX219 7 位 0x10 → 0x20。
+ * twi_cci_id 与 TWI 序号一致（3 = TWI3）。
+ * ------------------------------------------------------------------- */
+
+&pio {
+	twi3_pins_default: twi3@0 {
+		pins = "PE3", "PE4";
+		function = "twi3";
+		drive-strength = <10>;
+		bias-pull-up;
+	};
+
+	twi3_pins_sleep: twi3@1 {
+		pins = "PE3", "PE4";
+		function = "gpio_in";
+		bias-pull-up;
+	};
+};
+
+&twi3 {
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&twi3_pins_default>;
+	pinctrl-1 = <&twi3_pins_sleep>;
+	status = "okay";
+};
+
+&sensor_list0 {
+	status = "okay";
+	csi_sel = <0>;
+	sensor00_mname = "imx219";
+	sensor00_twi_addr = <0x20>;
+	sensor00_type = <1>;
+	sensor00_hflip = <0>;
+	sensor00_vflip = <0>;
+	sensor00_act_used = <0>;
+	sensor00_act_name = "";
+	sensor00_act_twi_addr = <>;
+};
+
+&sensor0 {
+	status = "okay";
+	sensor0_mname = "imx219";
+	sensor0_twi_cci_id = <3>;
+	sensor0_twi_addr = <0x20>;
+	sensor0_mclk_id = <0>;
+	sensor0_pos = "rear";
+	sensor0_isp_used = <0>;
+	sensor0_fmt = <0>;
+	sensor0_stby_mode = <0>;
+	sensor0_vflip = <0>;
+	sensor0_hflip = <0>;
+	sensor0_iovdd-supply = <>;
+	sensor0_iovdd_vol = <>;
+	sensor0_avdd-supply = <>;
+	sensor0_avdd_vol = <>;
+	sensor0_dvdd-supply = <>;
+	sensor0_dvdd_vol = <>;
+	/* 3V3/5V 由板上 DCDC1 → FB1 常供，没有独立控制脚；
+	 * MCSI-RST-R / MCSI-STBY-R 走 PE/PK 的 GPIO，等确认引脚号后补
+	 * sensor0_reset / sensor0_pwdn（先让传感器能被 I2C 探测到）。 */
+	sensor0_power_en = <>;
+	sensor0_reset = <>;
+	sensor0_pwdn = <>;
+	sensor0_sm_vs = <>;
+	flash_handle = <>;
+	act_handle = <>;
 };
