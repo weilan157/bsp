@@ -21,7 +21,9 @@
 - `microduck.config`：叠在 `defconfig` 上的精简配置，**保留视频编解码**
   （`CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`），
   去掉 DRM/FB/GPU、USB、PCIe、以太网、netfilter/IPv6、多余文件系统、调试设施。
-- `overlay/`：micro rootfs 的 A733 版本（console `ttyS0,115200`、模块清单）。
+- `overlay/`：micro rootfs 的 A733 版本（`etc/inittab` 给 `ttyAS0` 挂 getty、模块清单）。
+- `patches/kernel/`：打在 `allwinner-bsp` 驱动上的补丁，`./bsp kernel` 会自动应用（幂等）。
+  目前只有一个 `0001-sunxi-mmc-a733-ccu-workaround.patch`（见下文「上板必须的修法」）。
 - `boot.cmd`：u-boot 启动脚本（`fatload` Image/dtb + `booti`，root 指向 `/dev/mmcblk0p4`）。
 - `sys_partition.fex`、`env.cfg`：板厂原始分区表与启动参数，`./bsp pack` 直接读它们。
 
@@ -99,25 +101,53 @@ boot0 阶段（错误 DDR 时序，串口一个字都没有）。官方打包时
 
 ## 状态
 
-**已验证**（2026-10-24，WSL2 Ubuntu 22.04.5）：
+**已在真机跑通**（2026-10-24，Cubie A7Z / A733，SD 卡启动）：
 
-- A7Z 的 6.6 设备树（device 的 `board.dts` + BSP 的 `sun60iw2p1*.dtsi` + 我们的
-  `microduck-a7z.dtsi`）`cpp + dtc` 编译通过（154 KiB dtb，含 `ve@`/`codec` 节点）；
-- `./bsp uboot`：官方 u-boot（AArch32，`ARCH=arm CROSS_COMPILE=arm-linux-gnueabi-`，
-  与官方打包仓库一致；告警用官方的 `EXTRA_CFLAGS="-Wno-…"` 关掉）编出
-  `u-boot.bin` 1.2 MB + `u-boot.dtb` 40 KB（`model = "Radxa Cubie A7Z"`），
-  再用官方 `update_boot0` / `dragonsecboot` 生成注入过 sys_config 的 boot0 和
-  带 BL31 的 `boot_package.fex`（1.3 MB）；
-- `./bsp pack`：按 rsdk 布局生成 379 MB 的 `a733-micro.img`——GPT、
-  boot0@128 KiB / boot0_ufs@2064 扇区 / `boot_package.fex`@12 MiB、
-  p1 `config` FAT16 @16 MiB、p2 `rootfs` ext4 @32 MiB，`/boot.scr` 与 extlinux.conf
-  都在 rootfs 的 `/boot` 下，fstab 的 UUID 与实际卷 UUID 一致。
+```
+mmc0: new high speed SDHC card at address 5048
+mmcblk0: mmc0:5048 SD32G 29.7 GiB
+mmcblk0: p1 p2
+EXT4-fs (mmcblk0p2): mounted filesystem ... r/w with ordered data mode
+Run /sbin/init as init process
+microduck: userspace ready in 2.74s
+INIT: Entering runlevel: 2
+Debian GNU/Linux 13 (none) ttyAS0
+(none) login:
+```
 
-**未验证**（本机没有 A733 板子）：
+上电到 login 约 **2.7 s**（内核 1.7 s + 用户态 1 s），串口是 UART0 = `ttyAS0`，115200。
 
-- 真机启动：之前用「未注入 sys_config 的 boot0 + 没有 BL31 的包」是**完全无输出**
-  的，现在这两处都按官方做法修正了，但还没上板复测；
-- `distro_bootcmd` 扫到 `/boot.scr` 后 `load mmc 0:2` / `booti` 的实机启动。
+## 上板必须的修法（从「完全无输出」到能登录）
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| 完全无输出 | boot0 的 DRAM 参数不对 / u-boot 没带 BL31 | 用官方 `vendor/a733/boot0_sdcard.bin` + 官方 `boot_package.fex`（不再自己 pack） |
+| `GUID Partition Table Entry Array CRC is wrong` | u-boot Kconfig 里 GPT 表项默认 56 条，sfdisk 写了 128 条 | 打包后把 GPT 改成 56 项（`gpt56.py`），p2 打 `LegacyBIOSBootable` |
+| `unknown pin PG*/PC*/PF*`、pinctrl 永远 `-517` | `CONFIG_AW_FPGA_S4=y` 让 pinctrl 编了 FPGA 的 104-pin 表 | 关掉 `AW_FPGA_S4/V7`，开 `CONFIG_AW_IC_BOARD=y`（完整 181 pin / 10 bank） |
+| 所有 SPI 中断 `-517 / -22` | 根 `interrupt-parent` 是 `sunxi-wakeupgen`，但驱动没编 | `CONFIG_AW_WAKEUPGEN=y` |
+| `uart-ng: cannot get the TX DMA channel` | 没编 DMA | `CONFIG_AW_DMA=y` |
+| `sunxi_get_soc_ver()` 走 weak 桩 | 没编 SID | `CONFIG_AW_SID=y` |
+| sdc0 probe 卡死（无任何输出） | `resource_request()` 末尾关总线时钟后紧跟寄存器访问 | 保持总线时钟常开（补丁第 2 段） |
+| `sdc set ios:clk 400000Hz` 后整机冻住 | `sunxi_mmc_clk_set_rate_for_sdmmc_v5p3x()` 里 `clk_set_parent()/clk_set_rate()` 在 CCU 上死锁 | 跳过 CCU，直接写 `CLKCR[7:0]` 分频（补丁第 1 段） |
+| 命令发出但收不到中断 | 上面时钟/中断修好后自然恢复 | — |
+| `EXT4-fs: bad geometry: block count ... exceeds size of device` | 打包时 p2 比文件系统小（少给 GPT 备份留扇区） | `img_size` 按实际 `rootfs.ext4` 大小算，再 +8 MiB |
+| `INIT: id field too long (max 4 characters)`，没有 login | busybox init 的 id 必须 1~4 字符，`ttyAS0` 是 6 个 | inittab 用 `tS0`，rcS 里建 `/dev/tS0 -> /dev/ttyAS0` |
+
+**关于「官方为什么不用打补丁」**：官方 A733 的 `bsp/configs/linux-6.1/sun60iw2p1_min_defconfig`
+用的是 `CONFIG_AW_FPGA_V7=y`（FPGA 分支，pin 表精简、且不真正编程 PLL），时钟由 boot0/u-boot
+配好即可；我们为了修 pinmux 改成了 `AW_IC_BOARD`，内核才开始真去改 SMHC0 时钟，于是踩到 CCU
+死锁。后续优化方向就是把这套配置尽量往官方靠（见下）。
+
+## 已知限制 / 待办
+
+- `CONFIG_AW_MFD_AXP2101` + `CONFIG_AW_REGULATOR_AXP2101` + TWI 还没编，所以 DT 里 sdc0 的
+  `vmmc/vqmmc` 电源引用被删掉了；PMIC 相关电源域（`vcc-dram` 等）目前由 boot0 配好不动。
+- `&r_pio` 暂时 `disabled`（BSP 的 r_pinctrl probe 会 Oops），HAT 上依赖 PL/PJ 的部分后续再修。
+- sdc1/sdc2 在 DT 里 disabled（本板只有 SD 槽，无 eMMC）。
+- 视频编解码（cedar-ve）probe 报 `-110`（依赖没就绪），暂不影响启动。
+- u-boot 启动仍有 `Boot menu / Enter choice` 交互过程，`extlinux.conf` 里加
+  `timeout 0` + `default` 可以免按键直启（待验证）。
+
 
 ## u-boot 设备树
 

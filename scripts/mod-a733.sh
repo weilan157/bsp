@@ -317,6 +317,27 @@ cmd_a733_kernel() {
 	# 1) 6.6 内核顶层 Makefile 已有 drivers-y += bsp/ 与 -I$(srctree)/bsp/include
 	ln -sfn "${b}" "${k}/bsp"
 
+	# 1.5) 应用内核补丁（幂等）。补丁全部打在 BSP 驱动上（bsp/ 是符号链接，
+	#      不在内核 git 仓库里，所以必须用补丁文件固化，保证全新构建可复现）。
+	#      判断顺序：先试 -R（已应用）→ 再试正向（未应用）→ 都不行则报错。
+	a733_apply_kernel_patches() {
+		local pdir="${BSP_ROOT}/vendor/a733/patches/kernel" p
+		[[ -d "${pdir}" ]] || return 0
+		for p in "${pdir}"/*.patch; do
+			[[ -f "${p}" ]] || continue
+			if patch -p1 -R --dry-run -s -f -d "${b}" < "${p}" >/dev/null 2>&1; then
+				info "内核补丁已应用：$(basename "${p}")"
+				continue
+			fi
+			patch -p1 --dry-run -s -f -d "${b}" < "${p}" >/dev/null 2>&1 || \
+				die "内核补丁无法应用（源码状态不符）：$(basename "${p}")"
+			patch -p1 -s -d "${b}" < "${p}" || \
+				die "应用内核补丁失败：$(basename "${p}")"
+			info "内核补丁已应用：$(basename "${p}")"
+		done
+	}
+	a733_apply_kernel_patches
+
 	# 2) SoC dtsi（BSP）+ 板级 board.dts（device）+ microduck 的 HAT 适配
 	dstdir="${k}/arch/arm64/boot/dts/allwinner"
 	info "安装 dts: ${A733_DTS_NAME}"

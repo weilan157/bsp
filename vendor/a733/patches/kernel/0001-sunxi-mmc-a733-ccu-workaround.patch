@@ -1,0 +1,52 @@
+diff --git a/drivers/mmc/sunxi-mmc-v5p3x.c b/drivers/mmc/sunxi-mmc-v5p3x.c
+index 9e7f091..4a18ec9 100644
+--- a/drivers/mmc/sunxi-mmc-v5p3x.c
++++ b/drivers/mmc/sunxi-mmc-v5p3x.c
+@@ -488,6 +488,15 @@ static int sunxi_mmc_clk_set_rate_for_sdmmc_v5p3x(struct sunxi_mmc_host *host,
+ 
+ 	sunxi_mmc_oclk_onoff(host, 0);
+ 
++	/* A733 workaround: clk_set_parent()/clk_set_rate() 在本板 CCU 上会死锁
++	 * （sdc0 设 400kHz 时整机冻住，PLL/父时钟切换卡在 CCU 内部）。
++	 * 这里跳过 CCU，直接用 SMHC 自己的 CLKCR[7:0] 分频字段，以 24MHz 为源；
++	 * rate/src_clk 按 24MHz 源给出，供后面延时链计算使用。
++	 */
++	rate = mod_clk;
++	src_clk = 24000000;
++	goto program_div;
++
+ clk_set_retry:
+ 	err = clk_set_parent(mclk, sclk);
+ 	if (err) {
+@@ -592,10 +601,16 @@ clk_set_retry:
+ 	SM_INFO(mmc_dev(host->mmc), "FPGA REG_CLKCR: 0x%08x\n",
+ 		mmc_readl(host, REG_CLKCR));
+ #else
++program_div:
+ 	/* clear internal divider */
+ 	rval = mmc_readl(host, REG_CLKCR);
+ 	rval &= ~0xff;
+-	rval |= div;
++	if (ios->clock <= 400000)
++		rval |= 59;          /* 24MHz / 60 ≈ 400kHz */
++	else if (ios->clock <= 12000000)
++		rval |= 1;
++	else
++		rval |= div;
+ 	mmc_writel(host, REG_CLKCR, rval);
+ #endif
+ #ifdef MMC_FPGA
+diff --git a/drivers/mmc/sunxi-mmc.c b/drivers/mmc/sunxi-mmc.c
+index 0e4f584..6f868bb 100644
+--- a/drivers/mmc/sunxi-mmc.c
++++ b/drivers/mmc/sunxi-mmc.c
+@@ -4043,7 +4043,8 @@ static int sunxi_mmc_resource_request(struct sunxi_mmc_host *host,
+ 		disable_irq(host->irq_ecc);
+ 	}
+ 
+-	sunxi_mmc_bus_clk_en(host, 0);
++	/* A733 workaround: 这里关掉总线时钟后，紧跟其后的寄存器访问会在
++	 * AXI 上挂死（实测 sdc0 probe 直接卡住）。保持总线时钟常开。 */
+ 
+ 	return ret;
+ 
