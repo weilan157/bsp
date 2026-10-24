@@ -1,5 +1,5 @@
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-index d3a3371..49b2aa8 100644
+index d3a3371..063328e 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
 @@ -399,7 +399,12 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
@@ -15,6 +15,28 @@ index d3a3371..49b2aa8 100644
  	if (rd_version_val > 0x06090100) {
  		patch_buff_addr = rd_patch_addr + 12;
  		ret = rwnx_send_dbg_mem_read_req(aicdev, patch_buff_addr, &rd_patch_addr_cfm);
+@@ -600,10 +605,17 @@ int aicbsp_8800d80_fw_init(struct priv_dev *aicdev)
+ 			aicbsp_firmware_list = fw_u02;
+ 	}
+ #elif defined(AICWF_USB_SUPPORT)
+-	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02)
+-		 aicbsp_firmware_list = fw_u02;
+-	else if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03)
+-		aicbsp_firmware_list = fw_u03;
++	/* AIC8800 USB FIX (u03 fw): USB 分支原本让 U03 用 fw_u03[]
++	 * （fw_adid_u03.bin / fw_patch_u03.bin / fw_patch_table_u03.bin /
++	 *  fmacfw_usb.bin），但这套固件不随 BSP 发布，实测直接
++	 * "Direct firmware load for fw_patch_table_u03.bin failed with error -2"。
++	 *
++	 * 同一份代码的 SDIO 分支是把 U03 当 U02 处理（rev == U02 || U03 → fw_u02），
++	 * 这里照做：U03 也用 fw_u02 表（aic8800d80/*_u02.bin，我们已有）。
++	 */
++	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02 ||
++	    aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03)
++		aicbsp_firmware_list = fw_u02;
+ #endif
+ 
+ 	if (aicbsp_system_config(aicdev))
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 index 71998d8..bd12256 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
