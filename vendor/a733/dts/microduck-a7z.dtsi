@@ -180,3 +180,40 @@
 &r_pio {
 	status = "disabled";
 };
+
+/* =====================================================================
+ * 6. 上板实测必需的 SD / 中断覆盖（2026-10-24，从跑通的 dtb 反推回来）
+ *
+ * - 本板只有 SD 槽、没有 eMMC：sdc1/sdc2 关掉，否则 CQHCI 会一直刷 RTO。
+ * - sdc0：
+ *     * 无卡检测 GPIO（卡槽常闭）→ non-removable，并删掉 cd-* 属性；
+ *     * 删掉 vmmc 以及 vqmmc/vdmmc 的 33sw/18sw 稳压器引用：这几路电压由 AXP8191
+ *       提供，但内核侧 PMIC/TWI 驱动还没接入，留着会让 sdc0 probe 一直 -517；
+ *     * 限 25MHz 并去掉 UHS 三种模式（UHS 需要 1.8V 切换，同样等 PMIC 接好）；
+ *     * 中断直连 GIC（interrupt-parent = <&gic>）：sdc0 的命令完成中断经
+ *       sunxi-wakeupgen 域时收不到（命令发出去后永远等不到 irq），直连后一次就通。
+ * ===================================================================== */
+&sdc1 {
+	status = "disabled";
+};
+
+&sdc2 {
+	status = "disabled";
+};
+
+&sdc0 {
+	/delete-property/ vmmc-supply;
+	/delete-property/ vqmmc33sw-supply;
+	/delete-property/ vdmmc33sw-supply;
+	/delete-property/ vqmmc18sw-supply;
+	/delete-property/ vdmmc18sw-supply;
+	/delete-property/ cd-gpios;
+	/delete-property/ cd-used-24M;
+	/delete-property/ cd-set-debounce;
+	/delete-property/ sd-uhs-sdr50;
+	/delete-property/ sd-uhs-ddr50;
+	/delete-property/ sd-uhs-sdr104;
+	non-removable;
+	max-frequency = <25000000>;
+	interrupt-parent = <&gic>;
+};
