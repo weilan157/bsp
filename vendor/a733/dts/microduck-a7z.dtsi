@@ -178,7 +178,15 @@
  * microduck 用不到 PL/PM 引脚（HAT 全在 PB/PJ/PI 上），先 disabled。
  * ===================================================================== */
 &r_pio {
-	status = "disabled";
+	/* R 侧引脚（PL/PM）必须可用，否则整条 R 域全瘫：
+	 *   - s_twi0/s_twi1 的引脚在 PL0/PL1（PMIC AXP8191 挂在 s_twi0 上），
+	 *     关掉 r_pio 会让两条 TWI 一直 -EPROBE_DEFER，PMIC 永远不 probe；
+	 *   - usb2-vbus / wifi_power_en / wifi_chip_en / leds 都用 PL2/PM0/PM1/PM2；
+	 *   - HAT 的 TWI7（codec/IMU/ToF）也在 R 侧。
+	 * 早期关掉它是因为 r_pinctrl probe 会 Oops，那是 TWI/AXP 驱动缺失时的
+	 * deferred probe 时序问题；这些驱动补齐后实测稳定，故恢复 okay。
+	 */
+	status = "okay";
 };
 
 /* =====================================================================
