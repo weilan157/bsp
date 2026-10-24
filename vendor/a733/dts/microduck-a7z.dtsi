@@ -358,3 +358,18 @@
 &scaler31 { status = "disabled"; };
 &scaler32 { status = "disabled"; };
 &scaler33 { status = "disabled"; };
+
+/* =====================================================================
+ * 9. VIN 不用 IOMMU（去掉 iommus 引用）
+ *
+ * DT 里 vind0/csi/isp/vinc 都带 iommus = <&mmu_aw ...>。开了 AW_IOMMU 之后
+ * iommu_master attach 一直 -517，导致 vin_core_probe 里 vin_iommu_en()
+ * 拿到 NULL 直接 Oops（sunxi_iommu_distribute_mater_get+0x3c）。
+ * microduck 用 CMA（dma_alloc_coherent）就够，直接把 iommus 删掉，
+ * 同时配置里关掉 AW_IOMMU / VIN_IOMMU。
+ * ===================================================================== */
+&vind0 { /delete-property/ iommus; };
+&csi1  { /delete-property/ iommus; };
+&mipi1 { /delete-property/ iommus; };
+&isp00 { /delete-property/ iommus; };
+&vinc00 { /delete-property/ iommus; };
