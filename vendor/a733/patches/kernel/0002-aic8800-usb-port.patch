@@ -36,7 +36,7 @@ index dc8d991..def6d2d 100644
  		for (index = 0; index < patch_info->ext_patch_nb; index++) {
  			id = *(patch_info->ext_patch_param + (index * 2));
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-index 71998d8..00d04cd 100644
+index 71998d8..5ab431d 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 @@ -50,6 +50,20 @@ void aicbsp_device_exit(void)
@@ -84,7 +84,15 @@ index 71998d8..00d04cd 100644
  	mdelay(100);
  #endif
  	bsp_dbg("%s\n", __func__);
-@@ -877,12 +899,22 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+@@ -855,6 +877,7 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+ 	struct aicwf_rx_priv *rx_priv = NULL;
+ 	struct priv_dev *aicdev = NULL;
+ 	int i = 0;
++	bool handoff = false;
+ 
+ 	bsp_dbg("%s vid:0x%X pid:0x%X icl:0x%X isc:0x%X ipr:0x%X\n", __func__,
+ 		id->idVendor,
+@@ -877,12 +900,21 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
  		return -1;
  	}
  
@@ -93,11 +101,10 @@ index 71998d8..00d04cd 100644
 +	 * （否则 feature.chipinfo 为 NULL，后面取 chipid 会空指针崩溃）。
 +	 * 但 8d80/8d81 是运行态设备，bsp 不绑定，直接 -ENODEV 交给 fdrv。 */
 +	aicbsp_info.chipinfo = aic_matched_ic;
-+	if (id->idProduct == 0x8d80 || id->idProduct == 0x8d81) {
-+		bsp_dbg("%s app-mode device (pid 0x%04x), leave it to aic8800_fdrv\n",
-+			__func__, id->idProduct);
-+		return -ENODEV;
-+	}
++	/* AIC8800 USB FIX (bsp download then handoff): 8d80/8d81 上电时芯片里还没有
++	 * 固件，必须由 bsp 先下载（WiFi 固件 + BT patch），下载完再把接口释放给
++	 * aic8800_fdrv。真正的释放动作在 aicbsp_driver_fw_init() 成功之后。 */
++	handoff = (id->idProduct == 0x8d80 || id->idProduct == 0x8d81);
 +
  	aicdev = kzalloc(sizeof(struct priv_dev), GFP_ATOMIC);
  	if (!aicdev) {
@@ -108,7 +115,23 @@ index 71998d8..00d04cd 100644
  	aicdev->udev = usb;
  	aicdev->dev = &usb->dev;
  	usb_set_intfdata(intf, aicdev);
-@@ -1012,6 +1044,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+@@ -949,6 +981,15 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+ 	if (aicbsp_driver_fw_init(aicdev))
+ 		goto out_free_bus;
+ 
++	if (handoff) {
++		/* 固件已经灌进芯片，接下来让 aic8800_fdrv 绑定这个接口去建 wlan0。
++		 * 返回 -ENODEV 表示 bsp 不绑定，usb 核心会把接口留给 fdrv。 */
++		printk("aicbsp: firmware downloaded, handoff to aic8800_fdrv (pid 0x%04x)\n",
++		       id->idProduct);
++		ret = -ENODEV;
++		goto out_free_bus;
++	}
++
+ 	aicdev->app_cmp = true;
+ 	fw_loaded = 1;
+ 
+@@ -1012,6 +1053,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
  static struct usb_device_id aicwf_usb_id_table[] = {
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC)},
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC_8801)},
