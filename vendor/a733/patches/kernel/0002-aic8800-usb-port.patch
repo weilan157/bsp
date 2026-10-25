@@ -36,22 +36,29 @@ index dc8d991..def6d2d 100644
  		for (index = 0; index < patch_info->ext_patch_nb; index++) {
  			id = *(patch_info->ext_patch_param + (index * 2));
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-index 71998d8..bd12256 100644
+index 71998d8..1075260 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-@@ -50,6 +50,11 @@ void aicbsp_device_exit(void)
+@@ -50,6 +50,18 @@ void aicbsp_device_exit(void)
  
  static struct device_match_entry aicdev_match_table[] = {
  	{0xa69c, 0x8800, PRODUCT_ID_AIC8800D,   "aic8800d",   0, 0}, // 8800d in bootloader mode
-+	/* AIC8800 USB D80 FIX: FCU760K 模块的 USB PID 是 0x8d80（bootloader 模式）。
-+	 * 这颗芯片在 SDIO 表里是 0x0182 -> PRODUCT_ID_AIC8800D80，但 USB 表原本没这一项，
-+	 * 导致设备枚举成功却没有任何驱动绑定（实测 a69c:8d80）。 */
-+	{0xa69c, 0x8d80, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
-+	{0xa69c, 0x8d81, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
++	/* AIC8800 USB FIX (bsp not own 8d80): 这颗 FCU760K 的 USB PID 一直是
++	 * 0x8d80（单接口 ff/ff/ff，2 个 bulk 端点），固件下载前后都不重新枚举。
++	 *
++	 * 实测：aic8800_fdrv 依赖 aic8800_bsp 的符号，modprobe fdrv 会自动把 bsp
++	 * 拉起来；bsp 先在 match 表里命中 8d80 并绑定设备，然后因为芯片已在
++	 * 运行态，下载命令直接超时：
++	 *     cmd timed-out / tkn[0] flags:0012 result: -4 cmd:1024
++	 *     aicwf_usb_probe: failed with errno 0
++	 * 此后 fdrv 再注册 USB 驱动也抢不到设备，wlan0 永远不出现（实测）。
++	 *
++	 * 所以 bsp 只保留它真正该负责的 bootloader PID 0x8800，
++	 * 8d80/8d81 交给 aic8800_fdrv 自己去探测和下载固件。 */
  };
  
  static struct device_match_entry *aic_matched_ic;
-@@ -69,7 +74,13 @@ void *aicbsp_get_drvdata(void *args)
+@@ -69,7 +81,13 @@ void *aicbsp_get_drvdata(void *args)
  static int aicbsp_platform_power_on(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -65,7 +72,7 @@ index 71998d8..bd12256 100644
  	mdelay(50);
  #endif
  	return 0;
-@@ -78,7 +89,9 @@ static int aicbsp_platform_power_on(void)
+@@ -78,7 +96,9 @@ static int aicbsp_platform_power_on(void)
  static void aicbsp_platform_power_off(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -75,7 +82,7 @@ index 71998d8..bd12256 100644
  	mdelay(100);
  #endif
  	bsp_dbg("%s\n", __func__);
-@@ -1012,6 +1025,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+@@ -1012,6 +1032,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
  static struct usb_device_id aicwf_usb_id_table[] = {
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC)},
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC_8801)},
