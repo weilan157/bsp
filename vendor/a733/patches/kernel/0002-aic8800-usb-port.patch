@@ -92,7 +92,7 @@ index 71998d8..1075260 100644
  };
  
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
-index ef198ee..f4f55c9 100644
+index ef198ee..8fda9ab 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
 @@ -10,6 +10,13 @@
@@ -109,7 +109,22 @@ index ef198ee..f4f55c9 100644
  #include "rwnx_tx.h"
  #include "rwnx_defs.h"
  #include "usb_host.h"
-@@ -945,8 +952,16 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+@@ -741,7 +748,13 @@ static int aicwf_parse_usb(struct aic_usb_dev *usb_dev, struct usb_interface *in
+ 
+ 	/* Check interface number */
+ #ifdef CONFIG_USB_BT
+-	if (usb->actconfig->desc.bNumInterfaces != 3) {
++	/* AIC8800 USB FIX (1-intf): 本工程 CONFIG_USB_BT 打开时这里硬性要求
++	 * 3 个接口（WiFi + BT + ...），但 FCU760K 实测只有 1 个接口：
++	 *   bInterfaceClass/Sub/Proto = ff/ff/ff, bNumEndpoints = 2 (ep_01/ep_82)
++	 * 于是 parse_usb 直接 -ENODEV（"Number of interfaces: 1 not supported"），
++	 * fdrv 永远建不出 wlan0。单接口设备允许通过，3 接口的照旧。 */
++	if (usb->actconfig->desc.bNumInterfaces != 1 &&
++	    usb->actconfig->desc.bNumInterfaces != 3) {
+ #else
+ 	if (usb->actconfig->desc.bNumInterfaces != 1) {
+ #endif
+@@ -945,8 +958,16 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
  static struct usb_device_id aicwf_usb_id_table[] = {
  #ifndef CONFIG_USB_BT
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_PRODUCT_ID_AIC)},
