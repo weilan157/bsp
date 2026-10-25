@@ -27,6 +27,7 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	fdisk \
 	parted \
 	alsa-utils \
+	i2c-tools \
 	iproute2 procps
 
 echo ">>> 用 sysvinit 取代 systemd"

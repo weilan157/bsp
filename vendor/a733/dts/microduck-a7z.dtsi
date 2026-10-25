@@ -103,6 +103,28 @@
  * 3. 音频 I2S0：PB5/PB6/PB7/PB8 = 排针 pin 12/35/40/38（BCLK/LRCK/DOUT/DIN），
  *    MCLK 在 PB4（pin 36）。用 Allwinner 的 soundcard-mach 把 codec 挂上。
  * ===================================================================== */
+
+/* codec 供电：HAT 上 TLV320AIC3104 由 3.3V 常供。
+ * 不配 regulator 的话驱动打印
+ *   Invalid supply voltage(s) AVDD: -22, DVDD: -22
+ * 并跳过 mic bias 配置（麦克风会没声音）。 */
+/ {
+	codec_3v3: regulator-codec-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "codec-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+};
+
+&audio_codec {
+	AVDD-supply  = <&codec_3v3>;
+	DVDD-supply  = <&codec_3v3>;
+	IOVDD-supply = <&codec_3v3>;
+	DRVDD-supply = <&codec_3v3>;
+};
+
 &i2s0_plat {
 	status = "okay";
 	tdm-num = <0>;
@@ -119,6 +141,19 @@
 
 &i2s0_mach {
 	status = "okay";
+	soundcard-mach,name = "microduck-audio";
+	soundcard-mach,format = "i2s";
+	/* TLV320AIC3104 需要 MCLK：由 SoC 提供，mclk-fs=256（48k*256=12.288MHz）。
+	 * frame/bitclock 也由 SoC 做主，codec 只当 slave。 */
+	soundcard-mach,frame-master = <&i2s0_cpu>;
+	soundcard-mach,bitclock-master = <&i2s0_cpu>;
+	soundcard-mach,slot-num = <2>;
+	soundcard-mach,slot-width = <32>;
+	i2s0_cpu: soundcard-mach,cpu {
+		sound-dai = <&i2s0_plat>;
+		soundcard-mach,pll-fs = <1>;
+		soundcard-mach,mclk-fs = <256>;
+	};
 	soundcard-mach,codec {
 		sound-dai = <&audio_codec>;
 	};
@@ -407,49 +442,3 @@
 &mipi1 { /delete-property/ iommus; };
 &isp00 { /delete-property/ iommus; };
 &vinc00 { /delete-property/ iommus; };
-
-/* =====================================================================
- * 10. 音频：HAT 上的 TLV320AIC3104（TWI7 @0x18）+ SoC I2S0
- *
- * 选 i2s0 的原因：HAT 的 40-pin 上只有 i2s0 的引脚是「全套」的 ——
- *   PB4 = mclk, PB5 = bclk, PB6 = lrck, PB7 = dout0, PB8 = din0
- * （i2s1 是 PG10-PG14，i2s2 缺 mclk，i2s4 只有 din0 没有 dout0）。
- * TLV320AIC3104 需要 MCLK，所以必须用带 mclk 的那组。
- *
- * 若实测无声，说明 HAT 实际走的是 i2s2/i2s4——把下面的 i2s0 换成对应
- * 节点、并按原理图确认 BCLK/WCLK/DIN/DOUT/MCLK 的引脚即可。
- * ===================================================================== */
-&twi7 {
-	tlv320: tlv320aic3104@18 {
-		compatible = "ti,tlv320aic3104";
-		reg = <0x18>;
-		#sound-dai-cells = <0>;
-		status = "okay";
-	};
-};
-
-&i2s0_plat {
-	/* pin 状态在 board-a7z.dts 的 &pio 里已定义 */
-	pinctrl-names = "default", "sleep";
-	pinctrl-0 = <&i2s0_pins_a &i2s0_pins_b &i2s0_pins_c &i2s0_pins_d &i2s0_pins_e>;
-	pinctrl-1 = <&i2s0_pins_f>;
-	status = "okay";
-};
-
-&i2s0_mach {
-	soundcard-mach,name = "microduck-audio";
-	soundcard-mach,format = "i2s";
-	soundcard-mach,frame-master = <&i2s0_cpu>;
-	soundcard-mach,bitclock-master = <&i2s0_cpu>;
-	soundcard-mach,slot-num = <2>;
-	soundcard-mach,slot-width = <32>;
-	status = "okay";
-	i2s0_cpu: soundcard-mach,cpu {
-		sound-dai = <&i2s0_plat>;
-		soundcard-mach,pll-fs = <1>;
-		soundcard-mach,mclk-fs = <256>;
-	};
-	i2s0_codec: soundcard-mach,codec {
-		sound-dai = <&tlv320>;
-	};
-};
