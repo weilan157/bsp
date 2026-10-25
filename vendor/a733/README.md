@@ -126,6 +126,21 @@ ieee80211 phy0: New interface create wlan0
 2: wlan0: <BROADCAST,MULTICAST> mtu 1500 ... link/ether c3:82:00:80:ff:ff
 ```
 
+**IMX219 1080p 抓帧成功**（2026-10-25）：
+
+```
+microduck-cam                 → /tmp/frame.raw = 4,177,920 字节，0.22s
+microduck-cam 640 480 10 ...  → /tmp/f.raw    = 6,144,000 字节（=640*480*2*10）
+```
+
+**蓝牙手柄已在真机跑通**（2026-10-25，Xbox Wireless Controller）：
+
+```
+input: Xbox Wireless Controller as /devices/virtual/misc/uhid/0005:045E:02FD.0001/input/input1
+microsoft 0005:045E:02FD.0001: input: BLUETOOTH HID v9.03 Gamepad
+/dev/input/js0  /dev/input/event1
+```
+
 **IMX219 摄像头已在真机跑通**（2026-10-25）：
 
 ```
