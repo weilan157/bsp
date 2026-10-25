@@ -617,8 +617,17 @@ cmd_a733_pack() {
 		run_root mkdir -p "${dst}"
 		run_root cp -f "${work}/aic_load_fw/aic_load_fw.ko" "${dst}/"
 		run_root cp -f "${work}/aic8800_fdrv/aic8800_fdrv.ko" "${dst}/"
+		# 蓝牙：aic_btusb（BlueZ 模式，接 8d81 的 BT 接口 e0/01/01）
+		if [[ -d "${work}/aic_btusb" ]]; then
+			make -C "${k}" M="${work}/aic_btusb" ARCH=arm64 \
+				CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+				CONFIG_PLATFORM_UBUNTU=y modules \
+				> "${A733_OUT}/aic_btusb.build.log" 2>&1 || \
+				die "编译 aic_btusb 失败（见 out/a733/aic_btusb.build.log）"
+			run_root cp -f "${work}/aic_btusb/aic_btusb.ko" "${dst}/"
+		fi
 		depmod -b "${rootdir}" -a "${rel}" >/dev/null 2>&1 || true
-		info "安装 Radxa WiFi 驱动: aic_load_fw + aic8800_fdrv (${rel}/extra)"
+		info "安装 Radxa WiFi/BT 驱动: aic_load_fw + aic8800_fdrv + aic_btusb (${rel}/extra)"
 	}
 	a733_build_aic8800_usb
 

@@ -6,3 +6,4 @@
 #   aic8800_fdrv  —— 负责 8d81（运行态）建 wlan0
 aic_load_fw
 aic8800_fdrv
+aic_btusb
