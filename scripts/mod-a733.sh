@@ -153,7 +153,7 @@ cmd_a733_uboot() {
 		# 关键：mmc read 的 block/count 按十六进制解析！
 		# Image@16MiB=0x8000 扇区，dtb@56MiB=0x1C000 扇区；每段 0x8000（16 MiB）
 		local rawboot
-		rawboot="mmc dev 0; setenv bootargs console=ttyAS0,115200 earlycon=uart8250,mmio32,0x02500000 root=/dev/mmcblk0p2 rw rootwait cma=8M loglevel=8"
+		rawboot="mmc dev 0; setenv bootargs console=ttyAS0,115200 earlycon=uart8250,mmio32,0x02500000 root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=8"
 		rawboot="${rawboot}; mmc read 0x40080000 0x8000 0x8000"
 		rawboot="${rawboot}; mmc read 0x41080000 0x10000 0x8000"
 		rawboot="${rawboot}; mmc read 0x42080000 0x18000 0x2200"
@@ -582,7 +582,7 @@ cmd_a733_pack() {
 	# uart8250 + UART0 基址，保证 console 驱动 probe 之前也能看到 log。
 	# loglevel=4：只保留 warning 以上。115200 下日志本身要占掉几百毫秒，
 	# 调试时临时改成 7/8 即可。
-	bootargs="console=ttyAS0,115200 root=/dev/mmcblk0p2 rw rootwait cma=8M loglevel=4"
+	bootargs="console=ttyAS0,115200 root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=4"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
@@ -642,7 +642,8 @@ cmd_a733_pack() {
 		[[ -n "${bb}" ]] || return 0
 		local dst link
 		for dst in /usr/sbin/udhcpc /usr/sbin/udhcpc6 /bin/ping /bin/ping6 \
-			   /bin/ps /usr/bin/killall /bin/killall; do
+			   /bin/ps /usr/bin/killall /bin/killall \
+			   /usr/bin/hexdump /bin/hexdump /usr/bin/od /bin/od /usr/bin/free; do
 			link="${rootdir}${dst}"
 			[[ -e "${link}" ]] && continue
 			run_root mkdir -p "$(dirname "${link}")"

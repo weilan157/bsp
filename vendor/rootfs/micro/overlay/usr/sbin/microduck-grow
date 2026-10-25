@@ -39,7 +39,9 @@ if command -v parted >/dev/null 2>&1; then
 		fi
 		# 用显式扇区号（磁盘末尾）而不是 "100%"：
 		# "100%" 在某些 parted 版本上按"剩余空间百分比"解释，会扩不到底。
-		sectors=$(blockdev --getsz "$disk" 2>/dev/null)
+		# sysfs 的 size 就是 512 字节扇区数，比 blockdev --getsz 可靠
+		sectors=$(cat "/sys/class/block/$(basename "$disk")/size" 2>/dev/null)
+		[ -n "$sectors" ] || sectors=$(blockdev --getsz "$disk" 2>/dev/null)
 		if [ -n "$sectors" ] && [ "$sectors" -gt 0 ]; then
 			end=$((sectors - 1))
 			if parted -s "$disk" unit s resizepart "$part" "${end}s" >/dev/null 2>&1; then

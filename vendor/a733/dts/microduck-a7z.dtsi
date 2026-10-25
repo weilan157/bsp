@@ -247,6 +247,14 @@
 
 &mipi1 {
 	status = "okay";
+	/* mipi1 pinctrl: SoC dtsi 里 mipi1 用的是 mipib_pins_a/b（PK10-PK19），
+	 * 与 csi1 申请的同一组引脚冲突：
+	 *   pin PK12 already requested by 5821000.csi; cannot claim for 5810200.mipi
+	 *   → mipi1 request pinctrl handle failed
+	 * MIPI/CSI 共用这组引脚，交给 csi 统一 mux 即可，mipi 不再申请。 */
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	/delete-property/ pinctrl-1;
 };
 
 &isp00 {
