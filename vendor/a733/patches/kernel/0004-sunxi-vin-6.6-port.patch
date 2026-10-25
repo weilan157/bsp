@@ -29,3 +29,59 @@ index 3842b1c..15c882e 100644
  #else
  	return i2c_add_driver(sensor_driver);
  #endif
+diff --git a/drivers/vin/vin.c b/drivers/vin/vin.c
+index 1dbf849..a39eae5 100644
+--- a/drivers/vin/vin.c
++++ b/drivers/vin/vin.c
+@@ -2429,6 +2429,7 @@ static int vin_probe(struct platform_device *pdev)
+ 
+ 	vind->id = pdev->id;
+ 	vind->pdev = pdev;
++	printk("VINPROBE 1: enter vin_probe id=%d\n", pdev->id);
+ #if IS_ENABLED(CONFIG_VIN_INIT_MELIS) && !defined RV_RUN_CAR_REVERSE
+ 	vind->sensor_power_on = true;
+ #endif
+@@ -2534,6 +2535,7 @@ static int vin_probe(struct platform_device *pdev)
+ 	platform_set_drvdata(pdev, vind);
+ 
+ 	ret = vin_md_get_clocks(vind);
++	printk("VINPROBE 2: vin_md_get_clocks ret=%d\n", ret);
+ 	if (ret)
+ 		goto err_clk;
+ 
+@@ -2554,6 +2556,7 @@ static int vin_probe(struct platform_device *pdev)
+ 
+ 	if (dev->of_node) {
+ 		ret = vin_md_register_entities(vind, dev->of_node);
++		printk("VINPROBE 3: vin_md_register_entities ret=%d\n", ret);
+ 	} else {
+ 		vin_err("Device tree of_node is NULL!\n");
+ 		ret = -ENOSYS;
+@@ -2569,6 +2572,7 @@ static int vin_probe(struct platform_device *pdev)
+ #endif
+ 	mutex_lock(&vind->media_dev.graph_mutex);
+ 	ret = vin_create_media_links(vind);
++	printk("VINPROBE 4: vin_create_media_links ret=%d\n", ret);
+ 	mutex_unlock(&vind->media_dev.graph_mutex);
+ 	if (ret) {
+ 		vin_err("vin_create_media_links error\n");
+@@ -2580,6 +2584,7 @@ static int vin_probe(struct platform_device *pdev)
+ 	 * pay attention to graph_mutex dead lock.
+ 	 */
+ 	ret = vin_setup_default_links(vind);
++	printk("VINPROBE 5: vin_setup_default_links ret=%d\n", ret);
+ 	if (ret) {
+ 		vin_err("vin_setup_default_links error\n");
+ 		goto err_clk;
+@@ -2594,9 +2599,11 @@ static int vin_probe(struct platform_device *pdev)
+ 		goto err_clk;
+ 
+ 
++	printk("VINPROBE 6: vin_probe ok\n");
+ 	vin_log(VIN_LOG_MD, "%s ok!\n", __func__);
+ 	return 0;
+ err_clk:
++	printk("VINPROBE ERR: goto err_clk, ret=%d\n", ret);
+ 	vin_md_put_clocks(vind);
+ 	vin_md_unregister_entities(vind);
+ 	media_device_unregister(&vind->media_dev);
