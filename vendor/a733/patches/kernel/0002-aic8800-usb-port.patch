@@ -191,7 +191,7 @@ index ef198ee..8fda9ab 100644
  	{}
  };
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
-index 8ee19ec..2998eb5 100644
+index 8ee19ec..de9fcc2 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
 +++ b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
 @@ -2329,9 +2329,17 @@ static int rwnx_do_ioctl(struct net_device *net, struct ifreq *req, void __user
@@ -212,3 +212,22 @@ index 8ee19ec..2998eb5 100644
  		break;
  	default:
  		ret = -EOPNOTSUPP;
+@@ -6170,6 +6178,18 @@ static int rwnx_ic_rf_init(struct rwnx_hw *rwnx_hw)
+ void aic_ipc_setting(struct rwnx_vif *rwnx_vif)
+ {
+ 	struct rwnx_hw *rwnx_hw = rwnx_vif->rwnx_hw;
++
++	/* AIC8800 USB FIX (skip ipc setting): 这条厂商私有 hwconfig 命令在本固件上
++	 * 不返回应答，触发 rwnx_cmds.c 的 "cmd timed-out"，把 cmd_mgr 置成
++	 * RWNX_CMD_MGR_STATE_CRASHED。之后 ip link up 的 start/coex/add_if
++	 * 三条命令全部立刻 -EPIPE：
++	 *     cmd queue crashed x3
++	 *     add_if: Status Error(255)
++	 *     RTNETLINK answers: Input/output error
++	 * 这里直接跳过（只影响 EDCA 调参，不影响连通性）。
++	 */
++	printk("aic_ipc_setting: skipped (AIC8800 USB FIX)\n");
++	return;
+ 	uint32_t hw_edca = 1;
+ 	//uint32_t hw_cca = 3;
+ 	int32_t param[14];
