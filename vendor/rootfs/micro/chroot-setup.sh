@@ -24,6 +24,7 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	wpasupplicant iw rfkill bluez \
 	hostapd dnsmasq \
 	v4l-utils \
+	parted \
 	iproute2 procps
 
 echo ">>> 用 sysvinit 取代 systemd"

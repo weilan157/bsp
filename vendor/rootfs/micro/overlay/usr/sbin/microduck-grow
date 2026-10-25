@@ -1,10 +1,29 @@
 #!/bin/sh
-# 首次启动把 rootfs 扩到分区大小
-#   - 分区本身由 parameter.txt 的 rootfs:grow 在烧写时扩到磁盘末尾
-#   - 这里只负责把 ext4 文件系统扩到分区大小（在线 resize，秒级）
+# 首次启动把 rootfs 扩到整张 SD 卡
+#  1) 用 parted 把 p2 分区扩到磁盘末尾（在线 BLKPG，不需要重读分区表）；
+#  2) 再用 resize2fs 把 ext4 扩到分区大小。
+# 旧版本只做了第 2 步，而镜像里的 p2 本身只有 rootfs 那么大（打包时按
+# rootfs.ext4 尺寸写的），SD 卡剩余空间永远用不上，apt 就会
+# "No space left on device"。
 dev=$(awk '$2=="/"{print $1}' /proc/mounts | head -1)
 [ -b "$dev" ] || exit 0
 
+case "$dev" in
+	*/mmcblk*p[0-9]*) disk=${dev%p[0-9]*}; part=${dev##*p} ;;
+	*/sd[a-z][0-9]*)  disk=$(printf '%s' "$dev" | sed 's/[0-9]*$//'); part=$(printf '%s' "$dev" | sed 's/.*[a-z]//') ;;
+	*) exit 0 ;;
+esac
+
+# 1) 扩分区（只有后面确实还有空闲空间时才做）
+if command -v parted >/dev/null 2>&1; then
+	if parted -s "$disk" print free 2>/dev/null | grep -qi 'free space'; then
+		if parted -s "$disk" resizepart "$part" 100% >/dev/null 2>&1; then
+			printf 'microduck: partition %s resized to end of disk\n' "$dev" > /dev/kmsg 2>/dev/null
+		fi
+	fi
+fi
+
+# 2) 扩文件系统
 bs=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block size/{gsub(/ /,"",$2);print $2}')
 fs_blocks=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block count/{gsub(/ /,"",$2);print $2}')
 size_bytes=$(blockdev --getsize64 "$dev" 2>/dev/null) || exit 0

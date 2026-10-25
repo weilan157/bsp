@@ -364,6 +364,21 @@
 &scaler32 { status = "disabled"; };
 &scaler33 { status = "disabled"; };
 
+/* ---------------------------------------------------------------------
+ * 但 scaler00 必须打开：VIN 取图管线（vinc0 → isp00 → scaler00）里
+ * scaler 是必经子设备。全关掉之后 v4l2 能枚举格式，但 S_FMT 会失败：
+ *     v4l2 sub device scaler get_selection error!
+ *     vin_pipeline_try_format failed
+ *     VIDIOC_S_FMT: failed: Invalid argument
+ * scaler00 的 work_mode=0 / device_id=0 是正常配置（崩掉的 scaler11 是
+ * work_mode=0xff / device_id=5），所以只开这一个。
+ * iommus 一并删掉：我们没开 AW_IOMMU，留着会让它 probe 一直 defer。
+ * ------------------------------------------------------------------- */
+&scaler00 {
+	status = "okay";
+	/delete-property/ iommus;
+};
+
 /* =====================================================================
  * 9. VIN 不用 IOMMU（去掉 iommus 引用）
  *
