@@ -303,7 +303,8 @@ cmd_rootfs_micro() {
 		fi
 		rootfs_fix_perms "${rootfs}"
 		run_root chmod 755 "${rootfs}/etc/init.d/rcS" "${rootfs}"/usr/sbin/microduck-* \
-			"${rootfs}/usr/share/udhcpc/default.script" 2>/dev/null || true
+			"${rootfs}/usr/share/udhcpc/default.script" \
+			"${rootfs}"/www/cgi-bin/*.cgi 2>/dev/null || true
 	fi
 
 	run_root rm -f "${rootfs}/tmp/chroot-setup.sh" "${rootfs}/usr/bin/qemu-aarch64-static"

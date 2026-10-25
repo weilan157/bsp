@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>microduck 配网</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 24px;
+         background: #f5f7fa; color: #1f2937; }
+  .card { max-width: 420px; margin: 0 auto; background: #fff; border-radius: 12px;
+          padding: 24px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p.hint { color: #6b7280; font-size: 13px; margin: 0 0 20px; }
+  label { display: block; font-size: 13px; margin: 14px 0 6px; color: #374151; }
+  input { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px;
+          border: 1px solid #d1d5db; border-radius: 8px; }
+  input:focus { outline: none; border-color: #2563eb; }
+  button { margin-top: 20px; width: 100%; padding: 12px; font-size: 16px; color: #fff;
+           background: #2563eb; border: 0; border-radius: 8px; }
+  button:active { background: #1d4ed8; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>microduck 配网</h1>
+    <p class="hint">填写要连接的 WiFi（支持中文 SSID），保存后设备会自动切换为普通联网模式。</p>
+    <form action="/cgi-bin/save.cgi" method="get">
+      <label for="ssid">WiFi 名称 (SSID)</label>
+      <input id="ssid" name="ssid" required autocomplete="off" autocapitalize="off" spellcheck="false">
+      <label for="psk">密码</label>
+      <input id="psk" name="psk" type="password" required minlength="8" maxlength="63">
+      <button type="submit">保存并连接</button>
+    </form>
+  </div>
+</body>
+</html>
