@@ -275,7 +275,7 @@ index ef198ee..8fda9ab 100644
  	{}
  };
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
-index 8ee19ec..de9fcc2 100644
+index 8ee19ec..89bda0d 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
 +++ b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
 @@ -2329,9 +2329,17 @@ static int rwnx_do_ioctl(struct net_device *net, struct ifreq *req, void __user
@@ -315,3 +315,35 @@ index 8ee19ec..de9fcc2 100644
  	uint32_t hw_edca = 1;
  	//uint32_t hw_cca = 3;
  	int32_t param[14];
+@@ -6325,15 +6345,22 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
+ 	}
+ #endif
+ 
+-	if (rwnx_hw->chipid == PRODUCT_ID_AIC8800D) {
+-		ret = rwnx_send_set_stack_start_req(rwnx_hw, 1, feature.hwinfo < 0, feature.hwinfo, feature.fwlog_en, &set_start_cfm);
+-	} else if (rwnx_hw->chipid == PRODUCT_ID_AIC8800DC ||
+-			rwnx_hw->chipid == PRODUCT_ID_AIC8800DW) {
+-		ret = rwnx_send_set_stack_start_req(rwnx_hw, 1, 0, 0, feature.fwlog_en, &set_start_cfm);
+-		set_start_cfm.is_5g_support = false;
+-	} else {
+-		ret = rwnx_send_set_stack_start_req(rwnx_hw, 1, 0, CO_BIT(5), feature.fwlog_en, &set_start_cfm);
+-	}
++	/* AIC8800 USB FIX (skip set_stack_start): 这颗 D80 的固件已经由
++	 * aic8800_bsp 的 aicwifi_init() 用 HOST_START_APP_AUTO 启动过；
++	 * fdrv 作为独立 USB 驱动再发一次 MM_SET_STACK_START，
++	 * 固件会直接抛异常：
++	 *     cmd timed-out
++	 *     cmd: 123-MM_SET_STACK_START_REQ
++	 *     rwnx_exception_event send exception uevent to userspace
++	 * 于是 cmd_mgr 变 CRASHED，之后 ip link up 全部失败。
++	 * 这里跳过重复启动，用合理默认值填充 cfm 供后续使用。
++	 */
++	printk("rwnx_cfg80211_init: skip MM_SET_STACK_START (AIC8800 USB FIX)\n");
++	memset(&set_start_cfm, 0, sizeof(set_start_cfm));
++	set_start_cfm.is_5g_support = true;
++	set_start_cfm.vendor_info = 0;
++	ret = 0;
++
+ 	if (ret)
+ 		goto err_lmac_reqs;
+ 
