@@ -52,3 +52,10 @@ if [ -x /usr/sbin/microduck-bt-autoconnect ]; then
 		/usr/sbin/microduck-bt-autoconnect >/dev/null 2>&1 &
 	fi
 fi
+
+# 新手柄自动配对：手柄进入配对模式后无需任何命令即可连上
+if [ -x /usr/sbin/microduck-bt-autopair ]; then
+	if ! pidof microduck-bt-autopair >/dev/null 2>&1; then
+		/usr/sbin/microduck-bt-autopair >/dev/null 2>&1 &
+	fi
+fi
