@@ -23,35 +23,44 @@ case "$dev" in
 	*) exit 0 ;;
 esac
 
-# 1) 扩分区（只有后面确实还有空闲空间时才做）
+# 1) 扩分区
 #
-# 注意：镜像里的 GPT 备份头写在 p2 末尾（437MB 处），SD 卡后面还有几十 GB 时
-# parted 会提示 "Not all of the space available ... fix the GPT"，并且拒绝
-# resizepart。做法是先让 parted 修掉 GPT（用 ---pretend-input-tty 自动回答
-# "Fix"），再 resizepart。
-if command -v parted >/dev/null 2>&1; then
-	if parted -s "$disk" print free 2>/dev/null | grep -qi 'free space'; then
-		# 若 GPT 需要修复，parted print 会带 "fix the GPT" 提示
-		if parted -s "$disk" print 2>&1 | grep -qi 'fix the GPT'; then
-			printf 'Fix\n' | parted ---pretend-input-tty "$disk" print \
-				>/dev/null 2>&1
-			printf 'microduck: GPT backup header moved to end of disk\n' > /dev/kmsg 2>/dev/null
+# 踩过的坑（按顺序）：
+#   a) /proc/mounts 里 root 是 /dev/root（不是块设备）→ 旧脚本直接 exit；
+#   b) 镜像的 GPT 备份头在 p2 末尾，parted 提示 "fix the GPT"；
+#   c) 即使修了 GPT，parted resizepart 仍报
+#      "Unable to satisfy all constraints on the partition"（对齐/备份头约束）。
+# 现在优先用 sfdisk（growpart 的标准做法，对已挂载分区走 BLKPG）：
+#     printf ',+,\n' | sfdisk --force --no-reread -N <part> <disk>
+# sfdisk 不可用时再退回 parted。
+grow_partition() {
+	if command -v sfdisk >/dev/null 2>&1; then
+		if printf ',+,\n' | sfdisk --force --no-reread -N "$part" "$disk" \
+			> /dev/null 2>&1; then
+			printf 'microduck: partition %s extended with sfdisk\n' "$dev" > /dev/kmsg 2>/dev/null
+			return 0
 		fi
-		# 用显式扇区号（磁盘末尾）而不是 "100%"：
-		# "100%" 在某些 parted 版本上按"剩余空间百分比"解释，会扩不到底。
-		# sysfs 的 size 就是 512 字节扇区数，比 blockdev --getsz 可靠
+		printf 'microduck: sfdisk extend failed\n' > /dev/kmsg 2>/dev/null
+	fi
+
+	if command -v parted >/dev/null 2>&1; then
+		if parted -s "$disk" print 2>&1 | grep -qi 'fix the GPT'; then
+			printf 'Fix\n' | parted ---pretend-input-tty "$disk" print >/dev/null 2>&1
+		fi
 		sectors=$(cat "/sys/class/block/$(basename "$disk")/size" 2>/dev/null)
 		[ -n "$sectors" ] || sectors=$(blockdev --getsz "$disk" 2>/dev/null)
 		if [ -n "$sectors" ] && [ "$sectors" -gt 0 ]; then
-			end=$((sectors - 1))
-			if parted -s "$disk" unit s resizepart "$part" "${end}s" >/dev/null 2>&1; then
-				printf 'microduck: partition %s resized to %ss\n' "$dev" "$end" > /dev/kmsg 2>/dev/null
-			else
-				printf 'microduck: resizepart %s FAILED (end=%ss)\n' "$dev" "$end" > /dev/kmsg 2>/dev/null
-			fi
+			parted -s "$disk" unit s resizepart "$part" "$((sectors - 1))s" \
+				> /dev/null 2>&1 && {
+				printf 'microduck: partition %s extended with parted\n' "$dev" > /dev/kmsg 2>/dev/null
+				return 0
+			}
 		fi
 	fi
-fi
+	return 1
+}
+
+grow_partition || printf 'microduck: partition grow skipped/failed\n' > /dev/kmsg 2>/dev/null
 
 # 2) 扩文件系统
 bs=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block size/{gsub(/ /,"",$2);print $2}')
