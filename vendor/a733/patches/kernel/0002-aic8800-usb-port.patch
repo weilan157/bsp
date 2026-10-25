@@ -60,10 +60,10 @@ index dc8d991..def6d2d 100644
  		for (index = 0; index < patch_info->ext_patch_nb; index++) {
  			id = *(patch_info->ext_patch_param + (index * 2));
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-index 71998d8..5ab431d 100644
+index 71998d8..e00a678 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-@@ -50,6 +50,20 @@ void aicbsp_device_exit(void)
+@@ -50,6 +50,19 @@ void aicbsp_device_exit(void)
  
  static struct device_match_entry aicdev_match_table[] = {
  	{0xa69c, 0x8800, PRODUCT_ID_AIC8800D,   "aic8800d",   0, 0}, // 8800d in bootloader mode
@@ -80,11 +80,10 @@ index 71998d8..5ab431d 100644
 +	 *     aic8800_fdrv。
 +	 */
 +	{0xa69c, 0x8d80, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
-+	{0xa69c, 0x8d81, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
  };
  
  static struct device_match_entry *aic_matched_ic;
-@@ -69,7 +83,13 @@ void *aicbsp_get_drvdata(void *args)
+@@ -69,7 +82,13 @@ void *aicbsp_get_drvdata(void *args)
  static int aicbsp_platform_power_on(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -98,7 +97,7 @@ index 71998d8..5ab431d 100644
  	mdelay(50);
  #endif
  	return 0;
-@@ -78,7 +98,9 @@ static int aicbsp_platform_power_on(void)
+@@ -78,7 +97,9 @@ static int aicbsp_platform_power_on(void)
  static void aicbsp_platform_power_off(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -108,7 +107,7 @@ index 71998d8..5ab431d 100644
  	mdelay(100);
  #endif
  	bsp_dbg("%s\n", __func__);
-@@ -855,6 +877,7 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+@@ -855,6 +876,7 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
  	struct aicwf_rx_priv *rx_priv = NULL;
  	struct priv_dev *aicdev = NULL;
  	int i = 0;
@@ -116,7 +115,7 @@ index 71998d8..5ab431d 100644
  
  	bsp_dbg("%s vid:0x%X pid:0x%X icl:0x%X isc:0x%X ipr:0x%X\n", __func__,
  		id->idVendor,
-@@ -877,12 +900,21 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+@@ -877,12 +899,21 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
  		return -1;
  	}
  
@@ -139,15 +138,21 @@ index 71998d8..5ab431d 100644
  	aicdev->udev = usb;
  	aicdev->dev = &usb->dev;
  	usb_set_intfdata(intf, aicdev);
-@@ -949,6 +981,15 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+@@ -949,6 +980,21 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
  	if (aicbsp_driver_fw_init(aicdev))
  		goto out_free_bus;
  
 +	if (handoff) {
-+		/* 固件已经灌进芯片，接下来让 aic8800_fdrv 绑定这个接口去建 wlan0。
-+		 * 返回 -ENODEV 表示 bsp 不绑定，usb 核心会把接口留给 fdrv。 */
-+		printk("aicbsp: firmware downloaded, handoff to aic8800_fdrv (pid 0x%04x)\n",
-+		       id->idProduct);
++		/* AIC8800 USB FIX (reboot after fw): D80 的 USB 是三段式
++		 *   1111:1111(伪装U盘) -> a69c:8d80(Boot ROM，上传固件) -> a69c:8d81(WiFi+BT 运行态, 3 接口)
++		 * 固件上传完必须让芯片 soft disconnect 重新枚举，否则 fdrv 会在
++		 * boot ROM 状态下去发 MM_SET_STACK_START，固件直接抛异常
++		 * （实测 cmd timed-out + rwnx_exception_event + cmd queue crashed）。
++		 * 这里用 HOST_START_APP_REBOOT 触发它切到 8d81。
++		 */
++		printk("aicbsp: firmware downloaded, send START_APP_REBOOT ...\n");
++		rwnx_send_dbg_start_app_req(aicdev, 2000, HOST_START_APP_REBOOT, NULL);
++		printk("aicbsp: reboot sent, expect re-enumeration as a69c:8d81\n");
 +		ret = -ENODEV;
 +		goto out_free_bus;
 +	}
@@ -155,7 +160,7 @@ index 71998d8..5ab431d 100644
  	aicdev->app_cmp = true;
  	fw_loaded = 1;
  
-@@ -1012,6 +1053,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+@@ -1012,6 +1058,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
  static struct usb_device_id aicwf_usb_id_table[] = {
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC)},
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC_8801)},
