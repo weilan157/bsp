@@ -29,6 +29,33 @@ index 3842b1c..15c882e 100644
  #else
  	return i2c_add_driver(sensor_driver);
  #endif
+diff --git a/drivers/vin/vin-video/vin_video.c b/drivers/vin/vin-video/vin_video.c
+index f1c996e..7dc09d9 100644
+--- a/drivers/vin/vin-video/vin_video.c
++++ b/drivers/vin/vin-video/vin_video.c
+@@ -915,6 +915,11 @@ static int vin_pipeline_try_format(struct vin_core *vinc,
+ 			sfmt.pad = 0;
+ 			ret = v4l2_subdev_call(sd, pad, set_fmt, NULL, &sfmt);
+ 			if (ret) {
++				/* PIPEFMT: 定位管线里哪个实体拒绝了格式 */
++				pr_err("PIPEFMT sink fail: entity=%s grp=0x%x ret=%d fmt=%dx%d code=0x%x pad=%d\n",
++				       me->name, sd->grp_id, ret,
++				       sfmt.format.width, sfmt.format.height,
++				       sfmt.format.code, sfmt.pad);
+ 				mutex_unlock(&vinc->vid_cap.vdev.entity.graph_obj.mdev->graph_mutex);
+ 				media_graph_walk_cleanup(&graph);
+ 				return ret;
+@@ -934,6 +939,10 @@ static int vin_pipeline_try_format(struct vin_core *vinc,
+ 				sfmt.pad = me->num_pads - 1;
+ 				ret = v4l2_subdev_call(sd, pad, set_fmt, NULL, &sfmt);
+ 				if (ret) {
++					pr_err("PIPEFMT source fail: entity=%s grp=0x%x ret=%d fmt=%dx%d code=0x%x pad=%d\n",
++					       me->name, sd->grp_id, ret,
++					       sfmt.format.width, sfmt.format.height,
++					       sfmt.format.code, sfmt.pad);
+ 					mutex_unlock(&vinc->vid_cap.vdev.entity.graph_obj.mdev->graph_mutex);
+ 					media_graph_walk_cleanup(&graph);
+ 					return ret;
 diff --git a/drivers/vin/vin.c b/drivers/vin/vin.c
 index 1dbf849..27fbd35 100644
 --- a/drivers/vin/vin.c

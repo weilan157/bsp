@@ -28,10 +28,16 @@ if command -v parted >/dev/null 2>&1; then
 				>/dev/null 2>&1
 			printf 'microduck: GPT backup header moved to end of disk\n' > /dev/kmsg 2>/dev/null
 		fi
-		if parted -s "$disk" resizepart "$part" 100% >/dev/null 2>&1; then
-			printf 'microduck: partition %s resized to end of disk\n' "$dev" > /dev/kmsg 2>/dev/null
-		else
-			printf 'microduck: resizepart %s FAILED\n' "$dev" > /dev/kmsg 2>/dev/null
+		# 用显式扇区号（磁盘末尾）而不是 "100%"：
+		# "100%" 在某些 parted 版本上按"剩余空间百分比"解释，会扩不到底。
+		sectors=$(blockdev --getsz "$disk" 2>/dev/null)
+		if [ -n "$sectors" ] && [ "$sectors" -gt 0 ]; then
+			end=$((sectors - 1))
+			if parted -s "$disk" unit s resizepart "$part" "${end}s" >/dev/null 2>&1; then
+				printf 'microduck: partition %s resized to %ss\n' "$dev" "$end" > /dev/kmsg 2>/dev/null
+			else
+				printf 'microduck: resizepart %s FAILED (end=%ss)\n' "$dev" "$end" > /dev/kmsg 2>/dev/null
+			fi
 		fi
 	fi
 fi
