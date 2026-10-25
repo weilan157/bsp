@@ -629,6 +629,19 @@ cmd_a733_pack() {
 		[[ -d "${fw}" ]] || return 0
 		run_root mkdir -p "${rootdir}/lib/firmware"
 		run_root cp -a "${fw}/." "${rootdir}/lib/firmware/"
+		# aic8800_fw_alias_lowercase: 仓库目录名是 Radxa 驱动要求的大写
+		# (aic8800D80/aic8800DC)，但 BSP 那版驱动用小写；ext4 大小写敏感，
+		# 这里在镜像里再生成一份小写别名，两代驱动都能找到固件。
+		a733_fw_alias_lowercase() {
+			local base="${rootdir}/lib/firmware" up low
+			for up in aic8800D80 aic8800DC; do
+				low=$(echo "${up}" | tr 'A-Z' 'a-z')
+				[[ -d "${base}/${up}" ]] || continue
+				[[ -d "${base}/${low}" ]] && continue
+				run_root cp -a "${base}/${up}" "${base}/${low}"
+			done
+		}
+		a733_fw_alias_lowercase
 		info "安装 aic8800 固件: $(run_root find "${rootdir}/lib/firmware" -type f | wc -l) 个文件"
 	}
 	a733_install_firmware
