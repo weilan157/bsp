@@ -295,6 +295,11 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&twi3_pins_default>;
 	pinctrl-1 = <&twi3_pins_sleep>;
+	/* twi-sunxi 的 probe 必须读到 clock-frequency，否则直接 -EINVAL：
+	 *   "failed to get clock frequency" -> "TWI failed to get resource"
+	 *   -> "probe of 2513000.twi failed with error -22"
+	 * TWI3 是 IMX219 的控制总线（原理图 TWI3-SCK/SDA = PE3/PE4）。 */
+	clock-frequency = <400000>;
 	status = "okay";
 };
 
