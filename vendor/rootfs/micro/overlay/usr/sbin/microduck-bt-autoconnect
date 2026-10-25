@@ -1,0 +1,47 @@
+#!/bin/sh
+# 已配对/信任的蓝牙设备自动重连（手柄、耳机、键鼠等）
+#
+# 触发场景：
+#   - 开机：手柄先开/板子先开都能连上（后台每 10s 扫一遍）
+#   - 手柄断电再开：BlueZ 的 page scan 会收到连接请求，这里再补一次主动 connect
+# 只处理 Trusted: yes 且 Icon 是 input-* 的设备（避免去连音箱/手机）。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+CONF=/etc/microduck/bt-autoconnect.conf
+INTERVAL=10
+
+log() { printf 'microduck-bt: %s\n' "$*" > /dev/kmsg 2>/dev/null; }
+
+# 可选：/etc/microduck/bt-autoconnect.conf 里每行一个 MAC，只连这些
+list_macs() {
+	if [ -s "$CONF" ]; then
+		grep -vE '^[[:space:]]*(#|$)' "$CONF" | awk '{print $1}'
+		return
+	fi
+	# 没配置就自动挑：trusted 且 icon 为 input-* 的设备
+	bluetoothctl devices 2>/dev/null | awk '{print $2}' | while read -r mac; do
+		[ -n "$mac" ] || continue
+		info=$(bluetoothctl info "$mac" 2>/dev/null)
+		echo "$info" | grep -q 'Trusted: yes' || continue
+		echo "$info" | grep -qE 'Icon: input-' || continue
+		echo "$mac"
+	done
+}
+
+i=0
+while :; do
+	# 适配器没上电就等
+	if ! hciconfig 2>/dev/null | grep -q 'UP RUNNING'; then
+		sleep "$INTERVAL"
+		continue
+	fi
+	for mac in $(list_macs); do
+		info=$(bluetoothctl info "$mac" 2>/dev/null)
+		echo "$info" | grep -q 'Connected: yes' && continue
+		if bluetoothctl connect "$mac" 2>/dev/null | grep -qi 'Connection successful'; then
+			log "auto-connected $mac"
+		fi
+	done
+	sleep "$INTERVAL"
+done

@@ -26,6 +26,7 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	v4l-utils \
 	fdisk \
 	parted \
+	alsa-utils \
 	iproute2 procps
 
 echo ">>> 用 sysvinit 取代 systemd"
@@ -33,6 +34,27 @@ ${APT} sysvinit-core
 # 只卸 systemd 本体；udev 保留（bluez 依赖它，且不启动它就不占启动时间）
 apt-get purge -y systemd-sysv systemd 2>/dev/null || true
 apt-get autoremove -y --purge 2>/dev/null || true
+
+# 蓝牙策略：已配对设备（手柄/键鼠/耳机）开机自动重连。
+# 注意不能把这个文件放进 overlay —— 它是 bluez 的 conffile，overlay 里的版本
+# 会让 dpkg 在安装时弹 "Configuration file ... main.conf" 交互提示，
+# 非交互环境读到 EOF 后 bluez 直接配置失败（rootfs 构建 rc=100）。
+echo ">>> 蓝牙自动重连策略"
+BTCFG=/etc/bluetooth/main.conf
+if [ -f "${BTCFG}" ]; then
+	set_bt_opt() {
+		local key="$1" val="$2"
+		if grep -qE "^#?[[:space:]]*${key}[[:space:]]*=" "${BTCFG}"; then
+			sed -i -E "s|^#?[[:space:]]*${key}[[:space:]]*=.*|${key} = ${val}|" "${BTCFG}"
+		else
+			printf '%s = %s\n' "${key}" "${val}" >> "${BTCFG}"
+		fi
+	}
+	set_bt_opt MultiProfile multiple
+	set_bt_opt AutoEnable true
+	set_bt_opt ReconnectAttempts 7
+	set_bt_opt ReconnectIntervals 1,2,4,8,16,32,64
+fi
 
 echo ">>> hostname / 用户"
 echo "${HOSTNAME}" > /etc/hostname

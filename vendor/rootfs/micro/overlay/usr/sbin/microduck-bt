@@ -45,3 +45,10 @@ if command -v bluetoothctl >/dev/null 2>&1; then
 fi
 
 printf 'microduck: bluetooth ready (hci0) at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
+
+# 已配对设备（手柄/键鼠/耳机）自动重连：后台每 10s 尝试一次
+if [ -x /usr/sbin/microduck-bt-autoconnect ]; then
+	if ! pidof microduck-bt-autoconnect >/dev/null 2>&1; then
+		/usr/sbin/microduck-bt-autoconnect >/dev/null 2>&1 &
+	fi
+fi
