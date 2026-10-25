@@ -323,7 +323,13 @@
 	sensor0_twi_addr = <0x20>;
 	sensor0_mclk_id = <0>;
 	sensor0_pos = "rear";
-	sensor0_isp_used = <0>;
+	/* IMX219 是 RAW Bayer 传感器，必须走 RAW → ISP → scaler 这条管线。
+	 * 写成 0 会让 VIN 当成 YUV 传感器走 dv_timings 路径，结果：
+	 *   sensor set dv timings error / sensor dv timings cap error
+	 *   整条 media 管线所有实体的 fmt 停在 unknown/0x0
+	 *   VIDIOC_S_FMT: Invalid argument
+	 */
+	sensor0_isp_used = <1>;
 	sensor0_fmt = <0>;
 	sensor0_stby_mode = <0>;
 	sensor0_vflip = <0>;

@@ -15,10 +15,23 @@ case "$dev" in
 esac
 
 # 1) 扩分区（只有后面确实还有空闲空间时才做）
+#
+# 注意：镜像里的 GPT 备份头写在 p2 末尾（437MB 处），SD 卡后面还有几十 GB 时
+# parted 会提示 "Not all of the space available ... fix the GPT"，并且拒绝
+# resizepart。做法是先让 parted 修掉 GPT（用 ---pretend-input-tty 自动回答
+# "Fix"），再 resizepart。
 if command -v parted >/dev/null 2>&1; then
 	if parted -s "$disk" print free 2>/dev/null | grep -qi 'free space'; then
+		# 若 GPT 需要修复，parted print 会带 "fix the GPT" 提示
+		if parted -s "$disk" print 2>&1 | grep -qi 'fix the GPT'; then
+			printf 'Fix\n' | parted ---pretend-input-tty "$disk" print \
+				>/dev/null 2>&1
+			printf 'microduck: GPT backup header moved to end of disk\n' > /dev/kmsg 2>/dev/null
+		fi
 		if parted -s "$disk" resizepart "$part" 100% >/dev/null 2>&1; then
 			printf 'microduck: partition %s resized to end of disk\n' "$dev" > /dev/kmsg 2>/dev/null
+		else
+			printf 'microduck: resizepart %s FAILED\n' "$dev" > /dev/kmsg 2>/dev/null
 		fi
 	fi
 fi
