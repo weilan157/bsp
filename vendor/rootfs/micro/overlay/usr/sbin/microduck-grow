@@ -6,7 +6,16 @@
 # rootfs.ext4 尺寸写的），SD 卡剩余空间永远用不上，apt 就会
 # "No space left on device"。
 dev=$(awk '$2=="/"{print $1}' /proc/mounts | head -1)
+# 内核 cmdline 是 root=/dev/mmcblk0p2，但 /proc/mounts 里会显示成 /dev/root，
+# 那不是块设备，旧脚本在这里 `exit 0` 静默退出，所以分区从来没扩过。
+# 依次兜底：/proc/cmdline 的 root= → 常见 SD 分区。
+if [ ! -b "$dev" ]; then
+	dev=$(sed -n 's/.*[[:space:]]root=\([^[:space:]]*\).*/\1/p' /proc/cmdline | head -1)
+fi
+[ -b "$dev" ] || dev=/dev/mmcblk0p2
 [ -b "$dev" ] || exit 0
+
+printf 'microduck: grow target %s\n' "$dev" > /dev/kmsg 2>/dev/null
 
 case "$dev" in
 	*/mmcblk*p[0-9]*) disk=${dev%p[0-9]*}; part=${dev##*p} ;;
