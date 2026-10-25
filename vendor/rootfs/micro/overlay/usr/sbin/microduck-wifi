@@ -57,6 +57,8 @@ if wpa_cli -p /run/wpa_supplicant -i wlan0 status 2>/dev/null | grep -q 'wpa_sta
 	printf 'microduck: wifi associated at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
 	busybox udhcpc -i wlan0 -b -q -t 5 -T 2 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 || true
 	printf 'microduck: dhcp done at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
+	# 板子没有 RTC 电池，联网后校时（否则 apt 签名/TLS 都会因时间错误失败）
+	/usr/sbin/microduck-timesync >/dev/null 2>&1 &
 else
 	# 连不上（密码错 / AP 不在范围）→ 回退到 AP 配网
 	printf 'microduck: wifi NOT associated, falling back to AP portal\n' > /dev/kmsg 2>/dev/null

@@ -1,0 +1,38 @@
+#!/bin/sh
+# 无 RTC 电池，上电后系统时间从 1970 开始；时间错会让 apt 的签名校验失败
+# （sqv: "Not live until ..."）、TLS 证书校验失败。
+# 这里在联网后从 HTTP 响应的 Date 头取当前时间（不依赖 NTP 端口，国内可用）。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+year=$(date +%Y)
+if [ "$year" -ge 2024 ]; then
+	exit 0
+fi
+
+i=0
+d=""
+while [ $i -lt 30 ]; do
+	for url in http://www.baidu.com http://mirrors.tuna.tsinghua.edu.cn http://www.qq.com; do
+		hdr=$(busybox wget -S -O /dev/null -T 5 "$url" 2>&1 \
+			| grep -i '^ *Date:' | head -1)
+		if [ -n "$hdr" ]; then
+			d=${hdr#*Date:}
+			break
+		fi
+	done
+	[ -n "$d" ] && break
+	sleep 1
+	i=$((i + 1))
+done
+
+if [ -n "$d" ]; then
+	d=$(echo "$d" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\r$//')
+	if date -s "$d" >/dev/null 2>&1; then
+		printf 'microduck: time synced to %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" > /dev/kmsg 2>/dev/null
+		exit 0
+	fi
+fi
+
+printf 'microduck: time sync failed (system time is %s)\n' "$(date '+%Y-%m-%d')" > /dev/kmsg 2>/dev/null
+exit 0
