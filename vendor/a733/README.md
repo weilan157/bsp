@@ -126,6 +126,15 @@ ieee80211 phy0: New interface create wlan0
 2: wlan0: <BROADCAST,MULTICAST> mtu 1500 ... link/ether c3:82:00:80:ff:ff
 ```
 
+**IMX219 摄像头已在真机跑通**（2026-10-25）：
+
+```
+sunxi-twi 2513000.twi: probe success            ← TWI3(PE3/PE4)
+sunxi:vin:[INFO]: [imx219]find the sony IMX219  ***********
+/dev/media0  /dev/video0
+i2c-3: SUNXI TWI(0x0000000002513000)
+```
+
 ## 上板必须的修法（从「完全无输出」到能登录）
 
 | 现象 | 根因 | 修法 |
@@ -169,14 +178,36 @@ ieee80211 phy0: New interface create wlan0
 注意：`0x8d80` 这颗模块**始终不重新枚举**（固件下载前后 PID 不变），所以厂商那套
 「bootloader PID → 重枚举成 app PID」的流程在这里不成立，必须靠上面的归属划分解决。
 
+## 摄像头（IMX219 / VIN）
+
+`board.dts` 默认把整棵 VIN 树关掉，加上 A733 的 BSP 与 6.6 内核之间有若干不匹配，
+这条链一共踩了 7 个坑（每个都是「配置看起来对，但驱动没走到」）：
+
+| 层 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 没有 `/dev/video*`、`sunxi_vin_debug_register_driver failed` | `board.dts` 把 `vind0/csi*/mipi*/isp*/vinc*` 全 `disabled`；且 `CONFIG_DEBUG_FS` 关着 | dtsi 里逐个打开（vind0/csi1/mipi1/isp00/vinc00）；开 `CONFIG_DEBUG_FS` |
+| 2 | `scaler_probe` 空指针 Oops，deferred probe 被打断 | `board.dts` 漏 disable `scaler11/12/13/21..23/31..33` | dtsi 里把这 9 个 scaler 全部 disabled |
+| 3 | `5800800.vind: -110`，且 **`vin_probe` 完全没被调用** | `vind0` 有 `power-domains = <&power-controller>`（`allwinner,sun60iw2-pck-600`），但 `CONFIG_AW_PCK600_DOMAINS` 没开 → devlink 永久挂起 | 开 `CONFIG_AW_PCK600_DOMAINS` |
+| 4 | `vin_probe` 一进去就 `error -1` | `vind_mclkpin/mcsipin/mipipin` 三路是固定常供，DT 无 supply → dummy regulator，而代码把 `regulator_set_voltage` 失败当致命 | 改成告警后继续（固定电压无需设置） |
+| 5 | `cci is NULL!`，`imx219 read addr 0x0` → `chip found is not an target chip` | `CONFIG_CSI_CCI=y` 会强制 `sensor_type = VIN_MODULE_TYPE_CCI`，而 A733 的 BSP 里根本没有 CCI 节点（只有老 SoC 有） | 关 `CONFIG_CSI_CCI`，传感器改走 DT 的 `sensor_bus_type`（TWI） |
+| 6 | `imx219 request i2c3 adapter failed!` | `twi-sunxi.c` probe 必须读到 `clock-frequency`，我们的 `&twi3` 漏了该属性 → `-22` | `&twi3` 补 `clock-frequency = <400000>` |
+| 7 | 传感器探测与 video 节点 | — | `[imx219]find the sony IMX219` + `/dev/video0` |
+
+DT 侧（`vendor/a733/dts/microduck-a7z.dtsi`）关键点：
+- MCSIB（原理图 D0/D1 + CLKA/CLKB，2-lane）→ `csi1` + `mipi1`；`vinc0_csi_sel=1`、`vinc0_mipi_sel=1`；
+- 传感器控制走 **TWI3（PE3/PE4）**，`&twi3` 需要自建 pin 状态 + `clock-frequency`；
+- BSP VIN 的绑定方式：`&sensor_list0`（`sensor00_mname="imx219"`、8 位地址 `0x20`）+ `&sensor0`（`mname`、`twi_cci_id=3`、`mclk_id=0`）；
+- `reset/pwdn`（MCSI-RST-R / MCSI-STBY-R）暂时留空，IMX219 已能被探测到。
+
 ## 已知限制 / 待办
 
 - **蓝牙未通**：`aic_btusb` 需要 class `e0` 的 USB 接口，而 FCU760K 只有 1 个 `ff/ff/ff`
   接口（WiFi/BT 共用），且这个设备被 `aic8800_fdrv` 独占。后续要验证 BT 到底走
   USB 复用、UART（BSP 里有 `aic8800_btlpm`）还是其它通路，再决定接法。
-- **摄像头未通**：IMX219 的 DT（`sensor_list0`/`sensor0`/`vinc00`/`twi3`）已配好、
-  VIN 已移植进内核，但 `5800800.vind` 一直 `deferred probe timeout (-110)`，
-  `vin_probe` 内部某个依赖拿不到，尚未定位到具体项。
+- **WiFi 还差最后一跳**：`wlan0` 能创建，初始化时的 `rwnx_send_*` 全部正常，
+  但 `ip link set wlan0 up` 触发 `rwnx_send_start/coex/add_if` 时出现
+  `cmd queue crashed` / `add_if: Status Error(255)`。表现为「初始化后固件不再应答」，
+  下一步排查 RX URB 是否在 `aic_ipc_setting` 之后被取消。
 - `i2c 13-0036`（AXP8191 PMIC）仍 `deferred probe pending`；`cpufreq-dt` 同样 pending。
   PMIC 的 `MFD_AXP2101/AXP8191` 注册路径还没打通（`AW_MFD_AXP2101` 已开但其 i2c 驱动未绑）。
 - cedar-ve（视频编解码）probe 报 `-110`，依赖没就绪，不影响启动。
