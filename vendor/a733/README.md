@@ -133,6 +133,15 @@ microduck-cam                 → /tmp/frame.raw = 4,177,920 字节，0.22s
 microduck-cam 640 480 10 ...  → /tmp/f.raw    = 6,144,000 字节（=640*480*2*10）
 ```
 
+**rootfs 自动扩容到整卡**（2026-10-25）：
+
+```
+microduck: grow target /dev/mmcblk0p2
+microduck: partition /dev/mmcblk0p2 extended with sfdisk
+EXT4-fs (mmcblk0p2): resized filesystem to 7786494
+/dev/root  28G  237M  27G  1% /
+```
+
 **蓝牙手柄已在真机跑通**（2026-10-25，Xbox Wireless Controller）：
 
 ```
@@ -222,6 +231,26 @@ rwnx_interface_add: wlan%d, 2, 10
 New interface create wlan0
 wlan0: link/ether 90:30:d6:03:3f:f6
 ```
+
+## 扩盘（grow）踩坑
+
+首次启动把 rootfs 扩到整张卡，中间踩了 4 层坑，最终方案在
+`/usr/sbin/microduck-grow`：
+
+1. `/proc/mounts` 里 root 是 `/dev/root`（不是块设备）—— 旧脚本 `[ -b ]` 直接
+   静默退出，所以扩容从来没执行过。改为 `/proc/cmdline` 的 `root=` 兜底；
+2. 镜像的 **GPT 备份头写在 p2 末尾**，`parted` 因此提示 "fix the GPT"；
+3. 即使修好 GPT，`parted resizepart` 仍报
+   `Unable to satisfy all constraints on the partition`（对齐/备份头约束），
+   而 `resize2fs` 只能把 ext4 扩到当前分区大小 → 看起来"扩了但没变大"；
+4. 最终改用 **`sfdisk`**（growpart 的标准做法，对挂载中分区走 BLKPG）：
+
+```sh
+printf ',+,\n' | sfdisk --force --no-reread -N 2 /dev/mmcblk0
+resize2fs /dev/mmcblk0p2
+```
+
+实测：`98304 -> 7786494 blocks`，`df /` 从 445M 变成 **28G**。
 
 ## 已知限制 / 待办## 已知限制 / 待办
 
