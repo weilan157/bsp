@@ -92,7 +92,7 @@ index 71998d8..1075260 100644
  };
  
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
-index ef198ee..c4ef63f 100644
+index ef198ee..f4f55c9 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_fdrv/aicwf_usb.c
 @@ -10,6 +10,13 @@
@@ -109,7 +109,7 @@ index ef198ee..c4ef63f 100644
  #include "rwnx_tx.h"
  #include "rwnx_defs.h"
  #include "usb_host.h"
-@@ -945,6 +952,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+@@ -945,8 +952,16 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
  static struct usb_device_id aicwf_usb_id_table[] = {
  #ifndef CONFIG_USB_BT
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_PRODUCT_ID_AIC)},
@@ -117,7 +117,15 @@ index ef198ee..c4ef63f 100644
 +	{USB_DEVICE(USB_VENDOR_ID_AIC, 0x8d81)},
  #else
  	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDOR_ID_AIC, USB_PRODUCT_ID_AIC, 0xff, 0xff, 0xff)},
++	/* AIC8800 USB FIX (fdrv bt-branch): 本工程 CONFIG_USB_BT 是打开的，
++	 * 实际编译的是这个 #else 分支（modinfo 里只有 usb:vA69Cp8801...
++	 * 一条别名可证），之前只把 8d80/8d81 加在 #ifndef 分支里等于没加。
++	 * FCU760K 是单接口 ff/ff/ff，用接口信息匹配最准确。 */
++	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDOR_ID_AIC, 0x8d80, 0xff, 0xff, 0xff)},
++	{USB_DEVICE_AND_INTERFACE_INFO(USB_VENDOR_ID_AIC, 0x8d81, 0xff, 0xff, 0xff)},
  #endif
+ 	{}
+ };
 diff --git a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c b/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
 index 8ee19ec..2998eb5 100644
 --- a/drivers/net/wireless/aic8800/aic8800_fdrv/rwnx_main.c
