@@ -29,6 +29,8 @@ printf 'microduck: zram at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 /usr/sbin/microduck-wifi >/dev/null 2>&1 &
 # 蓝牙：等 hci0 出现后起 dbus/bluetoothd 并上电
 /usr/sbin/microduck-bt >/dev/null 2>&1 &
+# SSH：我们的 inittab 不走 rc2.d，这里显式起 sshd（首次会生成主机密钥）
+/usr/sbin/microduck-sshd >/dev/null 2>&1 &
 
 # 启动耗时打点（dmesg 里看）
 printf 'microduck: userspace ready in %ss\n' "$(up)" > /dev/kmsg 2>/dev/null

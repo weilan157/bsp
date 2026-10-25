@@ -28,6 +28,7 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	parted \
 	alsa-utils \
 	i2c-tools \
+	openssh-server \
 	iproute2 procps
 
 echo ">>> 用 sysvinit 取代 systemd"
@@ -62,6 +63,25 @@ echo "${HOSTNAME}" > /etc/hostname
 touch /etc/hosts
 grep -q "^127.0.1.1" /etc/hosts || echo "127.0.1.1 ${HOSTNAME}" >> /etc/hosts
 echo "root:${ROOT_PASSWORD}" | chpasswd
+
+# SSH：允许 root 用密码登录（板子没 RTC，密钥交换不受时间影响，
+# 但旧版客户端可能因为时钟漂移报错，密码登录最省事）。
+# 注意不要把这些配置放进 overlay —— sshd_config 是 openssh-server 的 conffile，
+# overlay 里带同名文件会让 dpkg 弹交互提示（参考 bluez main.conf 那个坑）。
+echo ">>> SSH 配置"
+SSHD_CFG=/etc/ssh/sshd_config
+if [ -f "${SSHD_CFG}" ]; then
+	# 顶层配置段里改；Include 在文件末尾，改完仍生效
+	sed -i -E 's|^#?[[:space:]]*PermitRootLogin[[:space:]].*|PermitRootLogin yes|' "${SSHD_CFG}"
+	sed -i -E 's|^#?[[:space:]]*PasswordAuthentication[[:space:]].*|PasswordAuthentication yes|' "${SSHD_CFG}"
+	sed -i -E 's|^#?[[:space:]]*PermitEmptyPasswords[[:space:]].*|PermitEmptyPasswords no|' "${SSHD_CFG}"
+	# 允许 Keyboard-Interactive（部分客户端默认用它）
+	sed -i -E 's|^#?[[:space:]]*KbdInteractiveAuthentication[[:space:]].*|KbdInteractiveAuthentication yes|' "${SSHD_CFG}"
+	grep -qE '^[[:space:]]*PermitRootLogin' "${SSHD_CFG}" || echo 'PermitRootLogin yes' >> "${SSHD_CFG}"
+	grep -qE '^[[:space:]]*PasswordAuthentication' "${SSHD_CFG}" || echo 'PasswordAuthentication yes' >> "${SSHD_CFG}"
+fi
+# 主机密钥在首次启动时由 microduck-sshd 用 ssh-keygen -A 生成
+mkdir -p /run/sshd /var/run/sshd 2>/dev/null || true
 
 echo ">>> 精简"
 apt-get clean || true
