@@ -1,0 +1,18 @@
+diff --git a/drivers/sound/platform/Makefile b/drivers/sound/platform/Makefile
+index 6fe72c2..72c87f8 100644
+--- a/drivers/sound/platform/Makefile
++++ b/drivers/sound/platform/Makefile
+@@ -6,6 +6,13 @@
+ 
+ ccflags-y += -I $(srctree)/bsp/drivers/sound/pa/
+ ccflags-y += -I $(srctree)/bsp/drivers/sound/adapter
++# BSP 的 adapter/platform 源码用 #include <snd_sunxi_log.h> 等尖括号形式，
++# 需要把这些子目录也加进搜索路径，否则编译报
++#   snd_sunxi_pcm_adapter.c:19:10: fatal error: snd_sunxi_log.h: No such file or directory
++ccflags-y += -I $(srctree)/bsp/drivers/sound/platform
++ccflags-y += -I $(srctree)/bsp/drivers/sound/misc
++ccflags-y += -I $(srctree)/bsp/drivers/sound/codecs
++
+ ADPT_DIR := ../adapter
+ 
+ snd_soc_sunxi_component_sfx-objs		+= snd_sunxi_sfx.o

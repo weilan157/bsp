@@ -415,7 +415,7 @@ cmd_a733_kernel() {
 	export BSP_TOP="${k}/bsp/"
 	export LICHEE_KERN_DIR="${k}"
 	# cedar-ve/platforms/*.c 用 `"cedar_ve.h"`，Kbuild 只加了 platforms 目录
-	export KCFLAGS="-I${b}/drivers/ve/cedar-ve"
+	export KCFLAGS="-I${b}/drivers/ve/cedar-ve -I${b}/drivers/sound/platform -I${b}/drivers/sound/adapter -I${b}/drivers/sound/misc -I${b}/drivers/sound/pa -I${b}/drivers/sound/codecs"
 	cd "${k}" || die "无法进入 $k"
 	kmake=(make ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}")
 	info "生成配置：defconfig + microduck.config"
@@ -479,7 +479,7 @@ rootfs_install_platform_modules() {
 		cd "${k}" || exit 1
 		export BSP_TOP="${b%/}/"
 		export LICHEE_KERN_DIR="${k}"
-		export KCFLAGS="-I${b}/drivers/ve/cedar-ve"
+		export KCFLAGS="-I${b}/drivers/ve/cedar-ve -I${b}/drivers/sound/platform -I${b}/drivers/sound/adapter -I${b}/drivers/sound/misc -I${b}/drivers/sound/pa -I${b}/drivers/sound/codecs"
 		make ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}" -j"$(job_count)" modules
 	)
 	run_root rm -rf "${rootfs}/lib/modules"

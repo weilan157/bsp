@@ -7,3 +7,8 @@
 aic_load_fw
 aic8800_fdrv
 aic_btusb
+
+# HAT 音频：TLV320AIC3104（TWI7 @0x18）+ SoC I2S0。
+# 两个都要加载：core 提供 codec DAI，i2c 负责总线绑定。
+snd-soc-tlv320aic3x
+snd-soc-tlv320aic3x-i2c

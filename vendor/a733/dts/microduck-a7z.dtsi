@@ -407,3 +407,49 @@
 &mipi1 { /delete-property/ iommus; };
 &isp00 { /delete-property/ iommus; };
 &vinc00 { /delete-property/ iommus; };
+
+/* =====================================================================
+ * 10. 音频：HAT 上的 TLV320AIC3104（TWI7 @0x18）+ SoC I2S0
+ *
+ * 选 i2s0 的原因：HAT 的 40-pin 上只有 i2s0 的引脚是「全套」的 ——
+ *   PB4 = mclk, PB5 = bclk, PB6 = lrck, PB7 = dout0, PB8 = din0
+ * （i2s1 是 PG10-PG14，i2s2 缺 mclk，i2s4 只有 din0 没有 dout0）。
+ * TLV320AIC3104 需要 MCLK，所以必须用带 mclk 的那组。
+ *
+ * 若实测无声，说明 HAT 实际走的是 i2s2/i2s4——把下面的 i2s0 换成对应
+ * 节点、并按原理图确认 BCLK/WCLK/DIN/DOUT/MCLK 的引脚即可。
+ * ===================================================================== */
+&twi7 {
+	tlv320: tlv320aic3104@18 {
+		compatible = "ti,tlv320aic3104";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
+};
+
+&i2s0_plat {
+	/* pin 状态在 board-a7z.dts 的 &pio 里已定义 */
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&i2s0_pins_a &i2s0_pins_b &i2s0_pins_c &i2s0_pins_d &i2s0_pins_e>;
+	pinctrl-1 = <&i2s0_pins_f>;
+	status = "okay";
+};
+
+&i2s0_mach {
+	soundcard-mach,name = "microduck-audio";
+	soundcard-mach,format = "i2s";
+	soundcard-mach,frame-master = <&i2s0_cpu>;
+	soundcard-mach,bitclock-master = <&i2s0_cpu>;
+	soundcard-mach,slot-num = <2>;
+	soundcard-mach,slot-width = <32>;
+	status = "okay";
+	i2s0_cpu: soundcard-mach,cpu {
+		sound-dai = <&i2s0_plat>;
+		soundcard-mach,pll-fs = <1>;
+		soundcard-mach,mclk-fs = <256>;
+	};
+	i2s0_codec: soundcard-mach,codec {
+		sound-dai = <&tlv320>;
+	};
+};
