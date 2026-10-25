@@ -1,8 +1,32 @@
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-index d3a3371..9dd0db8 100644
+index d3a3371..b4ee201 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-@@ -399,7 +399,10 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
+@@ -205,6 +205,11 @@ static const struct aicbsp_firmware fw_u03[] = {
+ 		.bt_adid       = "fw_adid_u03.bin",
+ 		.bt_patch      = "fw_patch_u03.bin",
+ 		.bt_table      = "fw_patch_table_u03.bin",
++		/* AIC8800 USB FIX (u03 ext patch): patch table 里明确带 1 条 ext patch
++		 * (id:0 addr:20b43c)，之前因为本表没有 bt_ext_patch 字段被跳过，
++		 * 结果固件在 MM_SET_STACK_START 时抛异常（cmd timed-out +
++		 * rwnx_exception_event）。这里指向 d80 的 ext0 固件。 */
++		.bt_ext_patch  = "aic8800d80/fw_patch_8800d80_u02_ext",
+ 		.wl_fw         = "fmacfw_usb.bin"
+ 	},
+ 
+@@ -213,6 +218,11 @@ static const struct aicbsp_firmware fw_u03[] = {
+ 		.bt_adid       = "fw_adid_u03.bin",
+ 		.bt_patch      = "fw_patch_u03.bin",
+ 		.bt_table      = "fw_patch_table_u03.bin",
++		/* AIC8800 USB FIX (u03 ext patch): patch table 里明确带 1 条 ext patch
++		 * (id:0 addr:20b43c)，之前因为本表没有 bt_ext_patch 字段被跳过，
++		 * 结果固件在 MM_SET_STACK_START 时抛异常（cmd timed-out +
++		 * rwnx_exception_event）。这里指向 d80 的 ext0 固件。 */
++		.bt_ext_patch  = "aic8800d80/fw_patch_8800d80_u02_ext",
+ 		.wl_fw         = "fmacfw_rf_usb.bin"
+ 	},
+ };
+@@ -399,7 +409,10 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
  	}
  	rd_version_val = rd_patch_addr_cfm.memdata;
  	printk("rd_version_val=%08X\n", rd_version_val);
