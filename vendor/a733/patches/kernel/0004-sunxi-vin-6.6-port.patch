@@ -30,10 +30,27 @@ index 3842b1c..15c882e 100644
  	return i2c_add_driver(sensor_driver);
  #endif
 diff --git a/drivers/vin/vin.c b/drivers/vin/vin.c
-index 1dbf849..a39eae5 100644
+index 1dbf849..27fbd35 100644
 --- a/drivers/vin/vin.c
 +++ b/drivers/vin/vin.c
-@@ -2429,6 +2429,7 @@ static int vin_probe(struct platform_device *pdev)
+@@ -2389,8 +2389,14 @@ static int vin_pinpower_get_set(struct device *dev, struct vin_md *vind, char *n
+ 
+ 	ret = regulator_set_voltage(vind->vin_pinctrl[i], min_vol, def_vol[i]);
+ 	if (0 != ret) {
+-		vin_err("%s: set %s error, fail to set regulator voltage!\n", __func__, name);
+-		return -1;
++		/* AIC8800 VIN FIX (pinpower dummy): 板上 vind_mclkpin/mcsipin/mipipin
++		 * 这几路是固定常供，DT 里没有对应 supply，regulator_get() 给的是
++		 * dummy regulator，它无法设电压（set_voltage 直接失败）。
++		 * 原来这里返回 -1 会让 vin_probe 立刻失败（实测 error -1），
++		 * 固定电压本来就不需要设，记个告警继续即可。 */
++		vin_warn("%s: set %s voltage failed (%d), assume fixed supply\n",
++			 __func__, name, ret);
++		return 0;
+ 	}
+ 
+ 	return 0;
+@@ -2429,6 +2435,7 @@ static int vin_probe(struct platform_device *pdev)
  
  	vind->id = pdev->id;
  	vind->pdev = pdev;
@@ -41,7 +58,7 @@ index 1dbf849..a39eae5 100644
  #if IS_ENABLED(CONFIG_VIN_INIT_MELIS) && !defined RV_RUN_CAR_REVERSE
  	vind->sensor_power_on = true;
  #endif
-@@ -2534,6 +2535,7 @@ static int vin_probe(struct platform_device *pdev)
+@@ -2534,6 +2541,7 @@ static int vin_probe(struct platform_device *pdev)
  	platform_set_drvdata(pdev, vind);
  
  	ret = vin_md_get_clocks(vind);
@@ -49,7 +66,7 @@ index 1dbf849..a39eae5 100644
  	if (ret)
  		goto err_clk;
  
-@@ -2554,6 +2556,7 @@ static int vin_probe(struct platform_device *pdev)
+@@ -2554,6 +2562,7 @@ static int vin_probe(struct platform_device *pdev)
  
  	if (dev->of_node) {
  		ret = vin_md_register_entities(vind, dev->of_node);
@@ -57,7 +74,7 @@ index 1dbf849..a39eae5 100644
  	} else {
  		vin_err("Device tree of_node is NULL!\n");
  		ret = -ENOSYS;
-@@ -2569,6 +2572,7 @@ static int vin_probe(struct platform_device *pdev)
+@@ -2569,6 +2578,7 @@ static int vin_probe(struct platform_device *pdev)
  #endif
  	mutex_lock(&vind->media_dev.graph_mutex);
  	ret = vin_create_media_links(vind);
@@ -65,7 +82,7 @@ index 1dbf849..a39eae5 100644
  	mutex_unlock(&vind->media_dev.graph_mutex);
  	if (ret) {
  		vin_err("vin_create_media_links error\n");
-@@ -2580,6 +2584,7 @@ static int vin_probe(struct platform_device *pdev)
+@@ -2580,6 +2590,7 @@ static int vin_probe(struct platform_device *pdev)
  	 * pay attention to graph_mutex dead lock.
  	 */
  	ret = vin_setup_default_links(vind);
@@ -73,7 +90,7 @@ index 1dbf849..a39eae5 100644
  	if (ret) {
  		vin_err("vin_setup_default_links error\n");
  		goto err_clk;
-@@ -2594,9 +2599,11 @@ static int vin_probe(struct platform_device *pdev)
+@@ -2594,9 +2605,11 @@ static int vin_probe(struct platform_device *pdev)
  		goto err_clk;
  
  
