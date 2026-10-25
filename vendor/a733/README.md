@@ -156,58 +156,65 @@ i2c-3: SUNXI TWI(0x0000000002513000)
 配好即可；我们为了修 pinmux 改成了 `AW_IC_BOARD`，内核才开始真去改 SMHC0 时钟，于是踩到 CCU
 死锁。后续优化方向就是把这套配置尽量往官方靠（见下）。
 
-## WiFi（aic8800 / FCU760K，USB 单接口）
+## WiFi（AIC8800D80 / FCU760K，USB）
 
-这颗模块的驱动链路非常「多层门禁」，每一层都是**代码里有、但没走到**。完整踩坑记录：
+**已在真机跑通**（2026-10-25）：设备从 `a69c:8d80` 重新枚举为 `a69c:8d81`，
+`aic8800_fdrv` 建出 `wlan0`（真实 MAC）、射频校准完成、`ip link set wlan0 up` 返回 0。
 
-| 层 | 现象 | 根因 | 修法 |
-|---|---|---|---|
-| 1 | `/sys/bus/usb/devices` 完全为空 | `bsp/drivers/usb/Makefile` 只有 `CONFIG_USB_SUNXI_HCI` 才进 `host/` 子目录，而它又依赖 `USB_SUNXI_HCD` | 补 `CONFIG_USB_SUNXI_HCD=y` + `USB_SUNXI_HCI=y` |
-| 2 | 编译报 `sunxi_usb_debug.h: No such file` | `sunxi-hci.h` 用 `<../sunxi_usb/include/...>`（尖括号只查 -I 路径），host/ 没把自己加进搜索路径 | `patches/kernel/0005`：host/Makefile 加 `ccflags-y += -I $(srctree)/$(src)` |
-| 3 | 驱动编进去了但 `probe` 从不触发 | `ehci-sunxi.c` 的 `SUNXI_EHCI0_OF_MATCH` 在 `CONFIG_USB_SUNXI_EHCI0` 未开时被编译成 `"null"` | 开 `USB_SUNXI_EHCI0/OHCI0/EHCI1/OHCI1` |
-| 4 | host 起来了但设备不枚举 | `ehci/ohci-sunxi` 依赖 BSP 的 USB PHY | 开 `CONFIG_USB_SUNXI_PHY` + `USB_SUNXI_AWPHY` |
-| 5 | `request_firmware` 全失败 | BSP 根本不含 aic8800 固件 | `vendor/a733/firmware/`（aic8800dc + aic8800d80，含 u03 别名），pack 时铺到 `/lib/firmware` |
-| 6 | `fw_patch_table_u03.bin` / `(null)0.bin` 失败 | 驱动按 rev 选固件表；u01 表没有 `.bt_ext_patch` 字段，但 patch table 里带 ext 项 | `aicbt_ext_patch_data_load()` 加 NULL 保护跳过 |
-| 7 | 设备枚举但 `UNBOUND`，`probe` 日志都没有 | 本工程 `CONFIG_USB_BT` 打开，实际编译的是 `#else` 分支；`8d80` 只加在 `#ifndef` 分支里等于没加 | `aicwf_usb.c` 的 `#else` 分支补 `8D80/8D81`（按 `ff/ff/ff` 接口匹配） |
-| 8 | `Number of interfaces: 1 not supported` | `CONFIG_USB_BT` 分支硬性要求 3 个接口，实物只有 1 个 | `aicwf_parse_usb()` 放宽为 1 或 3 |
-| 9 | `rwnx_cfg80211_init` 空指针 Oops | `feature.chipinfo` 来自 bsp；bsp 不认 `8d80` 时它是 NULL | bsp 识别 `8d80` 并填 `aicbsp_info.chipinfo`，但 `return -ENODEV` 不绑定，把设备留给 fdrv |
+### 最终采用的方案：Radxa 官方 USB 驱动包
 
-模块加载顺序（`/etc/microduck-modules`，由 rcS 里的 `microduck-wifi` 后台 modprobe）：
-`aic8800_bsp` → `aic8800_fdrv`（fdrv 有符号依赖，会自动带起 bsp）。
+最终不是用 BSP 自带的那套 `aic8800_bsp`，而是 **Radxa 官方 USB 驱动包**
+（`radxa-pkg/aic8800`，与本模组原厂配对），因为它把两件事拆成两个模块：
 
-注意：`0x8d80` 这颗模块**始终不重新枚举**（固件下载前后 PID 不变），所以厂商那套
-「bootloader PID → 重枚举成 app PID」的流程在这里不成立，必须靠上面的归属划分解决。
+| 模块 | 职责 | 绑定阶段 |
+|---|---|---|
+| `aic_load_fw` | 只负责下载并启动固件 | `a69c:8d80`（Boot ROM） |
+| `aic8800_fdrv` | 只负责建 `wlan0` | `a69c:8d81`（运行态） |
 
-## 摄像头（IMX219 / VIN）
+- 源码放在 `vendor/a733/aic8800-usb/`，**以外部模块方式构建**（不改 BSP 仓库）；
+- `scripts/mod-a733.sh` 的 `a733_build_aic8800_usb()` 在 pack 时编译并安装到
+  `/lib/modules/<rel>/extra/`；`aic8800_fdrv` 需要
+  `KBUILD_EXTRA_SYMBOLS=<load_fw>/Module.symvers`（两模块间有符号依赖）；
+- `microduck.config` 关掉 `AIC_WLAN_SUPPORT` / `AIC8800_WLAN_SUPPORT` /
+  `AIC8800_BTUSB_SUPPORT`（BSP 的模块名与 Radxa 的 `aic8800_fdrv` 冲突且跑不通）；
+- `/etc/microduck-modules` 加载 `aic_load_fw` → `aic8800_fdrv`。
 
-`board.dts` 默认把整棵 VIN 树关掉，加上 A733 的 BSP 与 6.6 内核之间有若干不匹配，
-这条链一共踩了 7 个坑（每个都是「配置看起来对，但驱动没走到」）：
+### 固件目录大小写
 
-| 层 | 现象 | 根因 | 修法 |
-|---|---|---|---|
-| 1 | 没有 `/dev/video*`、`sunxi_vin_debug_register_driver failed` | `board.dts` 把 `vind0/csi*/mipi*/isp*/vinc*` 全 `disabled`；且 `CONFIG_DEBUG_FS` 关着 | dtsi 里逐个打开（vind0/csi1/mipi1/isp00/vinc00）；开 `CONFIG_DEBUG_FS` |
-| 2 | `scaler_probe` 空指针 Oops，deferred probe 被打断 | `board.dts` 漏 disable `scaler11/12/13/21..23/31..33` | dtsi 里把这 9 个 scaler 全部 disabled |
-| 3 | `5800800.vind: -110`，且 **`vin_probe` 完全没被调用** | `vind0` 有 `power-domains = <&power-controller>`（`allwinner,sun60iw2-pck-600`），但 `CONFIG_AW_PCK600_DOMAINS` 没开 → devlink 永久挂起 | 开 `CONFIG_AW_PCK600_DOMAINS` |
-| 4 | `vin_probe` 一进去就 `error -1` | `vind_mclkpin/mcsipin/mipipin` 三路是固定常供，DT 无 supply → dummy regulator，而代码把 `regulator_set_voltage` 失败当致命 | 改成告警后继续（固定电压无需设置） |
-| 5 | `cci is NULL!`，`imx219 read addr 0x0` → `chip found is not an target chip` | `CONFIG_CSI_CCI=y` 会强制 `sensor_type = VIN_MODULE_TYPE_CCI`，而 A733 的 BSP 里根本没有 CCI 节点（只有老 SoC 有） | 关 `CONFIG_CSI_CCI`，传感器改走 DT 的 `sensor_bus_type`（TWI） |
-| 6 | `imx219 request i2c3 adapter failed!` | `twi-sunxi.c` probe 必须读到 `clock-frequency`，我们的 `&twi3` 漏了该属性 → `-22` | `&twi3` 补 `clock-frequency = <400000>` |
-| 7 | 传感器探测与 video 节点 | — | `[imx219]find the sony IMX219` + `/dev/video0` |
+- Radxa 驱动按**大写**找固件：`/lib/firmware/aic8800D80/...`；
+- 仓库在 Windows 文件系统上大小写不敏感，所以仓库统一用**大写**，
+  pack 时 `a733_fw_alias_lowercase()` 在 ext4 镜像里再生成小写别名，
+  两代驱动都能用（镜像里 `aic8800D80` 与 `aic8800d80` 各有 18 个文件）。
 
-DT 侧（`vendor/a733/dts/microduck-a7z.dtsi`）关键点：
-- MCSIB（原理图 D0/D1 + CLKA/CLKB，2-lane）→ `csi1` + `mipi1`；`vinc0_csi_sel=1`、`vinc0_mipi_sel=1`；
-- 传感器控制走 **TWI3（PE3/PE4）**，`&twi3` 需要自建 pin 状态 + `clock-frequency`；
-- BSP VIN 的绑定方式：`&sensor_list0`（`sensor00_mname="imx219"`、8 位地址 `0x20`）+ `&sensor0`（`mname`、`twi_cci_id=3`、`mclk_id=0`）；
-- `reset/pwdn`（MCSI-RST-R / MCSI-STBY-R）暂时留空，IMX219 已能被探测到。
+### 走过的弯路（BSP 自带 aic8800_bsp，最终放弃）
 
-## 已知限制 / 待办
+BSP 那套把「加载器 + 驱动」揉在一个模块里，实测固件能下载但**启动约 2.5 秒后
+自己抛异常**（换哪条命令都在同一时刻 `cmd timed-out` + `rwnx_exception_event`），
+期间修过：USB 主机驱动门禁（`USB_SUNXI_HCI`）、`OF_MATCH` 的条件编译、
+USB PHY、驱动 ID 表（`8d80` 加在 `#else` 分支）、PID 归属（bsp 与 fdrv 抢设备）、
+单接口校验、`chipinfo` 空指针、`CSI_CCI`、`fw_u03` 不存在的固件表、
+`MM_SET_STACK_START` 重复启动 —— 都没能救回来，因为根因是驱动与模组不配对。
+
+### 上电后的正常日志
+
+```
+aic_load_firmware :firmware path = /lib/firmware/aic8800D80/fw_patch_table_8800d80_u02.bin
+... fw_adid / fw_patch / fw_patch_table_8800d80_u02_ext0 / fmacfw_8800d80_u02 ...
+（设备重新枚举为 a69c:8d81）
+rwnx_send_rf_calib_req in,chipid=5
+rwnx_get_countrycode_channels support channel: 1 2 3 ... 165
+rwnx_interface_add: wlan%d, 2, 10
+New interface create wlan0
+wlan0: link/ether 90:30:d6:03:3f:f6
+```
+
+## 已知限制 / 待办## 已知限制 / 待办
 
 - **蓝牙未通**：`aic_btusb` 需要 class `e0` 的 USB 接口，而 FCU760K 只有 1 个 `ff/ff/ff`
   接口（WiFi/BT 共用），且这个设备被 `aic8800_fdrv` 独占。后续要验证 BT 到底走
   USB 复用、UART（BSP 里有 `aic8800_btlpm`）还是其它通路，再决定接法。
-- **WiFi 还差最后一跳**：`wlan0` 能创建，初始化时的 `rwnx_send_*` 全部正常，
-  但 `ip link set wlan0 up` 触发 `rwnx_send_start/coex/add_if` 时出现
-  `cmd queue crashed` / `add_if: Status Error(255)`。表现为「初始化后固件不再应答」，
-  下一步排查 RX URB 是否在 `aic_ipc_setting` 之后被取消。
+- **蓝牙待接**：WiFi 起来后设备是 `8d81`（3 接口：BT `0xE0/0x01/0x01`、SCO、WiFi `0xFF/0xFF/0xFF`），
+  还需要 `aic_btusb`（Radxa 包里的独立模块，编译需 BlueZ 分支的适配）才能出 `hci0`。
 - `i2c 13-0036`（AXP8191 PMIC）仍 `deferred probe pending`；`cpufreq-dt` 同样 pending。
   PMIC 的 `MFD_AXP2101/AXP8191` 注册路径还没打通（`AW_MFD_AXP2101` 已开但其 i2c 驱动未绑）。
 - cedar-ve（视频编解码）probe 报 `-110`，依赖没就绪，不影响启动。
