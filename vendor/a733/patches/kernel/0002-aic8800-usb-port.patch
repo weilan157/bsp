@@ -36,29 +36,31 @@ index dc8d991..def6d2d 100644
  		for (index = 0; index < patch_info->ext_patch_nb; index++) {
  			id = *(patch_info->ext_patch_param + (index * 2));
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-index 71998d8..1075260 100644
+index 71998d8..00d04cd 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-@@ -50,6 +50,18 @@ void aicbsp_device_exit(void)
+@@ -50,6 +50,20 @@ void aicbsp_device_exit(void)
  
  static struct device_match_entry aicdev_match_table[] = {
  	{0xa69c, 0x8800, PRODUCT_ID_AIC8800D,   "aic8800d",   0, 0}, // 8800d in bootloader mode
-+	/* AIC8800 USB FIX (bsp not own 8d80): 这颗 FCU760K 的 USB PID 一直是
++	/* AIC8800 USB FIX (bsp fills chipinfo): 这颗 FCU760K 的 USB PID 恒为
 +	 * 0x8d80（单接口 ff/ff/ff，2 个 bulk 端点），固件下载前后都不重新枚举。
 +	 *
-+	 * 实测：aic8800_fdrv 依赖 aic8800_bsp 的符号，modprobe fdrv 会自动把 bsp
-+	 * 拉起来；bsp 先在 match 表里命中 8d80 并绑定设备，然后因为芯片已在
-+	 * 运行态，下载命令直接超时：
-+	 *     cmd timed-out / tkn[0] flags:0012 result: -4 cmd:1024
-+	 *     aicwf_usb_probe: failed with errno 0
-+	 * 此后 fdrv 再注册 USB 驱动也抢不到设备，wlan0 永远不出现（实测）。
-+	 *
-+	 * 所以 bsp 只保留它真正该负责的 bootloader PID 0x8800，
-+	 * 8d80/8d81 交给 aic8800_fdrv 自己去探测和下载固件。 */
++	 * 作用有两个：
++	 *  1) 让 bsp 能识别出芯片型号并填进 aicbsp_info.chipinfo——fdrv 在
++	 *     rwnx_cfg80211_init() 里会调 aicbsp_get_feature() 拿 chipinfo，
++	 *     若 bsp 不认这颗芯片，feature.chipinfo 就是 NULL，
++	 *     紧接着的 rwnx_hw->chipid = feature.chipinfo->chipid 直接崩（实测）。
++	 *  2) 但 bsp **不能绑定**这个设备（芯片已是运行态，bsp 的下载命令会
++	 *     cmd timed-out），所以 probe 里识别完立即返回 -ENODEV，把设备留给
++	 *     aic8800_fdrv。
++	 */
++	{0xa69c, 0x8d80, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
++	{0xa69c, 0x8d81, PRODUCT_ID_AIC8800D80, "aic8800d80", 0, 0},
  };
  
  static struct device_match_entry *aic_matched_ic;
-@@ -69,7 +81,13 @@ void *aicbsp_get_drvdata(void *args)
+@@ -69,7 +83,13 @@ void *aicbsp_get_drvdata(void *args)
  static int aicbsp_platform_power_on(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -72,7 +74,7 @@ index 71998d8..1075260 100644
  	mdelay(50);
  #endif
  	return 0;
-@@ -78,7 +96,9 @@ static int aicbsp_platform_power_on(void)
+@@ -78,7 +98,9 @@ static int aicbsp_platform_power_on(void)
  static void aicbsp_platform_power_off(void)
  {
  #ifdef CONFIG_PLATFORM_ALLWINNER
@@ -82,7 +84,31 @@ index 71998d8..1075260 100644
  	mdelay(100);
  #endif
  	bsp_dbg("%s\n", __func__);
-@@ -1012,6 +1032,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
+@@ -877,12 +899,22 @@ static int aicwf_usb_probe(struct usb_interface *intf, const struct usb_device_i
+ 		return -1;
+ 	}
+ 
++	/* AIC8800 USB FIX (bsp fills chipinfo): 先把芯片信息填进 aicbsp_info，
++	 * 供 aic8800_fdrv 在 rwnx_cfg80211_init() 里通过 aicbsp_get_feature() 读取
++	 * （否则 feature.chipinfo 为 NULL，后面取 chipid 会空指针崩溃）。
++	 * 但 8d80/8d81 是运行态设备，bsp 不绑定，直接 -ENODEV 交给 fdrv。 */
++	aicbsp_info.chipinfo = aic_matched_ic;
++	if (id->idProduct == 0x8d80 || id->idProduct == 0x8d81) {
++		bsp_dbg("%s app-mode device (pid 0x%04x), leave it to aic8800_fdrv\n",
++			__func__, id->idProduct);
++		return -ENODEV;
++	}
++
+ 	aicdev = kzalloc(sizeof(struct priv_dev), GFP_ATOMIC);
+ 	if (!aicdev) {
+ 		return -ENOMEM;
+ 	}
+ 
+-	aicbsp_info.chipinfo = aic_matched_ic;
+ 	aicdev->udev = usb;
+ 	aicdev->dev = &usb->dev;
+ 	usb_set_intfdata(intf, aicdev);
+@@ -1012,6 +1044,8 @@ static int aicwf_usb_reset_resume(struct usb_interface *intf)
  static struct usb_device_id aicwf_usb_id_table[] = {
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC)},
  	{USB_DEVICE(USB_VENDOR_ID_AIC, USB_DEVICE_ID_AIC_8801)},
