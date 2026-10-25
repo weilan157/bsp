@@ -1,8 +1,46 @@
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-index d3a3371..b4ee201 100644
+index d3a3371..4f1ff3a 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_8800d80.c
-@@ -205,6 +205,11 @@ static const struct aicbsp_firmware fw_u03[] = {
+@@ -182,20 +182,28 @@ static const struct aicbsp_firmware fw_h_u02[] = {
+ #elif defined(AICWF_USB_SUPPORT)
+ 
+ static const struct aicbsp_firmware fw_u02[] = {
++	/* AIC8800 USB FIX (u02 for U03/U04): 这颗 D80 的 rev 是 0x7，
++	 * 而 CHIP_REV_ID_U03 与 CHIP_REV_ID_U04 都是 0x7（aic_bsp_export.h）。
++	 * 厂商 USB 分支给 U03 准备了 fw_u03[]（fw_adid_u03.bin 等），
++	 * 但那套文件任何官方包里都没有；Radxa 的 USB 固件目录也只有 u02 + u04。
++	 * 所以 U02/U03/U04 统一用这张表，并改成 d80 前缀 + ext_patch
++	 * （原来 USB 的 fw_u02 是纯名字且没有 ext patch，固件跑不起来）。
++	 */
+ 	[AICBSP_CPMODE_WORK] = {
+ 		.desc          = "normal work mode(usb u02)",
+-		.bt_adid       = "fw_adid.bin",
+-		.bt_patch      = "fw_patch.bin",
+-		.bt_table      = "fw_patch_table.bin",
+-		.wl_fw         = "fmacfw_usb.bin"
++		.bt_adid       = "aic8800d80/fw_adid_8800d80_u02.bin",
++		.bt_patch      = "aic8800d80/fw_patch_8800d80_u02.bin",
++		.bt_table      = "aic8800d80/fw_patch_table_8800d80_u02.bin",
++		.bt_ext_patch  = "aic8800d80/fw_patch_8800d80_u02_ext",
++		.wl_fw         = "aic8800d80/fmacfw_8800d80_u02.bin"
+ 	},
+-
+ 	[AICBSP_CPMODE_TEST] = {
+ 		.desc          = "rf test mode(usb u02)",
+-		.bt_adid       = "fw_adid.bin",
+-		.bt_patch      = "fw_patch.bin",
+-		.bt_table      = "fw_patch_table.bin",
+-		.wl_fw         = "fmacfw_rf_usb.bin"
++		.bt_adid       = "aic8800d80/fw_adid_8800d80_u02.bin",
++		.bt_patch      = "aic8800d80/fw_patch_8800d80_u02.bin",
++		.bt_table      = "aic8800d80/fw_patch_table_8800d80_u02.bin",
++		.bt_ext_patch  = "aic8800d80/fw_patch_8800d80_u02_ext",
++		.wl_fw         = "aic8800d80/lmacfw_rf_8800d80_u02.bin"
+ 	},
+ };
+ 
+@@ -205,6 +213,11 @@ static const struct aicbsp_firmware fw_u03[] = {
  		.bt_adid       = "fw_adid_u03.bin",
  		.bt_patch      = "fw_patch_u03.bin",
  		.bt_table      = "fw_patch_table_u03.bin",
@@ -14,7 +52,7 @@ index d3a3371..b4ee201 100644
  		.wl_fw         = "fmacfw_usb.bin"
  	},
  
-@@ -213,6 +218,11 @@ static const struct aicbsp_firmware fw_u03[] = {
+@@ -213,6 +226,11 @@ static const struct aicbsp_firmware fw_u03[] = {
  		.bt_adid       = "fw_adid_u03.bin",
  		.bt_patch      = "fw_patch_u03.bin",
  		.bt_table      = "fw_patch_table_u03.bin",
@@ -26,7 +64,7 @@ index d3a3371..b4ee201 100644
  		.wl_fw         = "fmacfw_rf_usb.bin"
  	},
  };
-@@ -399,7 +409,10 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
+@@ -399,7 +417,10 @@ static int aicwifi_patch_config(struct priv_dev *aicdev)
  	}
  	rd_version_val = rd_patch_addr_cfm.memdata;
  	printk("rd_version_val=%08X\n", rd_version_val);
@@ -37,6 +75,23 @@ index d3a3371..b4ee201 100644
  	if (rd_version_val > 0x06090100) {
  		patch_buff_addr = rd_patch_addr + 12;
  		ret = rwnx_send_dbg_mem_read_req(aicdev, patch_buff_addr, &rd_patch_addr_cfm);
+@@ -600,10 +621,12 @@ int aicbsp_8800d80_fw_init(struct priv_dev *aicdev)
+ 			aicbsp_firmware_list = fw_u02;
+ 	}
+ #elif defined(AICWF_USB_SUPPORT)
+-	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02)
+-		 aicbsp_firmware_list = fw_u02;
+-	else if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03)
+-		aicbsp_firmware_list = fw_u03;
++	/* AIC8800 USB FIX (u02 for U03/U04): rev 0x7 同时等于 U03 和 U04，
++	 * 两者都走 fw_u02（u03 固件厂商未发布）。 */
++	if (aicbsp_info.chipinfo->rev == CHIP_REV_ID_U02 ||
++	    aicbsp_info.chipinfo->rev == CHIP_REV_ID_U03 ||
++	    aicbsp_info.chipinfo->rev == CHIP_REV_ID_U04)
++		aicbsp_firmware_list = fw_u02;
+ #endif
+ 
+ 	if (aicbsp_system_config(aicdev))
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_driver.c b/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_driver.c
 index dc8d991..def6d2d 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aic_bsp_driver.c
@@ -60,7 +115,7 @@ index dc8d991..def6d2d 100644
  		for (index = 0; index < patch_info->ext_patch_nb; index++) {
  			id = *(patch_info->ext_patch_param + (index * 2));
 diff --git a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
-index 71998d8..e00a678 100644
+index 71998d8..e54eb6e 100644
 --- a/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 +++ b/drivers/net/wireless/aic8800/aic8800_bsp/aicusb.c
 @@ -50,6 +50,19 @@ void aicbsp_device_exit(void)
@@ -150,9 +205,9 @@ index 71998d8..e00a678 100644
 +		 * （实测 cmd timed-out + rwnx_exception_event + cmd queue crashed）。
 +		 * 这里用 HOST_START_APP_REBOOT 触发它切到 8d81。
 +		 */
-+		printk("aicbsp: firmware downloaded, send START_APP_REBOOT ...\n");
-+		rwnx_send_dbg_start_app_req(aicdev, 2000, HOST_START_APP_REBOOT, NULL);
-+		printk("aicbsp: reboot sent, expect re-enumeration as a69c:8d81\n");
++		/* fw_init 内部已用 HOST_START_APP_AUTO 启动固件，这里不再发 REBOOT，
++		 * 否则会把刚启动的芯片打回 boot ROM（实测设备一直停在 8d80）。 */
++		printk("aicbsp: firmware downloaded, handoff to aic8800_fdrv\n");
 +		ret = -ENODEV;
 +		goto out_free_bus;
 +	}
