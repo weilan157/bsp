@@ -24,6 +24,8 @@ printf 'microduck: zram at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 # 扩容 + 驱动/WiFi 全部放后台，不阻塞登录
 /usr/sbin/microduck-grow >/dev/null 2>&1 &
 /usr/sbin/microduck-wifi >/dev/null 2>&1 &
+# 蓝牙：等 hci0 出现后起 dbus/bluetoothd 并上电
+/usr/sbin/microduck-bt >/dev/null 2>&1 &
 
 # 启动耗时打点（dmesg 里看）
 printf 'microduck: userspace ready in %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
