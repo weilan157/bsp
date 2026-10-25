@@ -117,6 +117,15 @@ Debian GNU/Linux 13 (none) ttyAS0
 
 上电到 login 约 **2.7 s**（内核 1.7 s + 用户态 1 s），串口是 UART0 = `ttyAS0`，115200。
 
+**WiFi 已在真机跑通**（2026-10-25）：
+
+```
+aicwf_usb_probe vid:0xA69C pid:0x8D80 → matched chip: aic8800d80
+rwnx_interface_add: wlan%d, 2, 10
+ieee80211 phy0: New interface create wlan0
+2: wlan0: <BROADCAST,MULTICAST> mtu 1500 ... link/ether c3:82:00:80:ff:ff
+```
+
 ## 上板必须的修法（从「完全无输出」到能登录）
 
 | 现象 | 根因 | 修法 |
@@ -138,13 +147,44 @@ Debian GNU/Linux 13 (none) ttyAS0
 配好即可；我们为了修 pinmux 改成了 `AW_IC_BOARD`，内核才开始真去改 SMHC0 时钟，于是踩到 CCU
 死锁。后续优化方向就是把这套配置尽量往官方靠（见下）。
 
+## WiFi（aic8800 / FCU760K，USB 单接口）
+
+这颗模块的驱动链路非常「多层门禁」，每一层都是**代码里有、但没走到**。完整踩坑记录：
+
+| 层 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `/sys/bus/usb/devices` 完全为空 | `bsp/drivers/usb/Makefile` 只有 `CONFIG_USB_SUNXI_HCI` 才进 `host/` 子目录，而它又依赖 `USB_SUNXI_HCD` | 补 `CONFIG_USB_SUNXI_HCD=y` + `USB_SUNXI_HCI=y` |
+| 2 | 编译报 `sunxi_usb_debug.h: No such file` | `sunxi-hci.h` 用 `<../sunxi_usb/include/...>`（尖括号只查 -I 路径），host/ 没把自己加进搜索路径 | `patches/kernel/0005`：host/Makefile 加 `ccflags-y += -I $(srctree)/$(src)` |
+| 3 | 驱动编进去了但 `probe` 从不触发 | `ehci-sunxi.c` 的 `SUNXI_EHCI0_OF_MATCH` 在 `CONFIG_USB_SUNXI_EHCI0` 未开时被编译成 `"null"` | 开 `USB_SUNXI_EHCI0/OHCI0/EHCI1/OHCI1` |
+| 4 | host 起来了但设备不枚举 | `ehci/ohci-sunxi` 依赖 BSP 的 USB PHY | 开 `CONFIG_USB_SUNXI_PHY` + `USB_SUNXI_AWPHY` |
+| 5 | `request_firmware` 全失败 | BSP 根本不含 aic8800 固件 | `vendor/a733/firmware/`（aic8800dc + aic8800d80，含 u03 别名），pack 时铺到 `/lib/firmware` |
+| 6 | `fw_patch_table_u03.bin` / `(null)0.bin` 失败 | 驱动按 rev 选固件表；u01 表没有 `.bt_ext_patch` 字段，但 patch table 里带 ext 项 | `aicbt_ext_patch_data_load()` 加 NULL 保护跳过 |
+| 7 | 设备枚举但 `UNBOUND`，`probe` 日志都没有 | 本工程 `CONFIG_USB_BT` 打开，实际编译的是 `#else` 分支；`8d80` 只加在 `#ifndef` 分支里等于没加 | `aicwf_usb.c` 的 `#else` 分支补 `8D80/8D81`（按 `ff/ff/ff` 接口匹配） |
+| 8 | `Number of interfaces: 1 not supported` | `CONFIG_USB_BT` 分支硬性要求 3 个接口，实物只有 1 个 | `aicwf_parse_usb()` 放宽为 1 或 3 |
+| 9 | `rwnx_cfg80211_init` 空指针 Oops | `feature.chipinfo` 来自 bsp；bsp 不认 `8d80` 时它是 NULL | bsp 识别 `8d80` 并填 `aicbsp_info.chipinfo`，但 `return -ENODEV` 不绑定，把设备留给 fdrv |
+
+模块加载顺序（`/etc/microduck-modules`，由 rcS 里的 `microduck-wifi` 后台 modprobe）：
+`aic8800_bsp` → `aic8800_fdrv`（fdrv 有符号依赖，会自动带起 bsp）。
+
+注意：`0x8d80` 这颗模块**始终不重新枚举**（固件下载前后 PID 不变），所以厂商那套
+「bootloader PID → 重枚举成 app PID」的流程在这里不成立，必须靠上面的归属划分解决。
+
 ## 已知限制 / 待办
 
-- `CONFIG_AW_MFD_AXP2101` + `CONFIG_AW_REGULATOR_AXP2101` + TWI 还没编，所以 DT 里 sdc0 的
-  `vmmc/vqmmc` 电源引用被删掉了；PMIC 相关电源域（`vcc-dram` 等）目前由 boot0 配好不动。
-- `&r_pio` 暂时 `disabled`（BSP 的 r_pinctrl probe 会 Oops），HAT 上依赖 PL/PJ 的部分后续再修。
+- **蓝牙未通**：`aic_btusb` 需要 class `e0` 的 USB 接口，而 FCU760K 只有 1 个 `ff/ff/ff`
+  接口（WiFi/BT 共用），且这个设备被 `aic8800_fdrv` 独占。后续要验证 BT 到底走
+  USB 复用、UART（BSP 里有 `aic8800_btlpm`）还是其它通路，再决定接法。
+- **摄像头未通**：IMX219 的 DT（`sensor_list0`/`sensor0`/`vinc00`/`twi3`）已配好、
+  VIN 已移植进内核，但 `5800800.vind` 一直 `deferred probe timeout (-110)`，
+  `vin_probe` 内部某个依赖拿不到，尚未定位到具体项。
+- `i2c 13-0036`（AXP8191 PMIC）仍 `deferred probe pending`；`cpufreq-dt` 同样 pending。
+  PMIC 的 `MFD_AXP2101/AXP8191` 注册路径还没打通（`AW_MFD_AXP2101` 已开但其 i2c 驱动未绑）。
+- cedar-ve（视频编解码）probe 报 `-110`，依赖没就绪，不影响启动。
+- `regulatory.db` 缺失（`cfg80211: failed to load regulatory.db`），WiFi 频道表用默认值，
+  需要时把 `wireless-regdb` 的 db 放进 `/lib/firmware`。
+- WiFi 的 MAC 读出来是 `c3:82:00:80:ff:ff`（efuse MAC 读取路径可能没成功），
+  需要时可在 DT/驱动里补 MAC 来源。
 - sdc1/sdc2 在 DT 里 disabled（本板只有 SD 槽，无 eMMC）。
-- 视频编解码（cedar-ve）probe 报 `-110`（依赖没就绪），暂不影响启动。
 - u-boot 启动仍有 `Boot menu / Enter choice` 交互过程，`extlinux.conf` 里加
   `timeout 0` + `default` 可以免按键直启（待验证）。
 
