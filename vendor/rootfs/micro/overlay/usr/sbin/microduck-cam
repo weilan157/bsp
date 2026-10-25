@@ -1,0 +1,37 @@
+#!/bin/sh
+# 抓一帧 IMX219（RAW10/RG10）到 /tmp/frame.raw
+#
+# 关键：必须先 VIDIOC_S_INPUT（--set-input），厂商 VIN 驱动在里面做
+# sensor→mipi→csi→isp 的链路配置并填充 pipe.sd[]；顺序错了会报
+#   vin_video.c:820 WARN_ON(!sd) / vin_pipeline_try_format failed
+# 而且这些状态是 per-fd 的，必须和 set-fmt/stream 在同一个进程里做。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+W="${1:-1920}"
+H="${2:-1080}"
+N="${3:-1}"
+OUT="${4:-/tmp/frame.raw}"
+
+if [ ! -c /dev/video0 ]; then
+	echo "没有 /dev/video0：确认摄像头接在 J5、且 VIN 驱动已加载" >&2
+	exit 1
+fi
+
+echo "抓 ${N} 帧 ${W}x${H} RAW10 → ${OUT}"
+t0=$(cut -d' ' -f1 /proc/uptime)
+v4l2-ctl -d /dev/video0 \
+	--set-input=0 \
+	--set-fmt-video=width="${W}",height="${H}",pixelformat=RG10 \
+	--stream-mmap --stream-count="${N}" --stream-to="${OUT}"
+rc=$?
+t1=$(cut -d' ' -f1 /proc/uptime)
+
+if [ $rc -ne 0 ]; then
+	echo "抓帧失败（rc=$rc）：dmesg | grep -E 'imx219|mipi|cma|vin' 看原因"
+	exit $rc
+fi
+
+sz=$(wc -c < "${OUT}")
+echo "完成：${OUT} = ${sz} 字节，耗时 $(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.2f", b-a}')s"
+echo "（${W}x${H} RAW10 单帧理论 $((W*H*2)) 字节）"
