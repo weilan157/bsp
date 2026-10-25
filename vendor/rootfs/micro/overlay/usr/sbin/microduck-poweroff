@@ -1,0 +1,4 @@
+#!/bin/sh
+# 强制关机：同上，直接走 reboot(2)/RB_POWER_OFF。
+sync
+exec busybox poweroff -f

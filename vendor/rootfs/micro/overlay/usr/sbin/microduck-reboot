@@ -1,0 +1,5 @@
+#!/bin/sh
+# 强制重启：不依赖 init 的 /run/initctl（mount tmpfs 覆盖 /run 后 FIFO 会失效），
+# 直接走 reboot(2) 系统调用。
+sync
+exec busybox reboot -f

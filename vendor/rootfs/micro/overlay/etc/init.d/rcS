@@ -9,7 +9,10 @@ mount -t sysfs  sysfs  /sys    2>/dev/null
 mkdir -p /dev/pts /dev/shm /run /tmp
 mount -t devpts devpts /dev/pts 2>/dev/null
 mount -t tmpfs  tmpfs  /dev/shm 2>/dev/null
-mount -t tmpfs  tmpfs  /run     2>/dev/null
+# 注意：**不要**在这里 mount tmpfs 到 /run。
+# init（sysvinit）启动早期会在 /run 下创建 initctl FIFO，reboot/halt/shutdown
+# 都靠它和 init 通信；这里再挂 tmpfs 会把它盖住，于是 reboot 只会让 init
+# 重读一遍 inittab（表现为 "INIT: No inittab.d directory found"）而不真重启。
 mount -t tmpfs  tmpfs  /tmp     2>/dev/null
 printf 'microduck: mounts done at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 
