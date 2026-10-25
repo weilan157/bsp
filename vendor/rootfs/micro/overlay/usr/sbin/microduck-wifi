@@ -1,11 +1,14 @@
 #!/bin/sh
-# 后台：按 /etc/microduck-modules 加载驱动，有 SSID 配置才连网
+# 后台：按 /etc/microduck-modules 加载驱动 → 有 WiFi 配置就自动连网
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 if [ -f /etc/microduck-modules ]; then
 	while read -r m; do
 		case "$m" in
 			''|\#*) continue ;;
 		esac
-		/usr/sbin/modprobe "$m" 2>/dev/null
+		modprobe "$m" 2>/dev/null
 	done < /etc/microduck-modules
 fi
 
@@ -13,16 +16,40 @@ CONF=/etc/wpa_supplicant/wpa_supplicant.conf
 [ -f "$CONF" ] || exit 0
 grep -q '^[[:space:]]*network=' "$CONF" || exit 0
 
-# 等 wlan0 出现（驱动异步 probe）
+# Radxa 的 aic 驱动是「加载器 + 驱动」两段式：aic_load_fw 先把固件灌进去，
+# 芯片会 soft disconnect 并重新枚举成 a69c:8d81，然后 aic8800_fdrv 才建 wlan0。
+# 所以这里要等 wlan0 出现，最多 10 秒。
 i=0
-while [ ! -e /sys/class/net/wlan0 ] && [ $i -lt 30 ]; do
+while [ ! -e /sys/class/net/wlan0 ] && [ $i -lt 100 ]; do
 	sleep 0.1
 	i=$((i + 1))
 done
 [ -e /sys/class/net/wlan0 ] || exit 0
+printf 'microduck: wlan0 appeared at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
 
-/usr/sbin/ip link set wlan0 up 2>/dev/null || exit 0
-/usr/sbin/wpa_supplicant -B -i wlan0 -c "$CONF" 2>/dev/null || exit 0
-busybox udhcpc -i wlan0 -b -q -t 5 -T 2 >/dev/null 2>&1 || true
+ip link set wlan0 up 2>/dev/null || exit 0
 
-printf 'microduck: wlan0 up at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
+# 清掉上次残留的控制接口 socket，否则 wpa_supplicant 会说 ctrl_iface in use
+rm -f /run/wpa_supplicant/wlan0 2>/dev/null
+mkdir -p /run/wpa_supplicant 2>/dev/null
+wpa_supplicant -B -i wlan0 -c "$CONF" 2>/dev/null || exit 0
+
+# 等关联 + 四次握手完成（最多 20 秒），再跑 DHCP。
+# 直接 udhcpc 会因为还没关联而失败，这是之前"拿到租约却没地址"之外的另一个坑。
+i=0
+while [ $i -lt 40 ]; do
+	if wpa_cli -p /run/wpa_supplicant -i wlan0 status 2>/dev/null \
+		| grep -q 'wpa_state=COMPLETED'; then
+		break
+	fi
+	sleep 0.5
+	i=$((i + 1))
+done
+
+if wpa_cli -p /run/wpa_supplicant -i wlan0 status 2>/dev/null | grep -q 'wpa_state=COMPLETED'; then
+	printf 'microduck: wifi associated at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
+	busybox udhcpc -i wlan0 -b -q -t 5 -T 2 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 || true
+	printf 'microduck: dhcp done at %ss\n' "$(cut -d' ' -f1 /proc/uptime)" > /dev/kmsg 2>/dev/null
+else
+	printf 'microduck: wifi not associated (check /etc/wpa_supplicant/wpa_supplicant.conf)\n' > /dev/kmsg 2>/dev/null
+fi

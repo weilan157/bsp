@@ -1,5 +1,12 @@
 #!/bin/sh
 # microduck：udhcpc 最小钩子（busybox 默认脚本路径）
+#
+# 注意：udhcpc 调用钩子时环境里的 PATH 可能不含 /usr/sbin（Debian usr-merge 后
+# ip 在 /usr/sbin 下）。原来脚本用裸 `ip` 又把它 2>/dev/null 掉，结果租约拿到了
+# 地址却没配上（ping 报 Network is unreachable）。这里显式设置 PATH。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 case "$1" in
 deconfig)
 	ip addr flush dev "$interface" 2>/dev/null

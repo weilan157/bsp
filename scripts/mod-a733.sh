@@ -622,6 +622,27 @@ cmd_a733_pack() {
 	}
 	a733_build_aic8800_usb
 
+	# 精简 rootfs 里没有把 busybox 的 applet 建成独立命令，导致
+	# udhcpc / ping / ps / killall 都 "command not found"。
+	# 这里补软链接（只在该命令确实不存在时创建）。
+	a733_busybox_applets() {
+		local bb=""
+		for c in /bin/busybox /usr/bin/busybox /sbin/busybox /usr/sbin/busybox; do
+			[[ -x "${rootdir}${c}" ]] && { bb="${c}"; break; }
+		done
+		[[ -n "${bb}" ]] || return 0
+		local dst link
+		for dst in /usr/sbin/udhcpc /usr/sbin/udhcpc6 /bin/ping /bin/ping6 \
+			   /bin/ps /usr/bin/killall /bin/killall; do
+			link="${rootdir}${dst}"
+			[[ -e "${link}" ]] && continue
+			run_root mkdir -p "$(dirname "${link}")"
+			run_root ln -sf "${bb}" "${link}"
+		done
+		info "补齐 busybox applet: udhcpc/ping/ps/killall"
+	}
+	a733_busybox_applets
+
 	# WiFi/BT（aic8800）需要 /lib/firmware/aic8800dc 与 aic8800d80 下的固件，
 	# 厂商 BSP 不带这些 bin，这里从 vendor/a733/firmware 铺进 rootfs。
 	a733_install_firmware() {
