@@ -586,6 +586,42 @@ cmd_a733_pack() {
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
+	# Radxa 官方 USB 驱动包（vendor/a733/aic8800-usb）：
+	#   aic_load_fw   —— 8d80（Boot ROM）阶段下载并启动固件
+	#   aic8800_fdrv  —— 8d81（运行态）建 wlan0
+	# BSP 自带的 aic8800_bsp/aic8800_fdrv 走不通（固件启动后 ~2.5s 抛异常），
+	# 且 fdrv 模块名冲突，所以配置里已关掉；这里单独编译这两个模块并装进
+	# rootfs 的 /lib/modules/<rel>/extra。两个模块有符号依赖（get_fw_path 等），
+	# fdrv 必须用 load_fw 的 Module.symvers 编译。
+	a733_build_aic8800_usb() {
+		local k="${A733_KERNEL_DIR}" src="${BSP_ROOT}/vendor/a733/aic8800-usb"
+		local work="${A733_OUT}/aic8800-usb" rel dst
+		[[ -d "${src}" ]] || return 0
+		[[ -f "${k}/arch/arm64/boot/Image" ]] || { warn "内核未构建，跳过 Radxa WiFi 驱动"; return 0; }
+		rm -rf "${work}"
+		mkdir -p "${work}"
+		cp -a "${src}/." "${work}/"
+		make -C "${k}" M="${work}/aic_load_fw" ARCH=arm64 \
+			CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+			CONFIG_PLATFORM_UBUNTU=y CONFIG_AIC_INTF_USB=y modules \
+			> "${A733_OUT}/aic_load_fw.build.log" 2>&1 || \
+			die "编译 aic_load_fw 失败（见 out/a733/aic_load_fw.build.log）"
+		make -C "${k}" M="${work}/aic8800_fdrv" ARCH=arm64 \
+			CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+			CONFIG_PLATFORM_UBUNTU=y CONFIG_AIC_INTF_USB=y \
+			KBUILD_EXTRA_SYMBOLS="${work}/aic_load_fw/Module.symvers" modules \
+			> "${A733_OUT}/aic8800_fdrv.build.log" 2>&1 || \
+			die "编译 aic8800_fdrv 失败（见 out/a733/aic8800_fdrv.build.log）"
+		rel=$(cat "${k}/include/config/kernel.release")
+		dst="${rootdir}/lib/modules/${rel}/extra"
+		run_root mkdir -p "${dst}"
+		run_root cp -f "${work}/aic_load_fw/aic_load_fw.ko" "${dst}/"
+		run_root cp -f "${work}/aic8800_fdrv/aic8800_fdrv.ko" "${dst}/"
+		depmod -b "${rootdir}" -a "${rel}" >/dev/null 2>&1 || true
+		info "安装 Radxa WiFi 驱动: aic_load_fw + aic8800_fdrv (${rel}/extra)"
+	}
+	a733_build_aic8800_usb
+
 	# WiFi/BT（aic8800）需要 /lib/firmware/aic8800dc 与 aic8800d80 下的固件，
 	# 厂商 BSP 不带这些 bin，这里从 vendor/a733/firmware 铺进 rootfs。
 	a733_install_firmware() {

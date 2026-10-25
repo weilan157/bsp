@@ -1,10 +1,8 @@
 # Cubie A7Z（A733）开机要加载的模块，由 /usr/sbin/microduck-wifi 在 rcS 后台逐个 modprobe。
 #
-# 板载 WiFi/BT 是 FCU760K 模块，走 USB1（USB2.0），驱动在 allwinner-bsp 的
-# drivers/net/wireless/aic8800：
-#   aic8800_bsp   —— 总线抽象层（USB/SDIO 共用），必须先加载
-#   aic8800_fdrv  —— WiFi 主驱动（cfg80211）
-#   aic8800_btusb —— 蓝牙 HCI（USB）
-aic8800_bsp
+# 板载 WiFi/BT 是 FCU760K（AIC8800D80）模块，走 USB1（USB2.0）。
+# 驱动用 Radxa 官方 USB 驱动包（vendor/a733/aic8800-usb，构建时单独编译）：
+#   aic_load_fw   —— 负责 8d80（Boot ROM）阶段的固件下载/启动
+#   aic8800_fdrv  —— 负责 8d81（运行态）建 wlan0
+aic_load_fw
 aic8800_fdrv
-aic8800_btusb
