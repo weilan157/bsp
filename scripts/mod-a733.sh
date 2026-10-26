@@ -29,7 +29,9 @@ A733_IMAGE_NAME="${A733_IMAGE_NAME:-a733-micro.img}"
 # 调试串口：none | uart2（PB0/PB1 = 40-pin 7/11）| uart4（PJ24/PJ25 = 40-pin 16/18）
 A733_DEBUG_UART="${A733_DEBUG_UART:-none}"
 # NPU：A733 的 VIP9000（aw_nna_vip/vip2）。默认不开（驱动默认 n、官方 min defconfig 也没开）
-A733_WITH_NPU="${A733_WITH_NPU:-n}"
+A733_WITH_NPU="${A733_WITH_NPU:-y}"
+# 是否把 NPU 用户态 runtime（VIPLite/vpm_run）也装进 rootfs
+A733_NPU_RUNTIME="${A733_NPU_RUNTIME:-y}"
 
 
 A733_DIR="${SOURCES_DIR}/a733"
@@ -408,7 +410,27 @@ cmd_a733_rootfs() {
 		ROOTFS_TINY=y \
 		INSTALL_AP6212_FIRMWARE=n \
 		ROOTFS_STRIP=y \
-		cmd_rootfs_micro "$@"
+		cmd_rootfs_micro "$@" || return
+
+	# NPU 用户态：VIPLite 库 + vpm_run + LeNet 冒烟样例
+	# （参考 jackhe183/radxa-dev：A733 是 VeriSilicon VIPLite，节点 /dev/vipcore）
+	if [[ "${A733_WITH_NPU}" == "y" && "${A733_NPU_RUNTIME:-y}" == "y" ]]; then
+		local stage="${SOURCES_DIR}/a733/npu-runtime"
+		info "安装 NPU runtime（VIPLite + vpm_run）"
+		if A733_CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+			bash "${BSP_ROOT}/vendor/a733/npu/fetch-runtime.sh" --dest "${stage}" >/dev/null 2>&1; then
+			run_root mkdir -p "${OUT_DIR}/rootfs/usr/lib/viplite" \
+				"${OUT_DIR}/rootfs/usr/bin" "${OUT_DIR}/rootfs/usr/share/npu"
+			run_root cp -f "${stage}/stage/lib/"*.so "${OUT_DIR}/rootfs/usr/lib/viplite/"
+			run_root cp -f "${stage}/stage/bin/vpm_run" "${OUT_DIR}/rootfs/usr/bin/vpm_run"
+			run_root cp -f "${stage}/stage/share/"* "${OUT_DIR}/rootfs/usr/share/npu/" 2>/dev/null || true
+			run_root chmod 755 "${OUT_DIR}/rootfs/usr/bin/vpm_run" "${OUT_DIR}/rootfs/usr/sbin/microduck-npu" 2>/dev/null || true
+			run_root strip --strip-unneeded "${OUT_DIR}/rootfs/usr/bin/vpm_run" 2>/dev/null || true
+			info "NPU runtime: $(run_root du -sh "${OUT_DIR}/rootfs/usr/lib/viplite" | cut -f1) + vpm_run $(run_root du -sh "${OUT_DIR}/rootfs/usr/share/npu" | cut -f1) 样例"
+		else
+			warn "NPU runtime 拉取/编译失败：镜像里只有内核驱动（/dev/vipcore），没有 vpm_run"
+		fi
+	fi
 }
 
 # 把 A733 内核树编出的模块装进 rootfs：rk3566 的 install_kernel_modules 只看

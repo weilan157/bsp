@@ -1,77 +1,86 @@
-# NPU：现状与怎么开
+# NPU（VeriSilicon VIPLite）：驱动 + 用户态 + 冒烟测试
 
-## 结论
+参考：[jackhe183/radxa-dev](https://github.com/jackhe183/radxa-dev)（A7Z NPU 实战指南）。
+A733 的 NPU 是 **VeriSilicon VIPLite（3 TOPS）**，驱动节点是 **`/dev/vipcore`**
+（不是 `/dev/galcore`、也不是 RKNN）。
 
-- **A733 有 NPU**（DT 里 `npu@3600000`，`compatible = "allwinner,npu"`，
-  board.dts 里 `npu-supply = <&reg_dcdc2>`、`status = "okay"`）。
-- **但我们的镜像里没有 NPU 驱动**：BSP 的 `CONFIG_AW_NNA_VIP` /
-  `CONFIG_AW_NNA_GALCORE` 都是 `default n`，官方 A733 的
-  `sun60iw2p1_min_defconfig` 也明确写着两行 `is not set`；我们的 fragment 没有加。
-  所以现在 `/dev/vipcore`（或 `/dev/galcore`）不存在，NPU 用不了。
-- 驱动有两套，**都 match `allwinner,npu`，只能二选一**：
-  - `aw_nna_vip`（VIP9000，源码 2.5 MB，A733 对应 `vip2`，驱动里有 `sun60iw2` 分支）；
-  - `aw_nna_galcore`（Vivante GC，源码 28 MB，给别的 SoC 的 NPU/GPU 用）。
+## 一、内核驱动
 
-## 怎么开
+DT 里 `npu@3600000`（`compatible = "allwinner,npu"`，board.dts 里 `npu-supply` 和
+`status = "okay"` 都有），但 BSP 驱动默认是关的：
+
+| 配置 | 作用 |
+|---|---|
+| `CONFIG_AW_NNA_VIP=y` | VIPLite 驱动（`aw_nna_vip`） |
+| `CONFIG_NNA_VIP2=y` | A733 用 vip2（驱动里有 `sun60iw2` 分支） |
+| `CONFIG_DEBUG_FS=y` | vip2 的 debugfs 代码必需，否则编不过 |
+| `CONFIG_NPU_SET_CLK_VOL=y` | 时钟/电压 sysfs 节点 |
+| `# CONFIG_AW_NNA_GALCORE is not set` | 另一套（Vivante），和 VIP 抢同一个 DT 节点 |
+
+`./bsp kernel` 在 `A733_WITH_NPU=y`（默认）时自动追加这几行。实测全量 Image
+38,482,432 字节，比不开 NPU 多约 0.7 MB。
+
+## 二、用户态 runtime（VIPLite + vpm_run）
+
+`vendor/a733/npu/fetch-runtime.sh` 会：
+
+1. sparse 克隆 `jackhe183/radxa-dev`（`A733_NPU_SDK_REPO` 可换），只取
+   `npu_test/ai-sdk/{viplite-tina,examples/vpm_run,machinfo}`；
+2. 用 `aarch64-linux-gnu-gcc` 交叉编译 `vpm_run`
+   （`make AI_SDK_PLATFORM=a733 NPU_SW_VERSION=v2.0`）；
+3. 把 `libNBGlinker.so`、`libVIPhal.so`、`vpm_run`、LeNet 样例（`.nb` + `.dat`）
+   stage 到一个目录。
+
+`./bsp rootfs` 在 `A733_WITH_NPU=y && A733_NPU_RUNTIME=y`（都是默认）时把它们装进镜像：
+
+```
+/usr/lib/viplite/libNBGlinker.so   (171 KB)
+/usr/lib/viplite/libVIPhal.so      ( 39 KB)
+/usr/bin/vpm_run                   ( 85 KB，strip 后)
+/usr/share/npu/lenet.nb            (434 KB)
+/usr/share/npu/lenet.dat
+/usr/share/npu/sample_lenet.txt
+/etc/profile.d/viplite.sh          # LD_LIBRARY_PATH=/usr/lib/viplite
+/usr/sbin/microduck-npu            # 冒烟测试脚本
+```
+
+合计约 0.7 MB。拉不到 SDK 时只 warn，镜像仍能启动（有 `/dev/vipcore`，没有 `vpm_run`）。
+
+## 三、验证
+
+板端：
 
 ```bash
-./bsp config A733_WITH_NPU=y
-./bsp kernel && ./bsp pack
+ls -l /dev/vipcore          # crw-rw-rw-
+microduck-npu               # 跑 LeNet，打印 Top5
+# 或手动：
+export LD_LIBRARY_PATH=/usr/lib/viplite
+cd /usr/share/npu && vpm_run -s sample_lenet.txt -l 1 --show_top5 1 -b 0
 ```
 
-`./bsp kernel` 会往 fragment 里追加：
+预期看到 `VIPLite driver software version 2.0.x`，`run time ... us`，Top5 里
+`0: 1.000000`（手写数字 1）。
 
-```
-CONFIG_AW_NNA_VIP=y
-CONFIG_NNA_VIP2=y
-# CONFIG_NNA_VIP1 is not set
-# CONFIG_AW_NNA_GALCORE is not set
-CONFIG_DEBUG_FS=y
-CONFIG_NPU_SET_CLK_VOL=y
-```
+本机已验证（qemu 无 NPU）：
 
-后两项是踩出来的：6.6 BSP 的 VIP2 代码在 `CONFIG_DEBUG_FS=n` 时编不过
-（`label 'flush_buffer' used but not defined`、`clk_freq_show undeclared`），
-`NPU_SET_CLK_VOL` 打开时钟/电压的 sysfs 节点。
+- `vpm_run` 能加载 VIPLite 库并打印版本，然后在 `open /dev/vipcore` 处失败——
+  说明用户态链路 OK，缺的只是板上的驱动/节点；
+- 内核配置与 `bsp/drivers/npu/` 编译通过（VIP2 选择），无 `DEBUG_FS` 时复现过
+  `flush_buffer` / `clk_freq_show` 编译错误。
 
-上板验证：
+## 四、跑自己的模型
+
+1. PC 上用 **Acuity Toolkit**（Allwinner 的 Docker 镜像）把 ONNX 转成 `.nb`；
+2. 模型按 vpm_run 的 `[network]` / `[input]` 配置格式写一个 txt；
+3. 拷到板子，`vpm_run -s your.txt -l 1 --show_top5 1 -b 0`。
+
+换模型只涉及 `.nb` + 输入数据 + 配置，不需要重编内核。
+
+## 五、开关
 
 ```bash
-ls /dev/vipcore            # 或 /dev/vip
-dmesg | grep -i vip        # vipcore probe 日志
-cat /sys/kernel/debug/vip/...   # DEBUG_FS 打开后能看到频率等
+A733_WITH_NPU=n ./bsp kernel        # 不要 NPU 驱动
+A733_NPU_RUNTIME=n ./bsp rootfs     # 只要驱动，不装 vpm_run
 ```
 
-`./bsp hal` 在 `A733_WITH_NPU=y` 时会多检查一项：dtb 里的 `npu@3600000` 节点。
-
-## 还缺什么（重要）
-
-内核驱动只是第一步，**用户态 runtime 不在 Debian 里**：
-
-- Allwinner 的 NPU 软件栈（Acuity Toolkit / `libvip` / `awnn`）是厂商 SDK 的一部分，
-  需要把对应的 `libvip.so`、`/usr/bin` 工具和模型转换后的 `.nb` 文件放进 rootfs；
-- 没有这套 runtime，`/dev/vipcore` 只能做底层 ioctl 测试，跑不了模型；
-- 模型要先在 PC 上用 Acuity 量化/转换（ONNX → `.nb`），再拷到板子上。
-
-## 体积影响
-
-- VIP 驱动编进 Image（`=y`）：预计 Image 增加几 MB（编译产物在
-  `bsp/drivers/npu/aw_nna_vip/vip2/`，源码 2.5 MB）；
-- 如果改 `=m`，模块本身约 1–2 MB，但要注意 `MICRODUCK_MIN_MODULES` 的裁剪规则
-  不碰 `npu` 路径，不会被误删；
-- galcore（28 MB 源码）体积更大，默认不选。
-
-## 已验证 / 未验证
-
-- 已验证（本机 6.6 内核树）：
-  - 配置解析正确（`AW_NNA_VIP=y`、`NNA_VIP2=y`、`DEBUG_FS=y`、`NPU_SET_CLK_VOL=y`）；
-  - `bsp/drivers/npu/` 在 VIP2 与 VIP1 两种选择下都能编译通过；
-  - vip2 在缺 `DEBUG_FS`/`NPU_SET_CLK_VOL` 时会报上面那两处错误。
-- 未验证：上板 probe、`/dev/vipcore` 实际推理（缺用户态 runtime）。
-
-## 建议
-
-- 产品不用 NPU：保持默认（不开），镜像最小；
-- 要用 NPU：先向 Radxa/Allwinner 要 A733 的 NPU runtime 包（libvip + Acuity 输出），
-  再开 `A733_WITH_NPU=y`；如果 runtime 只支持 galcore，就把 fragment 换成
-  `CONFIG_AW_NNA_GALCORE=y` 并关掉 VIP（两者不能同时 probe 同一个 DT 节点）。
+两处都关掉时，镜像回到之前的纯 CPU 版本。

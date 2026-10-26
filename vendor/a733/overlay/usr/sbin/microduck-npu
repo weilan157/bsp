@@ -1,0 +1,31 @@
+#!/bin/sh
+# microduck-npu —— NPU 冒烟测试（VIPLite + LeNet）
+#
+#   microduck-npu          检查 /dev/vipcore，跑一遍自带 LeNet 并打印 Top5
+#
+# 依赖：A733_WITH_NPU=y 编出的内核（/dev/vipcore）+ ./bsp rootfs 装进来的
+# VIPLite 库（/usr/lib/viplite）与 vpm_run（/usr/bin/vpm_run）。
+set -u
+
+KMSG() { printf 'microduck-npu: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
+
+if [ ! -c /dev/vipcore ]; then
+	echo "没有 /dev/vipcore：内核没开 NPU（A733_WITH_NPU=y）或驱动没 probe" >&2
+	dmesg 2>/dev/null | grep -i vip | tail -5
+	exit 1
+fi
+if [ ! -x /usr/bin/vpm_run ]; then
+	echo "没有 vpm_run：rootfs 里没装 NPU runtime（A733_NPU_RUNTIME=y）" >&2
+	exit 1
+fi
+
+export LD_LIBRARY_PATH="/usr/lib/viplite${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+cd /usr/share/npu 2>/dev/null || { echo "缺少 /usr/share/npu" >&2; exit 1; }
+
+KMSG "NPU 冒烟测试开始"
+if /usr/bin/vpm_run -s /usr/share/npu/sample_lenet.txt -l 1 --show_top5 1 -b 0; then
+	KMSG "NPU 冒烟测试完成"
+else
+	echo "vpm_run 失败（看上面输出 / dmesg | grep vip）" >&2
+	exit 1
+fi

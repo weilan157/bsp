@@ -265,11 +265,14 @@ docker run --rm --network host \
 
 配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
 断开急停）属于产品镜像层，方案和优先级都在那份文档里。
-### NPU
+### NPU（VeriSilicon VIPLite）
 
-A733 有 NPU（`npu@3600000`），但 BSP 的 `AW_NNA_VIP`/`AW_NNA_GALCORE` 默认都是 n，
-我们的镜像默认**不含** NPU 驱动。开法（`A733_WITH_NPU=y`，需要 `DEBUG_FS` 和
-`NPU_SET_CLK_VOL` 才能编过）和还缺的用户态 runtime 见 [docs/npu.md](docs/npu.md)。
+参考 [jackhe183/radxa-dev](https://github.com/jackhe183/radxa-dev)：A733 的 NPU 是
+VIPLite 3 TOPS，节点 `/dev/vipcore`。`A733_WITH_NPU=y`（默认）会打开
+`AW_NNA_VIP` + `NNA_VIP2`（外加 `DEBUG_FS`/`NPU_SET_CLK_VOL` 才能编过），
+`A733_NPU_RUNTIME=y`（默认）会把 VIPLite 库 + `vpm_run` + LeNet 样例装进 rootfs，
+板端 `microduck-npu` 即可跑冒烟测试。细节、模型转换（Acuity）和开关见
+[docs/npu.md](docs/npu.md)。
 
 ### 镜像体积
 

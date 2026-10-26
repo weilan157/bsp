@@ -221,9 +221,11 @@ brandy/dramlib，难度高。详见 [`docs/uboot-vs-official.md`](../../docs/ubo
 400 MB → 271 MB：pack 尺寸公式 + `resize2fs -M` + `-m 0`（−110 MB）、
 `ROOTFS_TINY=y` 去 apt/hwdb/perl（−40 MB）、`MICRODUCK_MIN_MODULES=y` 裁其它平台模块
 （−11 MB）。详见 [`docs/image-size.md`](../../docs/image-size.md)。
-## NPU
+## NPU（VIPLite）
 
-DT 有 `npu@3600000`（`allwinner,npu`），但 BSP 的两个驱动默认都是 n，官方 A733
-min defconfig 也是关的。开法：`A733_WITH_NPU=y`（VIP9000/vip2，另外需要
-`CONFIG_DEBUG_FS=y` + `CONFIG_NPU_SET_CLK_VOL=y` 才编得过）。用户态 runtime
-（libvip/Acuity）不在 Debian 里。详见 [`docs/npu.md`](../../docs/npu.md)。
+`A733_WITH_NPU=y`（默认）打开 `AW_NNA_VIP` + `NNA_VIP2`（需要 `CONFIG_DEBUG_FS` 和
+`CONFIG_NPU_SET_CLK_VOL`，否则 vip2 编不过）；`A733_NPU_RUNTIME=y`（默认）用
+`vendor/a733/npu/fetch-runtime.sh` 拉 ai-sdk、交叉编译 `vpm_run`，把
+`/usr/lib/viplite`、`/usr/bin/vpm_run`、`/usr/share/npu`（LeNet）装进 rootfs，
+板端跑 `/usr/sbin/microduck-npu`。参考 `jackhe183/radxa-dev`，详见
+[`docs/npu.md`](../../docs/npu.md)。
