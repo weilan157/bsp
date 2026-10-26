@@ -75,3 +75,32 @@ async fn forget(&self, ssid: &str) -> NetResult<proto::ForgetResult>;
 - `configd` 在 `UnavailableNet` 下，BLE 配网流程是否仍能完成“配手柄”之外的动作；
 - `btd`（bluez）和 `pad` 配对不依赖 NM（代码里只有 configd 用 NM，btd 用 bluer/bluez）；
 - 手机 App 的“配网”入口能否改成打开 `duck-XXXX.local` 的网页。
+
+## 已实现（A733_ROOTFS_INIT=systemd）
+
+```bash
+./bsp config A733_ROOTFS_INIT=systemd
+./bsp rootfs --clean && ./bsp pack
+```
+
+chroot-setup 会：装 `systemd-sysv + systemd`（**不装 NetworkManager**），
+启用 `ssh`/`avahi-daemon`/`bluetooth` 和五个 `microduck-*` unit：
+
+| unit | 作用 |
+|---|---|
+| `microduck-grow.service` | 开机扩 rootfs（sysinit.target，Before sysinit） |
+| `microduck-zram.service` | ZRAM swap（sysinit.target） |
+| `microduck-net.service` | `microduck-net auto`（wpa_supplicant + udhcpc，oneshot） |
+| `microduck-bt.service` | bluetoothd 常驻 + 手柄自动配对/回连 |
+| `microduck-ap.service` | AP+STA 热点与配网页（`ap.conf` ENABLED=0 时空跑） |
+
+**实测**（本机，未装内核模块的构建）：
+
+- rootfs 200 MB（sysvinit 同条件 189 MB，+11 MB）；
+- 镜像 **254 MB**（同条件 sysvinit 246 MB，**+8 MB**）；
+- `systemctl --version` → systemd 257；`network-manager` 未安装；
+- `systemd-analyze verify` 对五个 unit 只报“文件可执行位”的 warning（已改 644），无语法错误；
+- enable 的 symlink 在 `multi-user.target.wants` / `sysinit.target.wants` 下都已生成。
+
+**未验证**：真机启动（udev/unit 顺序、getty、网络在 systemd 下的行为）、
+`configd` 在无 NM 时的实际降级表现——都要上板。

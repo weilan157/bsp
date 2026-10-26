@@ -408,6 +408,7 @@ cmd_a733_rootfs() {
 	# 只额外盖一层 A733 的 console/模块清单
 	ROOTFS_OVERLAY_EXTRA="${BSP_ROOT}/vendor/a733/overlay" \
 		ROOTFS_TINY=y \
+		ROOTFS_INIT="${A733_ROOTFS_INIT:-sysvinit}" \
 		INSTALL_AP6212_FIRMWARE=n \
 		ROOTFS_STRIP=y \
 		cmd_rootfs_micro "$@" || return

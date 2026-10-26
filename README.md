@@ -272,7 +272,7 @@ docker run --rm --network host \
 兼容矩阵、三条适配路线和 BSP 待办见 [docs/software-adapter.md](docs/software-adapter.md)；
 A（systemd 产品镜像）和 B（改成 sysvinit）的逐项对比、工作量与推荐见
 [docs/route-a-vs-b.md](docs/route-a-vs-b.md)；A2 不装 NetworkManager 的可行性与代价见
-[docs/a2-without-networkmanager.md](docs/a2-without-networkmanager.md)。
+[docs/a2-without-networkmanager.md](docs/a2-without-networkmanager.md)。已实现：`A733_ROOTFS_INIT=systemd`（不装 NM，systemd 257 + 五个 microduck unit，镜像约 254 MB/不带模块）。
 已加 `/dev/microduck-servo` udev 别名（指向 ttyS0）方便软件改配置。
 
 ### NPU（VeriSilicon VIPLite）

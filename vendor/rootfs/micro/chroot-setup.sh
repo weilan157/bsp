@@ -26,11 +26,17 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	openssh-server dbus avahi-daemon libnss-mdns \
 	hostapd dnsmasq
 
-echo ">>> 用 sysvinit 取代 systemd"
-${APT} sysvinit-core
-# 只卸 systemd 本体；udev 保留（bluez 依赖它，且不启动它就不占启动时间）
-apt-get purge -y systemd-sysv systemd 2>/dev/null || true
-apt-get autoremove -y --purge 2>/dev/null || true
+INIT="${ROOTFS_INIT:-sysvinit}"
+if [ "$INIT" = "systemd" ]; then
+	echo ">>> systemd（product profile，不装 NetworkManager）"
+	${APT} systemd-sysv systemd
+else
+	echo ">>> 用 sysvinit 取代 systemd"
+	${APT} sysvinit-core
+	# 只卸 systemd 本体；udev 保留（bluez 依赖它）
+	apt-get purge -y systemd-sysv systemd 2>/dev/null || true
+	apt-get autoremove -y --purge 2>/dev/null || true
+fi
 
 echo ">>> hostname / 用户"
 echo "${HOSTNAME}" > /etc/hostname
@@ -47,6 +53,26 @@ PasswordAuthentication yes
 UseDNS no
 EOF
 ssh-keygen -A >/dev/null 2>&1 || true
+
+if [ "$INIT" = "systemd" ]; then
+	echo ">>> 启用 systemd 服务（不含 NetworkManager）"
+	enable_unit() {
+		unit="$1"; target="$2"
+		systemctl enable "$unit" >/dev/null 2>&1 && return 0
+		link="$(readlink -f "/lib/systemd/system/$unit" 2>/dev/null || true)"
+		[ -n "$link" ] || link="/usr/lib/systemd/system/$unit"
+		mkdir -p "/etc/systemd/system/${target}.wants"
+		ln -sf "$link" "/etc/systemd/system/${target}.wants/$unit"
+	}
+	for u in ssh.service avahi-daemon.service bluetooth.service \
+		microduck-net.service microduck-bt.service microduck-ap.service; do
+		enable_unit "$u" multi-user.target
+	done
+	for u in microduck-grow.service microduck-zram.service; do
+		enable_unit "$u" sysinit.target
+	done
+	enable_unit getty@tty1.service getty.target
+fi
 # avahi 只广播主机名；不装一堆 service 文件
 sed -i 's/^#*hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf 2>/dev/null || true
 

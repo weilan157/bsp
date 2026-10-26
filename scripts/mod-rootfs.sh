@@ -283,6 +283,7 @@ cmd_rootfs_micro() {
 			ROOTFS_HOSTNAME="${ROOTFS_HOSTNAME}" \
 			ROOTFS_ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD}" \
 			ROOTFS_TINY="${ROOTFS_TINY:-n}" \
+			ROOTFS_INIT="${ROOTFS_INIT:-sysvinit}" \
 			bash /tmp/chroot-setup.sh
 	)
 
