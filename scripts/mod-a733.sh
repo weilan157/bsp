@@ -925,7 +925,13 @@ EOF
 		info "rootfs.ext4 收缩到 $(run_root du -sm "${OUT_DIR}/rootfs.ext4" | cut -f1) MiB（+16 MiB 余量）"
 	fi
 	fs_bytes="$(run_root stat -c%s "${OUT_DIR}/rootfs.ext4")"
-	img_size=$(( root_start * 512 + fs_bytes ))
+	# 关键：镜像必须比"root_start + rootfs 大小"再多留一段。
+	# GPT 的备份头 + 备份表项放在磁盘最后 34 个扇区，sfdisk 会把 p2 的结束位置
+	# 卡在 last_usable_lba 上；如果这里不留余量，p2 就会比 rootfs 小 33 个扇区，
+	# 内核报 "EXT4-fs (mmcblk0p2): bad geometry: block count ... exceeds size of
+	# device" 而挂不上 rootfs。留 8 MiB 余量 + 1 MiB 对齐。
+	img_size=$(( root_start * 512 + fs_bytes + 8 * 1048576 ))
+	img_size=$(( (img_size + 1048576 - 1) / 1048576 * 1048576 ))
 
 	# 3) config 分区（16 MiB FAT）
 	tmp_cfg="${A733_OUT}/config.fat"
