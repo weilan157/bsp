@@ -51,6 +51,17 @@ ssh-keygen -A >/dev/null 2>&1 || true
 sed -i 's/^#*hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf 2>/dev/null || true
 
 echo ">>> 精简"
+if [ "${ROOTFS_TINY:-n}" = y ]; then
+	echo ">>> 极致精简（去掉 apt/hwdb/perl 运行时）"
+	# apt 在 Debian 里是 Essential，必须带 --allow-remove-essential；sqv 是它的依赖
+	apt-get purge -y --allow-remove-essential apt >/dev/null 2>&1 || true
+	apt-get purge -y sqv >/dev/null 2>&1 || true
+	# udev 的硬件数据库对这块板子没用（12.9 MB 的 hwdb.bin + 7 MB 源文件）
+	rm -rf /usr/lib/udev/hwdb.d /usr/lib/udev/hwdb.bin
+	# perl 运行时（dpkg 本体是 C，不需要 perl；adduser 也不用）
+	rm -rf /usr/lib/aarch64-linux-gnu/perl* /usr/lib/arm-linux-gnueabihf/perl* \
+		/usr/share/perl* /usr/bin/perl* /usr/lib/*/perl-base 2>/dev/null || true
+fi
 apt-get clean || true
 rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
 	/usr/share/doc/* /usr/share/man/* /usr/share/info/* \

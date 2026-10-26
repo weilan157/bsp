@@ -388,6 +388,7 @@ cmd_a733_rootfs() {
 	# 复用 microduck 的精简 rootfs（sysvinit + busybox + ZRAM + 扩容），
 	# 只额外盖一层 A733 的 console/模块清单
 	ROOTFS_OVERLAY_EXTRA="${BSP_ROOT}/vendor/a733/overlay" \
+		ROOTFS_TINY=y \
 		INSTALL_AP6212_FIRMWARE=n \
 		ROOTFS_STRIP=y \
 		cmd_rootfs_micro "$@"
@@ -439,6 +440,27 @@ rootfs_install_platform_modules() {
 		run_root depmod -b "${rootfs}" -a "${rel}" || warn "depmod 失败"
 	fi
 	info "模块数: $(run_root find "${rootfs}/lib/modules" -name '*.ko*' | wc -l)"
+
+	# 只留和这块板子相关的模块：QCOM/Renesas/Rockchip/MediaTek/Tegra/Ath/Marvell/
+	# Broadcom 等其它平台的驱动对 A733 没用，937 个 .ko 里能砍掉十几 MB。
+	if [[ "${MICRODUCK_MIN_MODULES:-y}" == "y" ]]; then
+		local before after
+		before="$(run_root du -sk "${rootfs}/lib/modules" 2>/dev/null | cut -f1)"
+		run_root find "${rootfs}/lib/modules" -name '*.ko*' -print0 2>/dev/null |
+			while IFS= read -r -d '' ko; do
+				case "${ko}" in
+				*/qcom/*|*/renesas/*|*/rockchip/*|*/mediatek/*|*/tegra/*|*/ath/*/|*/ath[0-9]*)
+					run_root rm -f "${ko}" ;;
+				*/marvell/*|*/brcm/*|*/broadcom/*|*/samsung/*|*/fsl/*|*/imx/*|*/wcn/*|*/ti/*|*/hisilicon/*|*/amlogic/*|*/nvidia/*|*/intel/*|*/amd/*|*/xilinx/*)
+					run_root rm -f "${ko}" ;;
+				esac
+			done
+		run_root depmod -b "${rootfs}" -a "$(make -s -C "${k}" ARCH=arm64 \
+			CROSS_COMPILE="${A733_CROSS_COMPILE}" kernelrelease 2>/dev/null | tr -d '[:space:]')" \
+			>/dev/null 2>&1 || warn "裁剪后 depmod 失败"
+		after="$(run_root du -sk "${rootfs}/lib/modules" 2>/dev/null | cut -f1)"
+		info "模块裁剪: $((before / 1024)) MB -> $((after / 1024)) MB（$(run_root find "${rootfs}/lib/modules" -name '*.ko*' | wc -l) 个）"
+	fi
 }
 
 # 检查编出来的 dtb 是否满足 HAT 的 BSP/HAL 基本要求
@@ -566,13 +588,31 @@ EOF
 	fs_mb="$(run_root du --apparent-size -sm "${rootdir}" | cut -f1)"
 	local file_count
 	file_count="$(run_root find "${rootdir}" | wc -l)"
-	fs_mb=$(( fs_mb + file_count * 4 / 1024 + 64 ))
-	fs_mb=$(( fs_mb * 110 / 100 ))
-	img_size=$(( root_start * 512 + fs_mb * 1024 * 1024 ))
+	# 尺寸 = 内容 + inode 表开销 + 一张很小的余量；以前是 +64MB 再 +10%，
+	# 在 300MB 级 rootfs 上会白占 ~100MB（mkfs 出来一半是空的）。
+	fs_mb=$(( fs_mb + file_count * 4 / 1024 + 24 ))
+	fs_mb=$(( fs_mb * 104 / 100 ))
 	info "rootfs.ext4: ${fs_mb} MiB，UUID=${rootfs_uuid}"
 	run_root rm -f "${OUT_DIR}/rootfs.ext4"
-	run_root mkfs.ext4 -d "${rootdir}" -L rootfs -U "${rootfs_uuid}" \
+	# -m 0：不留 5% 的 root 保留块（A7Z 的 rootfs 不会满到需要它）
+	run_root mkfs.ext4 -m 0 -d "${rootdir}" -L rootfs -U "${rootfs_uuid}" \
 		"${OUT_DIR}/rootfs.ext4" "${fs_mb}M" >/dev/null || die "mkfs.ext4 失败"
+
+	# mkfs -d 的尺寸是估算的，实际会空出几十 MB。用 resize2fs -M 缩到最小，
+	# 再补 16 MiB 余量，镜像长度按真实文件大小算，省掉这块空白。
+	run_root e2fsck -fy "${OUT_DIR}/rootfs.ext4" >/dev/null 2>&1 || true
+	if run_root resize2fs -M "${OUT_DIR}/rootfs.ext4" >/dev/null 2>&1; then
+		local fs_blocks
+		fs_blocks="$(run_root dumpe2fs -h "${OUT_DIR}/rootfs.ext4" 2>/dev/null |
+			awk -F: '/Block count/{gsub(/[ \t]/,"",$2); print $2}')"
+		if [[ -n "${fs_blocks}" ]]; then
+			run_root resize2fs "${OUT_DIR}/rootfs.ext4" $(( fs_blocks + 4096 )) \
+				>/dev/null 2>&1 || true
+		fi
+		info "rootfs.ext4 收缩到 $(run_root du -sm "${OUT_DIR}/rootfs.ext4" | cut -f1) MiB（+16 MiB 余量）"
+	fi
+	fs_bytes="$(run_root stat -c%s "${OUT_DIR}/rootfs.ext4")"
+	img_size=$(( root_start * 512 + fs_bytes ))
 
 	# 3) config 分区（16 MiB FAT）
 	tmp_cfg="${A733_OUT}/config.fat"

@@ -216,3 +216,8 @@ A7Z 无显示时相当于没有 console。换口方案（UART2/7-11、USB-C gadg
 初始化（“DDR 速率探测”）在预编译 boot0 里，sys_config 没有 `[dram_para]`，改它要重编
 brandy/dramlib，难度高。详见 [`docs/uboot-vs-official.md`](../../docs/uboot-vs-official.md)。
 生产默认 `debug_mode=0`（`A733_BOOT0_DEBUG=y` 可恢复 boot0 日志）。
+## 镜像体积
+
+400 MB → 271 MB：pack 尺寸公式 + `resize2fs -M` + `-m 0`（−110 MB）、
+`ROOTFS_TINY=y` 去 apt/hwdb/perl（−40 MB）、`MICRODUCK_MIN_MODULES=y` 裁其它平台模块
+（−11 MB）。详见 [`docs/image-size.md`](../../docs/image-size.md)。

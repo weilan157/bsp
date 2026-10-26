@@ -282,6 +282,7 @@ cmd_rootfs_micro() {
 			DEBIAN_RELEASE="${DEBIAN_RELEASE}" \
 			ROOTFS_HOSTNAME="${ROOTFS_HOSTNAME}" \
 			ROOTFS_ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD}" \
+			ROOTFS_TINY="${ROOTFS_TINY:-n}" \
 			bash /tmp/chroot-setup.sh
 	)
 

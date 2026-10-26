@@ -265,6 +265,12 @@ docker run --rm --network host \
 
 配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
 断开急停）属于产品镜像层，方案和优先级都在那份文档里。
+### 镜像体积
+
+实测从 **400 MB 缩到 271 MB**（rootfs 261→215 MB，ext4 368→239 MB，模块 929→740 个），
+手段和还能再缩的地方见 [docs/image-size.md](docs/image-size.md)。默认
+`ROOTFS_TINY=y`、`MICRODUCK_MIN_MODULES=y`，调试时可关掉。
+
 ### 调试串口 vs 舵机总线
 
 40-pin 的 8/10（UART0）既是官方调试口，也是 HAT 的舵机总线；console 和舵机不能共用。
