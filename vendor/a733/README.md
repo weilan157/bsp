@@ -209,3 +209,10 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 `&uart0`（PB9/PB10 = 40-pin 8/10）给了舵机，`boot.cmd` 的 console 是 `tty1`；
 A7Z 无显示时相当于没有 console。换口方案（UART2/7-11、USB-C gadget、SSH-only 的取舍）
 见 [`docs/uart-console-vs-servo.md`](../../docs/uart-console-vs-servo.md)。
+## u-boot 与官方差异 / DDR 初始化
+
+`./bsp uboot` 用的就是官方 `radxa/u-boot` 源码，只改构建配置和两处小修；与 rsdk 的差别
+主要在 boot0 是预编译还是现编、boot_package 里有没有 ARISC/NOR 变体。boot0 的 DRAM
+初始化（“DDR 速率探测”）在预编译 boot0 里，sys_config 没有 `[dram_para]`，改它要重编
+brandy/dramlib，难度高。详见 [`docs/uboot-vs-official.md`](../../docs/uboot-vs-official.md)。
+生产默认 `debug_mode=0`（`A733_BOOT0_DEBUG=y` 可恢复 boot0 日志）。

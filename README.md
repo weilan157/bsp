@@ -272,7 +272,7 @@ docker run --rm --network host \
 SSH）见 [docs/uart-console-vs-servo.md](docs/uart-console-vs-servo.md)。
 
 当前分支的状态：`&uart0` 给舵机，`boot.cmd` 用 `console=tty1`（A7Z 无显示时等于没有
-console），现场排查依赖 SSH。已加 `A733_DEBUG_UART=uart4`（PJ24/PJ25 = 40-pin 16/18，
+console），现场排查依赖 SSH。`./bsp uboot` 和官方 u-boot 的差异、以及 boot0 里 DDR 初始化为啥慢、能不能改，见 [docs/uboot-vs-official.md](docs/uboot-vs-official.md)。已加 `A733_DEBUG_UART=uart4`（PJ24/PJ25 = 40-pin 16/18，
 HAT 未占用）把 boot0/u-boot/kernel 的 console 一起挪到 UART4；`uart2`（7/11）因为 7 脚是
 HAT 的 Stemma SDA 不推荐。
 ### 板级相关配置（与 SDK 对齐）

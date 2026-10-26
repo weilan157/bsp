@@ -197,6 +197,14 @@ a733_pack_bootloader() {
 
 	# sys_config.fex -> sys_config.bin（fex 需要 CRLF，官方用 unix2dos）
 	cp -f "${d}/configs/cubie_a7z/sys_config.fex" sys_config.fex
+	# boot0 的调试打印走 115200 串口，量不小；生产默认关掉（调试时 A733_BOOT0_DEBUG=y）
+	if [[ "${A733_BOOT0_DEBUG:-n}" != "y" ]]; then
+		sed -i 's/^debug_mode.*/debug_mode  = 0/' sys_config.fex
+	fi
+	# UART2 调试口（PB0/PB1）和 JTAG 复用同一组脚，用 uart2 时把 JTAG 关掉
+	if [[ "${A733_DEBUG_UART}" == "uart2" ]]; then
+		sed -i 's/^jtag_enable.*/jtag_enable     = 0/' sys_config.fex
+	fi
 	# 调试串口搬到 UART2/4（boot0 从 [uart_para] 读），UART0 留给舵机
 	case "${A733_DEBUG_UART}" in
 	uart4)
