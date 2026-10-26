@@ -147,6 +147,11 @@ cmd_rootfs_debian() {
 	info "debootstrap 第一阶段..."
 	run_root debootstrap --arch="${DEBIAN_ARCH}" --variant="${DEBIAN_VARIANT}" \
 		"${DEBIAN_RELEASE}" "${rootfs}" "${mirror}"
+	# debootstrap 失败（镜像源挂死 / Release 取不到）时必须停：之前它失败了
+	# 但脚本继续往下走，最后用空目录打出一个 117MB 的坏镜像，还报 rc=0。
+	if [[ ! -x "${rootfs}/usr/bin/env" ]]; then
+		die "debootstrap 失败：${rootfs} 不完整（检查 DEBIAN_MIRROR=${DEBIAN_MIRROR:-?}）"
+	fi
 	run_root chown root:root "${rootfs}"
 
 	local qemu_static="/usr/bin/qemu-aarch64-static"

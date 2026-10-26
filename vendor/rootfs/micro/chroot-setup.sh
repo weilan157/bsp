@@ -7,6 +7,15 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=/root
 APT="apt-get install -y --no-install-recommends"
 
+# chroot 里没有运行中的 init：让 invoke-rc.d 直接返回 101（不启动/不停止服务）。
+# 不加的话每个包安装都会走一遍 "invoke-rc.d: could not determine current runlevel"，
+# 在 qemu 用户态模拟下非常慢，甚至会卡住（本次构建就卡在 bluez 的配置阶段）。
+cat > /usr/sbin/policy-rc.d <<'EOF'
+#!/bin/sh
+exit 101
+EOF
+chmod 755 /usr/sbin/policy-rc.d
+
 HOSTNAME="${ROOTFS_HOSTNAME:-microduck}"
 ROOT_PASSWORD="${ROOTFS_ROOT_PASSWORD:-root}"
 
@@ -110,6 +119,13 @@ if [ "$INIT" = "systemd" ]; then
 	# 屏蔽平台版 net/ap：WiFi 与 AP 统一由 microduck-wifi.service 负责，
 	# 否则两个服务会同时配置 wlan0。
 	systemctl mask microduck-net.service microduck-ap.service >/dev/null 2>&1 || true
+	# Debian 装 hostapd/dnsmasq/wpasupplicant 时会给它们 enable 开机自启，
+	# 这跟我们的 microduck-wifi / microduck-ap 会抢 wlan0（两套 hostapd、两个
+	# wpa_supplicant）。统一屏蔽，全部由 microduck-wifi 在运行时按需拉起。
+	systemctl mask hostapd.service dnsmasq.service wpa_supplicant.service \
+		>/dev/null 2>&1 || true
+	systemctl disable hostapd.service dnsmasq.service wpa_supplicant.service \
+		>/dev/null 2>&1 || true
 fi
 # avahi 只广播主机名；不装一堆 service 文件
 sed -i 's/^#*hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf 2>/dev/null || true
