@@ -81,3 +81,9 @@ openssh-server/dbus/avahi/hostapd/dnsmasq），只换 init：
   `gstreamer1.0-plugins-good`（8.1 MB）+ `libgstreamer-plugins-bad1.0-0`（3.3 MB，
   webrtcbin 在这里），合计约 20 MB + 依赖，**30–40 MB 量级**；
 - 镜像打包是 1:1（resize2fs -M 后），rootfs 多 10 MB ≈ 镜像多 10 MB。
+## 补充：A2 也可以不装 NetworkManager
+
+`configd` 在拿不到 NM 的 D-Bus 时会落到 `UnavailableNet`（`main.rs` 的
+`Err(e) => UnavailableNet::new(e)`），进程不退出，BLE/手柄/电源/日志照常，只有
+wifi 的四个 API 返回 Unavailable。配网改用我们的 AP + 网页。
+细节和 `WpaNet` 的改法见 [`a2-without-networkmanager.md`](a2-without-networkmanager.md)。
