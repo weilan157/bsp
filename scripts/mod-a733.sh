@@ -864,6 +864,21 @@ EOF
 	printf '%s\n' "${bootargs}" > "${A733_OUT}/cmdline"
 	run_root cp -f "${A733_OUT}/cmdline" "${rootdir}/etc/kernel/cmdline"
 
+	# 镜像身份标记：刷完机 `cat /etc/microduck/build-info` 就能确认跑的是哪一版。
+	# 排查"刷错镜像/旧镜像"时非常重要——内核版本号相同但 DTS/配置不同的情况很常见。
+	{
+		printf 'image      : %s\n' "${A733_IMAGE_NAME}"
+		printf 'built_utc  : %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+		printf 'git        : %s\n' "$(git -C "${BSP_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+		printf 'git_subject: %s\n' "$(git -C "${BSP_ROOT}" log -1 --pretty=%s 2>/dev/null || echo unknown)"
+		printf 'kernel     : %s\n' "$(cat "${A733_KERNEL_DIR}/include/config/kernel.release" 2>/dev/null)"
+		printf 'dtb        : %s\n' "${A733_DTS_NAME}.dtb"
+		printf 'debug_uart : %s\n' "${A733_DEBUG_UART:-none}"
+		printf 'console    : %s\n' "${bootargs}"
+	} > "${A733_OUT}/build-info"
+	run_root mkdir -p "${rootdir}/etc/microduck"
+	run_root cp -f "${A733_OUT}/build-info" "${rootdir}/etc/microduck/build-info"
+
 	# fstab：按 rsdk 的做法用文件系统 UUID（config + rootfs）
 	cat > "${A733_OUT}/fstab" <<EOF
 # rsdk 布局：p1 config（FAT）/ p2 rootfs（ext4）
