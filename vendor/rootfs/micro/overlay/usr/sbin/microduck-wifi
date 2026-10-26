@@ -79,17 +79,20 @@ try_sta() {
 }
 
 start_ap() {
-	/usr/sbin/microduck-ap
+	/usr/sbin/microduck-ap start
 	# 记录 AP 状态，供 try_sta 判断是否需要先关热点
 	: > /run/microduck-ap.pid
 }
 
 stop_ap() {
+	# 平台实现优先（A733 的 microduck-ap 支持 start/stop，AP+STA 共存时会用 ap0）
+	[ -x /usr/sbin/microduck-ap ] && /usr/sbin/microduck-ap stop >/dev/null 2>&1
 	pkill -x dnsmasq 2>/dev/null
 	pkill -x hostapd 2>/dev/null
 	pkill -f 'busybox httpd' 2>/dev/null
 	rm -f /run/microduck-ap.pid
 	sleep 1
+	# 清掉可能被 AP 模式改过的接口状态（ap0 由平台脚本删，这里兜底 wlan0）
 	ip addr flush dev wlan0 2>/dev/null
 	iw dev wlan0 set type managed 2>/dev/null
 	ip link set wlan0 up 2>/dev/null

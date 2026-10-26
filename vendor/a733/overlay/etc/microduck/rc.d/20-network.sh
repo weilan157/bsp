@@ -29,9 +29,12 @@ if [ -x /usr/sbin/sshd ]; then
 fi
 
 # 4) WiFi 自动连接（多 profile，见 microduck-net）
-if [ -x /usr/sbin/microduck-net ]; then
-	/usr/sbin/microduck-net auto >/dev/null 2>&1 &
-fi
+# 注：WiFi 由 rootfs 的 /usr/sbin/microduck-wifi 负责（它带 AP 配网回退：
+# 没有配置或 STA 连不上时就起热点 + 网页配网）。这里不要再跑
+# microduck-net auto，两者会抢 wlan0。
+# if [ -x /usr/sbin/microduck-net ]; then
+# 	/usr/sbin/microduck-net auto >/dev/null 2>&1 &
+# fi
 
 # 5) 已经插着的手柄（udev 只处理之后的事件）
 for js in /dev/input/js*; do
@@ -47,3 +50,6 @@ done
 if grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null; then
 	/usr/sbin/microduck-ap start >/dev/null 2>&1 &
 fi
+
+# 8) 校时（板子没有 RTC 电池；无网络时是空操作）
+[ -x /usr/sbin/microduck-timesync ] && /usr/sbin/microduck-timesync >/dev/null 2>&1 &
