@@ -1,0 +1,15 @@
+[Unit]
+Description=microduck: SSH 服务（首次启动自动生成主机密钥）
+After=network.target local-fs.target
+ConditionPathExists=/usr/sbin/microduck-sshd
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# microduck-sshd 内部逻辑：确保 host key → 起 sshd（已跑则跳过）
+ExecStartPre=-/bin/sh -c '[ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A'
+ExecStart=/usr/sbin/microduck-sshd
+ExecStop=-/usr/bin/pkill -x sshd
+
+[Install]
+WantedBy=multi-user.target

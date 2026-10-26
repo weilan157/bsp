@@ -96,14 +96,20 @@ if [ "$INIT" = "systemd" ]; then
 		mkdir -p "/etc/systemd/system/${target}.wants"
 		ln -sf "$link" "/etc/systemd/system/${target}.wants/$unit"
 	}
+	# 注意：不要同时启用 microduck-net（平台版）和 microduck-wifi（带 AP 配网
+	# 回退 + AP/STA 共存）—— 两者都会去管 wlan0，会互相抢。
+	# microduck-ap 也不要开机自启：它要在 STA 关联成功之后才由 wifi 服务拉起。
 	for u in ssh.service avahi-daemon.service bluetooth.service \
-		microduck-net.service microduck-bt.service microduck-ap.service; do
+		microduck-wifi.service microduck-sshd.service microduck-bt.service; do
 		enable_unit "$u" multi-user.target
 	done
 	for u in microduck-grow.service microduck-zram.service; do
 		enable_unit "$u" sysinit.target
 	done
 	enable_unit getty@tty1.service getty.target
+	# 屏蔽平台版 net/ap：WiFi 与 AP 统一由 microduck-wifi.service 负责，
+	# 否则两个服务会同时配置 wlan0。
+	systemctl mask microduck-net.service microduck-ap.service >/dev/null 2>&1 || true
 fi
 # avahi 只广播主机名；不装一堆 service 文件
 sed -i 's/^#*hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf 2>/dev/null || true

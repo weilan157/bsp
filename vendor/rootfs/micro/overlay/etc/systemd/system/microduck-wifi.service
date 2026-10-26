@@ -1,0 +1,18 @@
+[Unit]
+Description=microduck: WiFi 加载驱动 + 自动连接 + AP 配网回退 + AP/STA 共存
+# 等模块/设备就绪；本服务自己会等 wlan0 出现（最多 10s）
+After=local-fs.target systemd-modules-load.service
+Wants=network-pre.target
+Before=ssh.service
+ConditionPathExists=/usr/sbin/microduck-wifi
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/microduck-wifi
+# 它内部是常驻 watchdog 循环（STA 掉线重连），正常不会退出
+Restart=on-failure
+RestartSec=5
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target
