@@ -1,0 +1,70 @@
+#!/bin/sh
+# microduck-diag —— 一键收集现场信息（摄像头 / 音频 / WiFi / 蓝牙 / 系统）
+# 用法：microduck-diag [输出文件]   （默认 /tmp/diag.txt）
+# 之后把 /tmp/diag.txt 发出来即可定位问题。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+OUT="${1:-/tmp/diag.txt}"
+: > "$OUT"
+say() { printf '\n===== %s =====\n' "$*" >> "$OUT"; }
+run() { printf '\n$ %s\n' "$*" >> "$OUT"; eval "$@" >> "$OUT" 2>&1 || echo '(命令失败)' >> "$OUT"; }
+
+say "系统"
+run 'cat /etc/microduck/build-info 2>/dev/null'
+run 'uname -a'
+run 'cat /proc/cmdline'
+run 'uptime'
+run 'systemctl is-system-running 2>/dev/null; systemctl --failed --no-pager 2>/dev/null | head -20'
+
+say "microduck 服务"
+for u in microduck-wifi microduck-bt microduck-sshd microduck-grow microduck-zram; do
+	run "systemctl status $u --no-pager -n 0 2>/dev/null | head -8"
+done
+run 'journalctl -b -u microduck-wifi --no-pager 2>/dev/null | tail -30'
+
+say "启动日志里的关键错误"
+run "dmesg | grep -iE 'vin|imx219|mipi|csi|isp|scaler' | tail -40"
+run "dmesg | grep -iE 'tlv320|sound|i2s' | tail -30"
+run "dmesg | grep -iE 'aic|bluetooth|hci' | tail -25"
+run "dmesg | grep -iE 'twi|i2c' | tail -25"
+
+say "I2C（摄像头 TWI3 / HAT TWI7）"
+run 'ls /sys/bus/i2c/devices/ 2>/dev/null'
+for b in 3 7; do
+	run "i2cdetect -y $b 2>&1 | head -12"
+done
+
+say "摄像头"
+run 'ls -l /dev/video* /dev/media* /dev/v4l-subdev* 2>/dev/null'
+run 'cat /sys/class/video4linux/video0/name 2>/dev/null'
+run 'v4l2-ctl --list-devices 2>&1 | head -12'
+run 'media-ctl -p -d /dev/media0 2>&1 | head -40'
+run 'lsmod | grep -iE "vin|imx219" 2>/dev/null'
+
+say "音频"
+run 'cat /proc/asound/cards 2>/dev/null'
+run 'arecord -l 2>&1 | head -10'
+run 'aplay -l 2>&1 | head -10'
+run 'lsmod | grep -iE "snd|tlv320" 2>/dev/null'
+run 'amixer -c 0 scontrols 2>&1 | head -10'
+
+say "WiFi"
+run 'lsmod | grep -iE "aic|cfg80211"'
+run 'iw dev 2>&1'
+run 'ip -4 addr show 2>&1'
+run 'cat /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null | tail -20'
+run 'cat /etc/microduck/ap.conf 2>/dev/null'
+run '/usr/sbin/microduck-ap status 2>&1'
+
+say "蓝牙"
+run 'hciconfig -a 2>&1 | head -20'
+run 'bluetoothctl devices 2>&1 | head -10'
+run 'ls -l /dev/input/js* 2>/dev/null'
+run 'cat /etc/bluetooth/input.conf 2>/dev/null | grep -E "UserspaceHID|ClassicBondedOnly"'
+
+say "磁盘 / 分区"
+run 'df -h / 2>&1'
+run 'lsblk 2>&1 || cat /proc/partitions'
+
+printf '\n已写入 %s（%s 行）\n' "$OUT" "$(wc -l < "$OUT")"
