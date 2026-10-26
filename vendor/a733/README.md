@@ -221,3 +221,9 @@ brandy/dramlib，难度高。详见 [`docs/uboot-vs-official.md`](../../docs/ubo
 400 MB → 271 MB：pack 尺寸公式 + `resize2fs -M` + `-m 0`（−110 MB）、
 `ROOTFS_TINY=y` 去 apt/hwdb/perl（−40 MB）、`MICRODUCK_MIN_MODULES=y` 裁其它平台模块
 （−11 MB）。详见 [`docs/image-size.md`](../../docs/image-size.md)。
+## NPU
+
+DT 有 `npu@3600000`（`allwinner,npu`），但 BSP 的两个驱动默认都是 n，官方 A733
+min defconfig 也是关的。开法：`A733_WITH_NPU=y`（VIP9000/vip2，另外需要
+`CONFIG_DEBUG_FS=y` + `CONFIG_NPU_SET_CLK_VOL=y` 才编得过）。用户态 runtime
+（libvip/Acuity）不在 Debian 里。详见 [`docs/npu.md`](../../docs/npu.md)。

@@ -28,6 +28,8 @@ A733_BRANDY_DEFCONFIG="${A733_BRANDY_DEFCONFIG:-sun60iw2p1_a733_defconfig}"
 A733_IMAGE_NAME="${A733_IMAGE_NAME:-a733-micro.img}"
 # 调试串口：none | uart2（PB0/PB1 = 40-pin 7/11）| uart4（PJ24/PJ25 = 40-pin 16/18）
 A733_DEBUG_UART="${A733_DEBUG_UART:-none}"
+# NPU：A733 的 VIP9000（aw_nna_vip/vip2）。默认不开（驱动默认 n、官方 min defconfig 也没开）
+A733_WITH_NPU="${A733_WITH_NPU:-n}"
 
 
 A733_DIR="${SOURCES_DIR}/a733"
@@ -338,6 +340,21 @@ EOF
 	# 3) 配置：defconfig + 精简 fragment
 	install -m 644 "${BSP_ROOT}/vendor/a733/microduck.config" \
 		"${k}/arch/arm64/configs/microduck.config"
+	# A733 的 NPU 是 VIP9000（驱动里 sun60iw2 对应 vip2）；两个驱动都 match
+	# "allwinner,npu"，galcore 是另一套（源码 28MB），二选一，别同时开。
+	if [[ "${A733_WITH_NPU}" == "y" ]]; then
+		cat >> "${k}/arch/arm64/configs/microduck.config" <<EOF
+
+# ---- NPU（VIP9000 / vip2）----
+CONFIG_AW_NNA_VIP=y
+CONFIG_NNA_VIP2=y
+# CONFIG_NNA_VIP1 is not set
+# CONFIG_AW_NNA_GALCORE is not set
+# VIP2 的 debugfs 代码依赖 DEBUG_FS；NPU_SET_CLK_VOL 打开时钟/电压节点
+CONFIG_DEBUG_FS=y
+CONFIG_NPU_SET_CLK_VOL=y
+EOF
+	fi
 	# BSP 的 Kconfig 用 $(BSP_TOP)platform/Kconfig（结尾斜杠），
 	# nand/codec 的 Makefile 还依赖 LICHEE_KERN_DIR 和 PWD（codec 用 $(PWD) 拼绝对路径）。
 	export BSP_TOP="${k}/bsp/"
@@ -493,6 +510,9 @@ cmd_a733_hal() {
 	check "关机检测 PB2（gpio-keys）" 'hat-power-detect'
 	if [[ "${A733_WITH_CAMERA:-n}" == "y" ]]; then
 		check "摄像头 IMX219（VIN sensor0）" 'imx219'
+	fi
+	if [[ "${A733_WITH_NPU:-n}" == "y" ]]; then
+		check "NPU 节点 npu@3600000" 'npu@3600000'
 	fi
 
 	rm -f "${txt}"

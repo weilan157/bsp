@@ -265,6 +265,12 @@ docker run --rm --network host \
 
 配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
 断开急停）属于产品镜像层，方案和优先级都在那份文档里。
+### NPU
+
+A733 有 NPU（`npu@3600000`），但 BSP 的 `AW_NNA_VIP`/`AW_NNA_GALCORE` 默认都是 n，
+我们的镜像默认**不含** NPU 驱动。开法（`A733_WITH_NPU=y`，需要 `DEBUG_FS` 和
+`NPU_SET_CLK_VOL` 才能编过）和还缺的用户态 runtime 见 [docs/npu.md](docs/npu.md)。
+
 ### 镜像体积
 
 实测从 **400 MB 缩到 271 MB**（rootfs 261→215 MB，ext4 368→239 MB，模块 929→740 个），
