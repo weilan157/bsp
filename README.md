@@ -265,6 +265,13 @@ docker run --rm --network host \
 
 配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
 断开急停）属于产品镜像层，方案和优先级都在那份文档里。
+### 与 microduck 软件栈的适配
+
+当前的 sysvinit 极简镜像**不能直接**跑 [weilan157/microduck](https://github.com/weilan157/microduck)
+的软件栈（它假设 Armbian+systemd、`/dev/ttyS2` 舵机总线、RKNN NPU、GStreamer/MPP）。
+兼容矩阵、三条适配路线和 BSP 待办见 [docs/software-adapter.md](docs/software-adapter.md)。
+已加 `/dev/microduck-servo` udev 别名（指向 ttyS0）方便软件改配置。
+
 ### NPU（VeriSilicon VIPLite）
 
 参考 [jackhe183/radxa-dev](https://github.com/jackhe183/radxa-dev)：A733 的 NPU 是

@@ -1,0 +1,3 @@
+# 舵机总线稳定别名：A733 的 UART0（40-pin 8/10）= ttyS0
+# 软件（robotd 等）默认写 /dev/ttyS2（RK3566 的叫法），把 port 指向这个别名即可。
+SUBSYSTEM=="tty", KERNEL=="ttyS0", SYMLINK+="microduck-servo", MODE="0660", GROUP="root"
