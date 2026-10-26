@@ -86,6 +86,53 @@ boot0 / BL31 / u-boot / kernel 默认都从 **UART0 @115200** 输出。舵机总
 
 ## 待确认
 
-- PB1 是否支持 UART2-RX（决定 A 方案是否可行）；
+- PB1 支持 UART2-RX（已由 pinmux 表确认）；但 pin 7 是 HAT 的 Stemma SDA，改用 UART4；
 - HAT 是否占用 7/11；
 - boot0 的 sys_config 里调试串口字段名/取值（Tina `[uart_para]`）。
+
+## 方案 A 的可行性（按 A733 40-pin pinmux 表 + HAT 映射）
+
+A733 的 40-pin 复用表里，可用于调试的 UART 有两组：
+
+| 脚 | SoC | 复用（Function2） | HAT 侧 |
+|---|---|---|---|
+| 7 | PB0 | **UART2-TX** | **GPIO4 = Stemma/QT SDA（HAT 会用）** |
+| 11 | PB1 | **UART2-RX** | GPIO17（HAT 未分配） |
+| 16 | PJ24 | **UART4-TX** | GPIO23（HAT 未分配） |
+| 18 | PJ25 | **UART4-RX** | GPIO24（HAT 未分配） |
+
+结论：
+
+- **UART2（7/11）在 pinmux 上可行**（PB0/PB1 的 F2 就是 UART2），但 7 脚在 HAT 上是
+  Stemma/QT 的 SDA（GPIO4），接了 Stemma 外设就会打架——**不推荐**。
+- **UART4（16/18，PJ24/PJ25）更干净**：HAT 的 GPIO23/24 没有功能分配，
+  舵机/I2C/I2S/关机检测都不占这两脚。**推荐这个**。
+
+## 已实现：`A733_DEBUG_UART`
+
+```bash
+./bsp config A733_DEBUG_UART=uart4     # 或 uart2 / none
+./bsp kernel && ./bsp uboot && ./bsp pack
+```
+
+它会：
+
+1. 设备树里生成 `microduck-debug-uart.dtsi`：`&uart4 { status = "okay"; pinctrl-0 = <&uart_debug_pins>; }`，
+   引脚组 `PJ24/PJ25`、function `uart4`（uart2 则是 PB0/PB1）；
+2. `boot0` 的 `sys_config.fex [uart_para]` 改成
+   `uart_debug_port = 4`、`uart_debug_tx = port:PJ24<2>…`、`uart_debug_rx = port:PJ25<2>…`；
+3. u-boot `.config` 设 `CONFIG_CONS_INDEX=5`（uart2 是 3）；
+4. 打包时 kernel cmdline 用 `console=ttyS4,115200`（uart2 是 `ttyS2`，可用 `A733_CONSOLE` 覆盖）。
+
+已验证（本机）：
+
+- 带调试 dtsi 的 dtb 编译通过（157652 字节），`uart@2504000` 是 `status = "okay"`、
+  `pinctrl-0` 指向 `PJ24/PJ25`，aliases 里有 `serial4`（对应内核 `ttyS4`）；
+- `sys_config.fex` 改完是 `uart_debug_port = 4` + PJ24/PJ25 的 port 行。
+
+还需要上板确认的：
+
+- u-boot 在 `CONFIG_CONS_INDEX=5` 下是否真的把 console 输出到 UART4（u-boot 的
+  引脚复用可能还要在它的 DT 里补 uart4 节点）；
+- HAT 完整原理图确认 GPIO23/24 没有接到别的电路；
+- 3.3V 电平的 USB-TTL（TX/RX 交叉、共地）。

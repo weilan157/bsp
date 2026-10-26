@@ -26,6 +26,8 @@ A733_DTS_NAME="${A733_DTS_NAME:-sun60i-a733-cubie-a7z}"
 A733_CROSS_COMPILE="${A733_CROSS_COMPILE:-aarch64-linux-gnu-}"
 A733_BRANDY_DEFCONFIG="${A733_BRANDY_DEFCONFIG:-sun60iw2p1_a733_defconfig}"
 A733_IMAGE_NAME="${A733_IMAGE_NAME:-a733-micro.img}"
+# 调试串口：none | uart2（PB0/PB1 = 40-pin 7/11）| uart4（PJ24/PJ25 = 40-pin 16/18）
+A733_DEBUG_UART="${A733_DEBUG_UART:-none}"
 
 
 A733_DIR="${SOURCES_DIR}/a733"
@@ -130,6 +132,12 @@ cmd_a733_uboot() {
 		# defconfig 的默认 DT 是参考板 soc-system，这里换成 A7Z 板级 dts，
 		# 否则 dts/dt.dtb 会把 soc-system.dtb 一起 grep 进来（不存在就失败）
 		sed -i "s|^CONFIG_DEFAULT_DEVICE_TREE=.*|CONFIG_DEFAULT_DEVICE_TREE=\"${dt}\"|" .config
+		# 调试串口换到 UART2/4 时，u-boot 的 console 索引也跟着换
+		# （sunxi 的 CONFIG_CONS_INDEX 是 1-based：uart0=1, uart2=3, uart4=5）
+		case "${A733_DEBUG_UART}" in
+		uart2) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=3/' .config ;;
+		uart4) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=5/' .config ;;
+		esac
 		make ARCH=arm CROSS_COMPILE="${cc}" olddefconfig >/dev/null
 
 		info "编译 u-boot（ARCH=arm CROSS_COMPILE=${cc}）..."
@@ -189,6 +197,19 @@ a733_pack_bootloader() {
 
 	# sys_config.fex -> sys_config.bin（fex 需要 CRLF，官方用 unix2dos）
 	cp -f "${d}/configs/cubie_a7z/sys_config.fex" sys_config.fex
+	# 调试串口搬到 UART2/4（boot0 从 [uart_para] 读），UART0 留给舵机
+	case "${A733_DEBUG_UART}" in
+	uart4)
+		sed -i 's/^uart_debug_port.*/uart_debug_port = 4/' sys_config.fex
+		sed -i 's/^uart_debug_tx.*/uart_debug_tx   = port:PJ24<2><1><default><default>/' sys_config.fex
+		sed -i 's/^uart_debug_rx.*/uart_debug_rx   = port:PJ25<2><1><default><default>/' sys_config.fex
+		;;
+	uart2)
+		sed -i 's/^uart_debug_port.*/uart_debug_port = 2/' sys_config.fex
+		sed -i 's/^uart_debug_tx.*/uart_debug_tx   = port:PB00<2><1><default><default>/' sys_config.fex
+		sed -i 's/^uart_debug_rx.*/uart_debug_rx   = port:PB01<2><1><default><default>/' sys_config.fex
+		;;
+	esac
 	sed -i 's/\r$//; s/$/\r/' sys_config.fex
 	"${t}/mod_update/script" sys_config.fex >/dev/null || die "sys_config.fex 转换失败"
 	[[ -f sys_config.bin ]] || die "没有得到 sys_config.bin"
@@ -271,7 +292,38 @@ cmd_a733_kernel() {
 			cp -f "${BSP_ROOT}/vendor/a733/dts/microduck-a7z-camera.dtsi" "${dstdir}/"
 			echo '#include "microduck-a7z-camera.dtsi"'
 		fi
+		if [[ "${A733_DEBUG_UART}" == "uart2" || "${A733_DEBUG_UART}" == "uart4" ]]; then
+			echo '#include "microduck-debug-uart.dtsi"'
+		fi
 	} > "${dstdir}/${A733_DTS_NAME}.dts"
+
+	# 调试串口：UART0（8/10）留给舵机，按 A733 的 pinmux 表把 UART2/4 引到空闲脚。
+	#   uart2 -> PB0/PB1 = 40-pin 7/11（注意 7 脚 HAT 做 Stemma SDA 时不要用）
+	#   uart4 -> PJ24/PJ25 = 40-pin 16/18（HAT 的 GPIO23/24 没分配功能，推荐）
+	if [[ "${A733_DEBUG_UART}" == "uart2" ]]; then
+		debug_pins='"PB0", "PB1"'
+	elif [[ "${A733_DEBUG_UART}" == "uart4" ]]; then
+		debug_pins='"PJ24", "PJ25"'
+	else
+		debug_pins=""
+	fi
+	if [[ -n "${debug_pins}" ]]; then
+		cat > "${dstdir}/microduck-debug-uart.dtsi" <<EOF
+/* 由 ./bsp kernel 生成：${A733_DEBUG_UART} 调试串口（UART0 留给舵机） */
+&pio {
+	uart_debug_pins: uart-debug-pins {
+		pins = ${debug_pins};
+		function = "${A733_DEBUG_UART}";
+	};
+};
+
+&${A733_DEBUG_UART} {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart_debug_pins>;
+};
+EOF
+	fi
 	grep -q "${A733_DTS_NAME}.dtb" "${dstdir}/Makefile" || \
 		echo "dtb-\$(CONFIG_ARCH_SUNXI) += ${A733_DTS_NAME}.dtb" >> "${dstdir}/Makefile"
 
@@ -453,7 +505,17 @@ cmd_a733_pack() {
 	rootfs_uuid="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 	cfg_id="$(printf '%s' "${rootfs_uuid}" | cut -c1-8 | tr 'a-f' 'A-F')"
 	cfg_uuid="${cfg_id:0:4}-${cfg_id:4:4}"
-	bootargs="console=tty1 root=UUID=${rootfs_uuid} rw cma=8M loglevel=3"
+	local console
+	if [[ -n "${A733_CONSOLE:-}" ]]; then
+		console="${A733_CONSOLE}"
+	else
+		case "${A733_DEBUG_UART}" in
+		uart4) console="ttyS4,115200" ;;
+		uart2) console="ttyS2,115200" ;;
+		*) console="tty1" ;;
+		esac
+	fi
+	bootargs="console=${console} root=UUID=${rootfs_uuid} rw cma=8M loglevel=3"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
