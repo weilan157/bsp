@@ -1,0 +1,32 @@
+#!/bin/sh
+# CGI：保存 WiFi 并切换（busybox httpd 调用）
+printf 'Content-Type: text/html; charset=utf-8\n\n'
+
+BODY=$(cat)
+urldecode() {
+	printf '%s' "$1" | sed 's/+/ /g; s/%\([0-9A-Fa-f][0-9A-Fa-f]\)/\\x\1/g' | xargs -0 printf '%b'
+}
+ssid=$(urldecode "$(printf '%s' "$BODY" | sed -n 's/.*ssid=\([^&]*\).*/\1/p')")
+psk=$(urldecode "$(printf '%s' "$BODY" | sed -n 's/.*psk=\([^&]*\).*/\1/p')")
+
+echo '<!doctype html><html><head><meta charset="utf-8"><title>正在连接</title>'
+echo '<meta http-equiv="refresh" content="8"></head><body>'
+
+if [ -z "$ssid" ]; then
+	echo '<p style="color:#c00">没填 SSID，返回重试。</p>'
+	echo '<p><a href="/">返回</a></p></body></html>'
+	exit 0
+fi
+
+echo "<p>正在连接 <b>$ssid</b> …</p>"
+if /usr/sbin/microduck-net add "$ssid" "$psk" 2>/dev/null; then
+	/usr/sbin/microduck-net switch "$ssid" >/dev/null 2>&1
+	echo '<p>已保存，设备正在切换网络（约 5–15 秒）。</p>'
+else
+	/usr/sbin/microduck-net switch "$ssid" >/dev/null 2>&1
+	echo '<p>已更新，设备正在切换网络（约 5–15 秒）。</p>'
+fi
+
+echo '<p>连上后可以关掉热点，改用：</p>'
+echo '<pre>ssh root@duck-xxxx.local</pre>'
+echo '<p><a href="/">再配一个网络</a></p></body></html>'

@@ -23,7 +23,8 @@ echo ">>> 安装最小运行时"
 ${APT} busybox-static kmod e2fsprogs util-linux \
 	wpasupplicant iw rfkill bluez \
 	iproute2 procps \
-	openssh-server dbus avahi-daemon libnss-mdns
+	openssh-server dbus avahi-daemon libnss-mdns \
+	hostapd dnsmasq
 
 echo ">>> 用 sysvinit 取代 systemd"
 ${APT} sysvinit-core

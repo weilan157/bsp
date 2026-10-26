@@ -3,8 +3,11 @@
 #   microduck-pad add js0     手柄出现
 #   microduck-pad remove js0  手柄移除
 #
-# 产品层（robotd）通过 /run/microduck/pad.json 感知手柄状态；
-# 如果 robotd 没在跑，这里会尝试用 init 脚本/可执行文件把它拉起来。
+# 说明：产品镜像里真正读手柄的是 padd（直接读 /dev/input/event*），
+# robotd 通过 padd 的 IPC 拿输入；本脚本只负责：
+#   1) 把 padd / robotd 拉起来（如果还没跑）；
+#   2) 写一份诊断状态 /run/microduck/pad.json，给 Studio / SSH 排查用。
+# padd 或 robotd 不需要读这个文件。
 set -u
 
 ACTION=${1:-add}
@@ -16,29 +19,42 @@ mkdir -p "$RUN"
 
 kmsg() { printf 'microduck-pad: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
 
-robotd_running() { pgrep -x robotd >/dev/null 2>&1 || pgrep -f '/usr/sbin/robotd' >/dev/null 2>&1; }
+is_running() { pgrep -f "$1" >/dev/null 2>&1; }
 
-start_robotd() {
-	robotd_running && return 0
-	if [ -x /etc/init.d/robotd ]; then
-		/etc/init.d/robotd start >/dev/null 2>&1 && kmsg "robotd 已启动" && return 0
-	elif [ -x /usr/sbin/robotd ]; then
+find_padd() {
+	for p in /opt/robot/*/padd /usr/local/bin/padd /usr/sbin/padd /opt/padd; do
+		[ -x "$p" ] && { echo "$p"; return 0; }
+	done
+	return 1
+}
+
+start_product() {
+	# robotd：有 init 脚本优先，其次直接拉起
+	if [ -x /etc/init.d/robotd ] && ! is_running robotd; then
+		/etc/init.d/robotd start >/dev/null 2>&1 && kmsg "robotd 已启动"
+	elif [ -x /usr/sbin/robotd ] && ! is_running robotd; then
 		/usr/sbin/robotd >/dev/null 2>&1 &
 		kmsg "robotd 已拉起"
-		return 0
 	fi
-	return 1
+	# padd：手柄输入的实际读取者
+	if padd=$(find_padd); then
+		if ! is_running "$padd"; then
+			"$padd" >/dev/null 2>&1 &
+			kmsg "padd 已拉起: $padd"
+		fi
+	fi
 }
 
 case "$ACTION" in
 add)
-	start_robotd || true
-	printf '{"state":"connected","dev":"%s","ts":%s}\n' "$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
+	start_product
+	printf '{"state":"connected","dev":"%s","js":"%s","ts":%s,"source":"udev"}\n' \
+		"$DEV" "$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
 	kmsg "手柄连接: $DEV"
 	;;
 remove)
-	# 留 5 秒给 robotd 处理（断开急停由 robotd 自己计时）
-	printf '{"state":"disconnected","dev":"%s","ts":%s}\n' "$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
+	printf '{"state":"disconnected","dev":"%s","ts":%s,"source":"udev"}\n' \
+		"$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
 	kmsg "手柄断开: $DEV"
 	;;
 *)

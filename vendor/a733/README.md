@@ -198,7 +198,7 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 - `overlay/usr/sbin/microduck-ip`：打印所有接口地址和 SSID；
 - `overlay/usr/sbin/microduck-pad` + `etc/udev/rules.d/90-microduck-pad.rules`：
   joystick 热插拔 → `/run/microduck/pad.json` + 拉起 robotd；
-- `etc/microduck/rc.d/20-network.sh`：rcS 末尾启动 udevd → dbus/avahi → sshd → WiFi；
+- `etc/microduck/rc.d/20-network.sh`：rcS 末尾启动 udevd → dbus/avahi → sshd → WiFi → 蓝牙 →（可选）AP；`microduck-bt`（bluetoothd 常驻 + Xbox 自动配对/回连）、`microduck-ap`（AP+STA 共存 + busybox httpd 配网页）；
 - micro rootfs 里装了 `openssh-server`（root 密码登录，`sshd_config.d/10-microduck.conf`）、
   `dbus`、`avahi-daemon`、`libnss-mdns`（`<host>.local` 可解析）。
 

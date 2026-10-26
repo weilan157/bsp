@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Microduck 配网</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:420px;margin:8vh auto;padding:0 16px;color:#222}
+h1{font-size:1.3rem}input,button{font-size:1rem;padding:.6rem;width:100%;box-sizing:border-box;margin:.3rem 0}
+button{background:#0a7;color:#fff;border:0;border-radius:6px}small{color:#666}
+</style>
+</head>
+<body>
+<h1>Microduck 配网</h1>
+<p>选一个 WiFi，输入密码后设备会自动连接；页面会显示结果。</p>
+<form method="post" action="/cgi-bin/join">
+  <label>WiFi 名称（SSID）<input name="ssid" required autocomplete="off"></label>
+  <label>密码<input name="psk" type="password" autocomplete="off"></label>
+  <button type="submit">连接</button>
+</form>
+<p><small>已保存的网络会按优先级自动连接；换网时回到本页即可。
+调试：<code>ssh root@duck-xxxx.local</code> 或 <code>microduck ip</code>。</small></p>
+</body>
+</html>

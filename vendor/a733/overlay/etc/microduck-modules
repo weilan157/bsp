@@ -1,9 +1,6 @@
-# Cubie A7Z（A733）开机要加载的模块，microduck-wifi 里逐个 modprobe。
-#
-# 板载 WiFi/BT 芯片对应的驱动在 allwinner-bsp/drivers/net/wireless/ 下
-# （bcmdhd / aic8800 / rtl8xxx / xr829 / uwe5622 之一），
-# 具体模块名由 Radxa 的 kernel deb 决定，拿到板子后用
-#   ls /lib/modules/$(uname -r)/kernel/drivers/net/wireless/
-# 确认后取消注释，例如：
-# aic8800_fdrv
-# bcmdhd
+# Cubie A7Z 板载 WiFi6/BT5 模组是 AIC8800：
+#   WiFi → aic8800_fdrv
+#   BT   → aic8800_btusb（USB 版）；如果是 UART 版，换成 hci_uart + btattach
+# 换其他模组时改这里即可（microduck-net auto / microduck-bt 都会先加载本文件）。
+aic8800_fdrv
+aic8800_btusb

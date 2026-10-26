@@ -112,3 +112,64 @@ AP 兜底（hostapd+dnsmasq+portal）属于产品层，BSP 里只留了文档和
 4. **P1**：手柄 udev VID 列表 + 连接/断开反馈 + 断开急停
 5. **P2**：蓝牙手柄自动回连；USB-C RNDIS/ACM 兜底
 6. **P2**：长按按键进配网、状态 LED
+
+## 6. 三个具体问题的结论（2026-10-26 补）
+
+### 6.1 bluetoothd 常驻 + 自动配对 Xbox 手柄
+
+已实现 `vendor/a733/overlay/usr/sbin/microduck-bt`（rcS 后台启动）：
+
+1. 改 `/etc/bluetooth/input.conf`：`UserspaceHID=true`、`ClassicBondedOnly=false`
+   —— 复刻仓库《踩坑记录》里新卡 `pair` 返回 No Bonding、HID 被拒的两项；
+2. 等 `hci0`（AIC8800 的 `aic8800_btusb` 异步 probe）→ 拉起 `bluetoothd -n` 常驻；
+3. `btmgmt power/bondable/connectable on`；
+4. **单个 bluetoothctl 会话**（FIFO 喂命令）：`agent NoInputNoOutput` → `default-agent`
+   → `scan on`，轮询 `bluetoothctl devices`，出现 Xbox/GameSir/8BitDo/DualSense/
+   Switch Pro 等名字就 `pair` → `trust` → `connect`；每 60 秒对已配对的信任设备
+   `connect` 一次做回连。
+
+这正好对应他们 10-15 晚验证过的流程（分三条命令会 Permission denied）。
+
+### 6.2 pad.json 的真实角色
+
+查了产品仓库：真正读手柄的是 **padd**（`/opt/robot/*/padd`，直接读
+`/dev/input/event*`），robotd 通过 padd 的 IPC 拿输入；**没有 pad.json 这个接口**。
+所以 BSP 这边的 `microduck-pad` 只做两件事：
+
+- 拉起 `padd`/`robotd`（如果还没跑）——插手柄即开始；
+- 写 `/run/microduck/pad.json` 作为**诊断状态**（`{"state","dev","js","ts","source"}`），
+  给 Studio/SSH 看，padd/robotd 不读它。
+
+“连上进入可操控 / 断开急停”仍是 robotd/padd 的职责，BSP 只保证输入设备出现、
+padd 被拉起、状态可观测。
+
+### 6.3 AP 和 STA 能不能共存
+
+**能**。AIC8800 的 rwnx 驱动（`allwinner-bsp/aic8800_fdrv/rwnx_main.c`）：
+
+```c
+wiphy->interface_modes = BIT(STATION) | BIT(AP) | BIT(AP_VLAN) | BIT(P2P_*) | BIT(MONITOR);
+rwnx_limits[] = { {1, STATION}, {1, AP}, {1, P2P_CLIENT|P2P_GO}, {1, P2P_DEVICE} };
+.max_interfaces = NX_VIRT_DEV_MAX;
+#ifdef CONFIG_MCC
+.num_different_channels = NX_CHAN_CTXT_CNT;   // Makefile 里 CONFIG_MCC = y
+#endif
+```
+
+即 **1 个 STA + 1 个 AP** 可以同时存在；MCC 开着还能不同信道（同信道吞吐/延迟更好）。
+
+已实现 `microduck-ap`（+ `ap.conf`、`busybox httpd` 配网页面）：
+
+```sh
+iw dev wlan0 interface add ap0 type __ap     # 在 STA 接口旁边加 AP vif
+ip addr replace 10.42.0.1/24 dev ap0
+hostapd -B /run/microduck/hostapd.conf       # duck-XXXX / 随机 PSK
+dnsmasq -C /run/microduck/dnsmasq.conf       # DHCP + /#/ → 10.42.0.1（captive）
+busybox httpd -p 80 -h /usr/share/microduck/www   # 配网页面 + CGI
+```
+
+`ap.conf` 里 `ENABLED=1` 就开机常驻热点（STA 照常连家里 WiFi），手机连上直接弹页面；
+换网、排查都不用先断网。`microduck-net combo` 会打印 `iw list` 的接口组合，上板确认。
+
+**风险**：AIC8800 的 hostapd 兼容性（vendor 可能要求改过的 hostapd）、同信道限制、
+AP+STA 同时跑时的吞吐——这些只能上板验证。

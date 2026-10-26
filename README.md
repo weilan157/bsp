@@ -259,7 +259,7 @@ docker run --rm --network host \
 - `microduck-net`：多 WiFi profile，`scan / add <SSID> <PSK> / list / switch <SSID> /
   forget / status / auto`，换网不用重刷镜像；
 - `microduck-ip`：一条命令列出 wlan0/usb0/eth0 的地址和当前 SSID（SSH 排查用）；
-- `sshd` + `avahi` 默认开：`ssh root@<hostname>.local`，主机名默认 `microduck`；
+- `sshd` + `avahi` 默认开：`ssh root@<hostname>.local`，主机名默认 `microduck`；`microduck-bt` 常驻 bluetoothd 并自动配对/回连 Xbox 手柄；`microduck-ap` 可开 AP+STA（`ap.conf` ENABLED=1）做 captive portal；
 - `microduck-pad` + `90-microduck-pad.rules`：手柄（USB/蓝牙都算）插拔时写
   `/run/microduck/pad.json` 并尝试拉起 `robotd`，产品层据此进入可操控/急停。
 

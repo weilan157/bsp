@@ -39,3 +39,11 @@ for js in /dev/input/js*; do
 	/usr/sbin/microduck-pad add "$(basename "$js")" 2>/dev/null
 	break
 done
+
+# 6) 蓝牙：bluetoothd 常驻 + 自动配对/回连 Xbox 手柄
+[ -x /usr/sbin/microduck-bt ] && /usr/sbin/microduck-bt >/dev/null 2>&1 &
+
+# 7) AP + STA 共存（/etc/microduck/ap.conf 里 ENABLED=1 时）
+if grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null; then
+	/usr/sbin/microduck-ap start >/dev/null 2>&1 &
+fi

@@ -201,6 +201,15 @@ cmd_forget() {
 	msg "已删除：$ssid"
 }
 
+cmd_combo() {
+	# 看驱动允许的接口组合（AP+STA 共存能力），以及当前是否已有 ap0
+	printf '=== iw list 接口组合 ===\n'
+	iw list 2>/dev/null | sed -n '/valid interface combinations/,/^[[:space:]]*$/p' | head -20
+	printf '\n=== 当前接口 ===\n'
+	iw dev 2>/dev/null | awk '/Interface|type/ {print "  " $0}'
+	printf '\nAP+STA：驱动声明 STATION+AP 组合、且 CONFIG_MCC=y 时可行；\n'
+	printf '同信道最稳，跨信道会有分时开销。用 microduck-ap start 开热点。\n'
+}
 cmd_status() {
 	printf '接口: %s %s\n' "$IFACE" "$([ -e "/sys/class/net/$IFACE" ] && echo 存在 || echo 不存在)"
 	printf 'SSID: %s\n' "$(iwgetid -r "$IFACE" 2>/dev/null || echo -)"
@@ -219,7 +228,8 @@ case "${1:-status}" in
 	add) shift; cmd_add "$@" ;;
 	list) cmd_list ;;
 	switch) shift; cmd_switch "$@" ;;
+	combo) cmd_combo ;;
 	forget) shift; cmd_forget "$@" ;;
 	status) cmd_status ;;
-	*) msg "用法: microduck-net {auto|scan|add|list|switch|forget|status}"; exit 1 ;;
+	*) msg "用法: microduck-net {auto|scan|add|list|switch|forget|status|combo}"; exit 1 ;;
 esac

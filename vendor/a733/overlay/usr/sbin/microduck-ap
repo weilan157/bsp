@@ -1,0 +1,127 @@
+#!/bin/sh
+# microduck-ap —— AP + STA 共存（AIC8800 的 rwnx 驱动声明了 STA/AP/P2P 组合，
+# CONFIG_MCC=y 时允许不同信道）。STA 连家里 WiFi 的同时开 duck-XXXX 热点，
+# 手机连上就能打开配网页面（http://10.42.0.1），不用断开家里的网络。
+#
+#   microduck-ap start|stop|status
+set -u
+
+CONF=/etc/microduck/ap.conf
+STA_IF=${MICRODUCK_WIFI_IFACE:-wlan0}
+RUN=/run/microduck
+WWW=/usr/share/microduck/www
+
+ENABLED=0
+SSID=auto
+CHANNEL=6
+ADDR=10.42.0.1
+PSK_FILE=/etc/microduck/ap.psk
+PORTAL=1
+[ -f "$CONF" ] && . "$CONF"
+AP_IF=${AP_IFACE:-ap0}
+
+kmsg() { printf 'microduck-ap: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
+die() { kmsg "$*"; printf '%s\n' "$*" >&2; exit 1; }
+
+gen_psk() {
+	[ -s "$PSK_FILE" ] && return 0
+	mkdir -p "$(dirname "$PSK_FILE")"
+	tr -dc 'A-HJ-NP-Z2-9' < /dev/urandom | head -c 8 > "$PSK_FILE"
+	chmod 600 "$PSK_FILE"
+}
+ssid_name() {
+	if [ "$SSID" = auto ]; then
+		suffix=$(cut -c1-4 /etc/machine-id 2>/dev/null || hostname | md5sum | cut -c1-4)
+		echo "duck-$(printf '%s' "$suffix" | tr 'A-F' 'a-f')"
+	else
+		echo "$SSID"
+	fi
+}
+
+ap_up() {
+	[ -e "/sys/class/net/$AP_IF" ] && return 0
+	if [ -e "/sys/class/net/$STA_IF" ]; then
+		iw dev "$STA_IF" interface add "$AP_IF" type __ap 2>/dev/null && return 0
+	fi
+	phy=$(iw dev 2>/dev/null | awk '/phy#/{gsub("#","",$0); p=$0} /Interface/{print p; exit}')
+	[ -n "${phy:-}" ] || phy=phy0
+	iw phy "$phy" interface add "$AP_IF" type __ap 2>/dev/null
+}
+
+cmd_start() {
+	[ "$ENABLED" = 1 ] || { kmsg "ap.conf ENABLED=0，跳过"; return 0; }
+	command -v hostapd >/dev/null 2>&1 || die "缺少 hostapd（apt install hostapd）"
+	command -v dnsmasq >/dev/null 2>&1 || die "缺少 dnsmasq（apt install dnsmasq）"
+	gen_psk
+	ssid=$(ssid_name)
+
+	ap_up || die "创建 $AP_IF 失败（驱动不支持 AP vif？）"
+	ip addr replace "$ADDR/24" dev "$AP_IF" 2>/dev/null
+	ip link set "$AP_IF" up 2>/dev/null
+
+	mkdir -p "$RUN"
+	cat > "$RUN/hostapd.conf" <<EOF
+interface=$AP_IF
+driver=nl80211
+ssid=$ssid
+hw_mode=g
+channel=$CHANNEL
+wpa=2
+wpa_passphrase=$(cat "$PSK_FILE")
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+country_code=CN
+ctrl_interface=$RUN/hostapd
+EOF
+
+	cat > "$RUN/dnsmasq.conf" <<EOF
+interface=$AP_IF
+bind-interfaces
+dhcp-range=$(echo "$ADDR" | cut -d. -f1-3).10,$(echo "$ADDR" | cut -d. -f1-3).200,12h
+address=/#/$ADDR
+no-resolv
+EOF
+
+	# 先停掉旧实例，避免重复绑定
+	pkill -f "hostapd $RUN/hostapd.conf" 2>/dev/null
+	pkill -f "dnsmasq -C $RUN/dnsmasq.conf" 2>/dev/null
+	dnsmasq -C "$RUN/dnsmasq.conf" 2>/dev/null
+	hostapd -B "$RUN/hostapd.conf" >/dev/null 2>&1 || die "hostapd 启动失败（看 dmesg）"
+
+	# 配网页面：busybox httpd + CGI（captive portal 的落点）
+	if [ "$PORTAL" = 1 ]; then
+		BB=/bin/busybox
+		[ -x "$BB" ] || BB=/usr/sbin/busybox
+		"$BB" httpd -p 80 -h "$WWW" 2>/dev/null || true
+	fi
+
+	{
+		printf '{"ap":"%s","ssid":"%s","psk":"%s","addr":"%s","ts":%s}\n' \
+			"$AP_IF" "$ssid" "$(cat "$PSK_FILE")" "$ADDR" "$(cut -d' ' -f1 /proc/uptime)"
+	} > "$RUN/ap.json"
+	kmsg "AP 已启动: $ssid ($ADDR)"
+	printf 'SSID: %s\nPSK:  %s\n' "$ssid" "$(cat "$PSK_FILE")"
+}
+
+cmd_stop() {
+	pkill -f "hostapd $RUN/hostapd.conf" 2>/dev/null || true
+	pkill -f "dnsmasq -C $RUN/dnsmasq.conf" 2>/dev/null || true
+	pkill -f "busybox httpd" 2>/dev/null || true
+	[ -e "/sys/class/net/$AP_IF" ] && iw dev "$AP_IF" del 2>/dev/null
+	rm -f "$RUN/ap.json"
+	kmsg "AP 已停止"
+}
+
+cmd_status() {
+	printf 'ENABLED=%s SSID=%s addr=%s\n' "$ENABLED" "$(ssid_name)" "$ADDR"
+	[ -e "/sys/class/net/$AP_IF" ] && echo "$AP_IF: 存在" || echo "$AP_IF: 不存在"
+	pgrep -f "hostapd $RUN/hostapd.conf" >/dev/null 2>&1 && echo 'hostapd: 运行中' || echo 'hostapd: 未运行'
+	[ -f "$PSK_FILE" ] && printf 'PSK: %s\n' "$(cat "$PSK_FILE")"
+}
+
+case "${1:-status}" in
+start) cmd_start ;;
+stop) cmd_stop ;;
+status) cmd_status ;;
+*) echo "用法: microduck-ap {start|stop|status}" >&2; exit 1 ;;
+esac
