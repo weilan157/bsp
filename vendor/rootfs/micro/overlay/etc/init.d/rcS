@@ -16,8 +16,10 @@ mount -t tmpfs  tmpfs  /dev/shm 2>/dev/null
 mount -t tmpfs  tmpfs  /tmp     2>/dev/null
 printf 'microduck: mounts done at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 
-# busybox init 的 inittab id 只能 1~4 字符，而调试串口是 ttyAS0（6 字符）：
-# 建一个 4 字符别名，inittab 里用 tS0 起 getty。
+# busybox init 的 inittab id 只能 1~4 字符，而调试串口是 ttyAS4（6 字符）：
+# 建 4 字符别名，inittab 里用 tS4 起 getty。
+# （调试口现为 UART4 = 40-pin 16/18；UART0 留给舵机总线，仍建 tS0 别名备用）
+ln -sf /dev/ttyAS4 /dev/tS4 2>/dev/null
 ln -sf /dev/ttyAS0 /dev/tS0 2>/dev/null
 
 # ZRAM swap：前台，毫秒级

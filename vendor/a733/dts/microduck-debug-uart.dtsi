@@ -1,0 +1,26 @@
+/* 调试串口：UART4（40-pin 16 = PJ24 = TX，18 = PJ25 = RX）
+ *
+ * 由 A733_DEBUG_UART=uart4 时被 board dts 引入（见 scripts/mod-a733.sh）。
+ * 同时生效的三处：
+ *   - boot0/boot_package: sys_config.fex 的 uart_debug_port=4 + PJ24/PJ25；
+ *   - u-boot: CONFIG_CONS_INDEX=5（sunxi 是 1-based：uart0=1, uart2=3, uart4=5）；
+ *   - 内核: console=ttyAS4,115200（BSP 的 uart-v100 驱动注册名是 ttyAS*）。
+ *
+ * 注意 UART0（PB9/PB10）在本设计里给舵机总线用，不再作调试口。
+ */
+&pio {
+	uart_debug_pins: uart-debug-pins {
+		pins = "PJ24", "PJ25";
+		function = "uart4";
+		drive-strength = <10>;
+		bias-pull-up;
+	};
+};
+
+&uart4 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart_debug_pins>;
+	/* dtsi 里 dmas 用的是 "fake_tx"/"fake_rx"，驱动不会走 DMA，
+	 * 这里保持原样即可（显式改成 tx/rx 反而要保证 DMA 通道可用）。 */
+};

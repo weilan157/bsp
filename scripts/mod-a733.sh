@@ -164,7 +164,13 @@ cmd_a733_uboot() {
 		# 关键：mmc read 的 block/count 按十六进制解析！
 		# Image@16MiB=0x8000 扇区，dtb@56MiB=0x1C000 扇区；每段 0x8000（16 MiB）
 		local rawboot
-		rawboot="mmc dev 0; setenv bootargs console=ttyAS0,115200 earlycon=uart8250,mmio32,0x02500000 root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=8"
+		# console/earlycon 与内核 cmdline 保持一致（uart4 时是 ttyAS4 + 0x02504000）
+		local uboot_console="ttyAS0,115200" uboot_early="0x02500000"
+		case "${A733_DEBUG_UART:-none}" in
+		uart4) uboot_console="ttyAS4,115200"; uboot_early="0x02504000" ;;
+		uart2) uboot_console="ttyAS2,115200"; uboot_early="0x02502000" ;;
+		esac
+		rawboot="mmc dev 0; setenv bootargs console=${uboot_console} earlycon=uart8250,mmio32,${uboot_early} root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=8"
 		rawboot="${rawboot}; mmc read 0x40080000 0x8000 0x8000"
 		rawboot="${rawboot}; mmc read 0x41080000 0x10000 0x8000"
 		rawboot="${rawboot}; mmc read 0x42080000 0x18000 0x2200"
@@ -726,12 +732,17 @@ cmd_a733_pack() {
 	# uart8250 + UART0 基址，保证 console 驱动 probe 之前也能看到 log。
 	# loglevel=4：只保留 warning 以上。115200 下日志本身要占掉几百毫秒，
 	# 调试时临时改成 7/8 即可。
-	bootargs="console=ttyAS0,115200 root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=4"
-	# 可选：A733_CONSOLE 覆盖 console=，方便把调试串口换到 UART2/4。
-	# 注意内核串口是 BSP 驱动，注册名是 ttyAS*（不是 ttyS*）。
-	if [[ -n "${A733_CONSOLE:-}" ]]; then
-		bootargs="${bootargs/console=ttyAS0,115200/console=${A733_CONSOLE}}"
-	fi
+	# 调试口：默认 UART0；A733_DEBUG_UART=uart4/uart2 时跟着换。
+	# 注意内核串口是 BSP 的 uart-v100 驱动，注册名是 ttyAS*（不是 ttyS*），
+	# 写 ttyS4 会 "unable to open an initial console"。
+	local debug_console="ttyAS0,115200"
+	local earlycon_addr="0x02500000"
+	case "${A733_DEBUG_UART:-none}" in
+	uart4) debug_console="ttyAS4,115200"; earlycon_addr="0x02504000" ;;
+	uart2) debug_console="ttyAS2,115200"; earlycon_addr="0x02502000" ;;
+	esac
+	[[ -n "${A733_CONSOLE:-}" ]] && debug_console="${A733_CONSOLE}"
+	bootargs="console=${debug_console} root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=4"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
