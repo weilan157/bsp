@@ -1,0 +1,41 @@
+#!/bin/sh
+# A733 平台钩子：udev → SSH/mDNS → WiFi 自动连接 → 手柄热插拔
+# 由 micro rootfs 的 /etc/init.d/rcS 在启动末尾调用（后台，不阻塞登录）。
+
+# 1) udev：wlan0/手柄等热插拔事件（bluez 也依赖它）
+if [ -x /sbin/udevd ] || [ -x /usr/sbin/udevd ]; then
+	UDEVD=/sbin/udevd
+	[ -x "$UDEVD" ] || UDEVD=/usr/sbin/udevd
+	mkdir -p /run/udev
+	"$UDEVD" --daemon 2>/dev/null
+	udevadm trigger --action=add >/dev/null 2>&1
+	udevadm settle --timeout=5 >/dev/null 2>&1
+fi
+
+# 2) dbus + avahi（mDNS：duck-xxxx.local）
+if [ -x /usr/bin/dbus-daemon ] && [ ! -S /run/dbus/system_bus_socket ]; then
+	mkdir -p /run/dbus
+	dbus-daemon --system --fork 2>/dev/null
+fi
+if [ -x /usr/sbin/avahi-daemon ]; then
+	avahi-daemon -D 2>/dev/null
+fi
+
+# 3) SSH：host key 首次启动生成
+if [ -x /usr/sbin/sshd ]; then
+	[ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -A >/dev/null 2>&1
+	mkdir -p /run/sshd
+	/usr/sbin/sshd -f /etc/ssh/sshd_config 2>/dev/null
+fi
+
+# 4) WiFi 自动连接（多 profile，见 microduck-net）
+if [ -x /usr/sbin/microduck-net ]; then
+	/usr/sbin/microduck-net auto >/dev/null 2>&1 &
+fi
+
+# 5) 已经插着的手柄（udev 只处理之后的事件）
+for js in /dev/input/js*; do
+	[ -e "$js" ] || continue
+	/usr/sbin/microduck-pad add "$(basename "$js")" 2>/dev/null
+	break
+done

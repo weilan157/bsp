@@ -191,3 +191,16 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 `lz4 -l` legacy 格式）。**注意**：radxa/u-boot 2018.07 的 `cmd/` 里没有 `lz4` 命令，
 也没有 lz4 的解压路径，所以这个产物目前只是留档/实验；要真用必须改 u-boot（加 lz4 命令或
 在 bootm 里解压），和“完全用官方 u-boot”的前提冲突。默认启动仍走未压缩 `Image`。
+## 配网 / SSH / 手柄
+
+- `overlay/usr/sbin/microduck-net`：多 WiFi profile（wpa_supplicant，无 NetworkManager），
+  `auto` 开机自动连；`add/switch/forget/list/scan/status` 现场换网；
+- `overlay/usr/sbin/microduck-ip`：打印所有接口地址和 SSID；
+- `overlay/usr/sbin/microduck-pad` + `etc/udev/rules.d/90-microduck-pad.rules`：
+  joystick 热插拔 → `/run/microduck/pad.json` + 拉起 robotd；
+- `etc/microduck/rc.d/20-network.sh`：rcS 末尾启动 udevd → dbus/avahi → sshd → WiFi；
+- micro rootfs 里装了 `openssh-server`（root 密码登录，`sshd_config.d/10-microduck.conf`）、
+  `dbus`、`avahi-daemon`、`libnss-mdns`（`<host>.local` 可解析）。
+
+产品层的完整“傻瓜式”方案（AP 先起、per-device SSID/PSK、captive portal、换网常驻页面、
+蓝牙手柄自动回连、断开急停）见 `docs/ux-network-gamepad.md`。

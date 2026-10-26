@@ -22,7 +22,8 @@ apt-get update
 echo ">>> 安装最小运行时"
 ${APT} busybox-static kmod e2fsprogs util-linux \
 	wpasupplicant iw rfkill bluez \
-	iproute2 procps
+	iproute2 procps \
+	openssh-server dbus avahi-daemon libnss-mdns
 
 echo ">>> 用 sysvinit 取代 systemd"
 ${APT} sysvinit-core
@@ -35,6 +36,18 @@ echo "${HOSTNAME}" > /etc/hostname
 touch /etc/hosts
 grep -q "^127.0.1.1" /etc/hosts || echo "127.0.1.1 ${HOSTNAME}" >> /etc/hosts
 echo "root:${ROOT_PASSWORD}" | chpasswd
+
+echo ">>> SSH / mDNS"
+# 现场排查优先：允许 root 密码登录（产品镜像请改 sshd_config / 用密钥）
+mkdir -p /run/sshd /run/dbus
+cat > /etc/ssh/sshd_config.d/10-microduck.conf <<'EOF'
+PermitRootLogin yes
+PasswordAuthentication yes
+UseDNS no
+EOF
+ssh-keygen -A >/dev/null 2>&1 || true
+# avahi 只广播主机名；不装一堆 service 文件
+sed -i 's/^#*hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf 2>/dev/null || true
 
 echo ">>> 精简"
 apt-get clean || true

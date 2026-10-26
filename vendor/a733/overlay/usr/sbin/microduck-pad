@@ -1,0 +1,48 @@
+#!/bin/sh
+# microduck-pad —— 手柄热插拔钩子（udev 调用）
+#   microduck-pad add js0     手柄出现
+#   microduck-pad remove js0  手柄移除
+#
+# 产品层（robotd）通过 /run/microduck/pad.json 感知手柄状态；
+# 如果 robotd 没在跑，这里会尝试用 init 脚本/可执行文件把它拉起来。
+set -u
+
+ACTION=${1:-add}
+DEV=${2:-pad}
+RUN=/run/microduck
+STATE="$RUN/pad.json"
+
+mkdir -p "$RUN"
+
+kmsg() { printf 'microduck-pad: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
+
+robotd_running() { pgrep -x robotd >/dev/null 2>&1 || pgrep -f '/usr/sbin/robotd' >/dev/null 2>&1; }
+
+start_robotd() {
+	robotd_running && return 0
+	if [ -x /etc/init.d/robotd ]; then
+		/etc/init.d/robotd start >/dev/null 2>&1 && kmsg "robotd 已启动" && return 0
+	elif [ -x /usr/sbin/robotd ]; then
+		/usr/sbin/robotd >/dev/null 2>&1 &
+		kmsg "robotd 已拉起"
+		return 0
+	fi
+	return 1
+}
+
+case "$ACTION" in
+add)
+	start_robotd || true
+	printf '{"state":"connected","dev":"%s","ts":%s}\n' "$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
+	kmsg "手柄连接: $DEV"
+	;;
+remove)
+	# 留 5 秒给 robotd 处理（断开急停由 robotd 自己计时）
+	printf '{"state":"disconnected","dev":"%s","ts":%s}\n' "$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
+	kmsg "手柄断开: $DEV"
+	;;
+*)
+	echo "用法: microduck-pad {add|remove} <dev>" >&2
+	exit 1
+	;;
+esac

@@ -1,0 +1,3 @@
+# 手柄热插拔：所有 joystick 设备（USB dongle / 蓝牙手柄都走这里）
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="js[0-9]*", RUN+="/usr/sbin/microduck-pad add %k"
+ACTION=="remove", SUBSYSTEM=="input", KERNEL=="js[0-9]*", RUN+="/usr/sbin/microduck-pad remove %k"

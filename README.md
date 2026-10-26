@@ -251,6 +251,20 @@ docker run --rm --network host \
 > 仍未验证：修完 boot0 注入和 BL31 后的真机启动（上一版是**完全无输出**的），
 > 以及 `/boot.scr` 里 `load mmc 0:2` 的实机启动。依据与状态见 `vendor/a733/README.md`。
 
+### 配网 / SSH / 手柄（产品体验）
+
+设计评审与改进方案见 [docs/ux-network-gamepad.md](docs/ux-network-gamepad.md)。
+最小镜像（micro rootfs）里已经带上便于现场排查的一套：
+
+- `microduck-net`：多 WiFi profile，`scan / add <SSID> <PSK> / list / switch <SSID> /
+  forget / status / auto`，换网不用重刷镜像；
+- `microduck-ip`：一条命令列出 wlan0/usb0/eth0 的地址和当前 SSID（SSH 排查用）；
+- `sshd` + `avahi` 默认开：`ssh root@<hostname>.local`，主机名默认 `microduck`；
+- `microduck-pad` + `90-microduck-pad.rules`：手柄（USB/蓝牙都算）插拔时写
+  `/run/microduck/pad.json` 并尝试拉起 `robotd`，产品层据此进入可操控/急停。
+
+配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
+断开急停）属于产品镜像层，方案和优先级都在那份文档里。
 ### 板级相关配置（与 SDK 对齐）
 
 | 配置 | 默认值 | 对应 SDK |

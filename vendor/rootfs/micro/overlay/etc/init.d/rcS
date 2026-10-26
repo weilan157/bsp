@@ -21,6 +21,11 @@ printf 'microduck: zram at %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 /usr/sbin/microduck-grow >/dev/null 2>&1 &
 /usr/sbin/microduck-wifi >/dev/null 2>&1 &
 
+# 平台钩子（A733：udev / sshd / avahi / 配网 / 手柄热插拔）
+for h in /etc/microduck/rc.d/*.sh; do
+	[ -x "$h" ] && "$h"
+done
+
 # 启动耗时打点（dmesg 里看）
 printf 'microduck: userspace ready in %ss\n' "$(up)" > /dev/kmsg 2>/dev/null
 echo "microduck ready in $(up)s" > /dev/console 2>/dev/null
