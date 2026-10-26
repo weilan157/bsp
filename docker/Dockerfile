@@ -13,10 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential bc bison flex \
         libssl-dev libelf-dev libncurses-dev libgnutls28-dev uuid-dev \
         device-tree-compiler u-boot-tools \
-        git rsync curl wget ca-certificates patch zstd cpio kmod \
+        git rsync curl wget ca-certificates patch zstd cpio kmod xxd \
         python3 python3-setuptools swig \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-        e2fsprogs dosfstools mtools lz4 debootstrap qemu-user-static sudo \
+        gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
+        e2fsprogs dosfstools fdisk uuid-runtime mtools lz4 debootstrap qemu-user-static sudo \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

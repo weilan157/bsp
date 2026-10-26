@@ -63,3 +63,21 @@ dockerd --iptables=false --ip6tables=false --bridge=none \
 构建过程中 `./bsp kernel` 会自动处理 6.6 BSP 的几个构建前提（详见
 `vendor/a733/README.md` 的「内核构建的坑」）：`BSP_TOP`、`LICHEE_KERN_DIR`、
 `sunxi-autogen.h`、`DTC_INCLUDE`、关掉主线的 `SUNXI_CCU`、关掉 rt-media。
+## 已验证（2026-10-26 补）：u-boot 与整条链路
+
+镜像补上 `arm-linux-gnueabi` 交叉链、`xxd`、`fdisk`、`uuid-runtime` 之后：
+
+- `./bsp uboot` 在容器里通过：`u-boot.bin` 1.2 MB、`boot0.bin`/`boot0_ufs.bin` 240 KB
+  （`update_boot0` 已注入 sys_config）、`boot_package.fex` 1.3 MB（u-boot + BL31）；
+- `./bsp rootfs` + `./bsp pack` 在容器里通过：`rootfs.ext4` 347 MB、
+  `a733-micro.img` 379 MB（GPT：config@16 MiB、rootfs@32 MiB）。
+
+rootfs/pack 需要 **`--privileged`**（chroot 里要 mount proc/devpts），并且 `out/` 要放在
+**Linux 文件系统**上（`/mnt/d` 是 nodev，debootstrap 会 `mknod ... Operation not supported`）：
+
+```bash
+mkdir -p /tmp/a733out && cp -a out/a733 /tmp/a733out/
+docker run --rm --privileged --network host \
+    -v "$PWD":/work -v /tmp/a733src:/work/sources -v /tmp/a733out:/work/out \
+    -w /work microduck-a733 bash -lc './bsp rootfs && ./bsp pack'
+```

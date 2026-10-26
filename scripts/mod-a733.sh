@@ -44,8 +44,8 @@ cmd_a733_env() {
 		# A733 的 u-boot 是 AArch32，必须用 soft-float 的 gnueabi 工具链
 		gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
 		python3 python3-setuptools swig rsync curl wget git
-		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio
-		dosfstools mtools u-boot-tools binutils-aarch64-linux-gnu lz4
+		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio xxd
+		dosfstools fdisk uuid-runtime mtools u-boot-tools binutils-aarch64-linux-gnu lz4
 	)
 	info "安装 A733 构建依赖（需要 sudo）..."
 	run_root apt-get update
@@ -116,6 +116,11 @@ cmd_a733_uboot() {
 	extra_cflags="${extra_cflags} -Wno-maybe-uninitialized -Wno-misleading-indentation"
 	extra_cflags="${extra_cflags} -Wno-stringop-overflow -Wno-stringop-truncation"
 
+	# 环境里缺 xxd 时，u-boot 的 prepare 会留下 0 字节的 sunxi_challenge.c，
+	# make 之后看到文件已存在就不再生成，链接时报 undefined reference。
+	if [[ -f "${u}/board/sunxi/sunxi_challenge.c" && ! -s "${u}/board/sunxi/sunxi_challenge.c" ]]; then
+		rm -f "${u}/board/sunxi/sunxi_challenge.c"
+	fi
 	info "配置 u-boot: ${defconfig}（dt=${dt}）"
 	# u-boot 的 Makefile 以当前目录为 objtree，必须 cd 进去（make -C 会把
 	# arch/arm/dts 之类的路径解析到工作区根上）
@@ -338,6 +343,20 @@ rootfs_install_platform_modules() {
 	[[ -f "${A733_OUT}/kernel/Image" ]] || return 0
 
 	info "编译并安装 A733 内核模块 -> ${rootfs}/lib/modules"
+	# 先把最新的 fragment 合进 .config：否则改了 microduck.config（比如关掉
+	# AW_INPUT_SENSORINIT）又没重跑 ./bsp kernel 时，modules 会按旧配置编出
+	# init-input.ko，modpost 报 irq_to_desc undefined。
+	(
+		cd "${k}" || exit 1
+		# Kconfig 的 bsp/Kconfig 用 $(BSP_TOP) 拼路径，这里也要带上
+		export BSP_TOP="${k}/bsp/"
+		export LICHEE_KERN_DIR="${k}"
+		install -m 644 "${BSP_ROOT}/vendor/a733/microduck.config" \
+			"${k}/arch/arm64/configs/microduck.config" || exit 1
+		bash "${k}/scripts/kconfig/merge_config.sh" -m -O "${k}" "${k}/.config" \
+			"${k}/arch/arm64/configs/microduck.config" >/dev/null 2>&1 || exit 1
+		make ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}" olddefconfig >/dev/null 2>&1 || exit 1
+	)
 	(
 		cd "${k}" || exit 1
 		export BSP_TOP="${b%/}/"
