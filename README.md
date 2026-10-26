@@ -265,6 +265,14 @@ docker run --rm --network host \
 
 配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
 断开急停）属于产品镜像层，方案和优先级都在那份文档里。
+### 调试串口 vs 舵机总线
+
+40-pin 的 8/10（UART0）既是官方调试口，也是 HAT 的舵机总线；console 和舵机不能共用。
+分析、四种方案对比和推荐（优先把调试口换到 UART2/7-11，其次 USB-C gadget，不建议只用
+SSH）见 [docs/uart-console-vs-servo.md](docs/uart-console-vs-servo.md)。
+
+当前分支的状态：`&uart0` 给舵机，`boot.cmd` 用 `console=tty1`（A7Z 无显示时等于没有
+console），现场排查依赖 SSH；上板前建议按文档把调试口落到 UART2 或 USB-C。
 ### 板级相关配置（与 SDK 对齐）
 
 | 配置 | 默认值 | 对应 SDK |

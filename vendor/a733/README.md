@@ -204,3 +204,8 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 
 产品层的完整“傻瓜式”方案（AP 先起、per-device SSID/PSK、captive portal、换网常驻页面、
 蓝牙手柄自动回连、断开急停）见 `docs/ux-network-gamepad.md`。
+## 调试串口
+
+`&uart0`（PB9/PB10 = 40-pin 8/10）给了舵机，`boot.cmd` 的 console 是 `tty1`；
+A7Z 无显示时相当于没有 console。换口方案（UART2/7-11、USB-C gadget、SSH-only 的取舍）
+见 [`docs/uart-console-vs-servo.md`](../../docs/uart-console-vs-servo.md)。
