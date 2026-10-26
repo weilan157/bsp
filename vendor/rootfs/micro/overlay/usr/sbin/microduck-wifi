@@ -101,6 +101,16 @@ stop_ap() {
 # ---- 主流程 ----
 if try_sta; then
 	kmsg "online"
+	# AP+STA 共存：连上 STA 后再拉起热点（ap0 独立 vif，驱动 CONFIG_MCC=y）。
+	# 必须在 STA 成功之后做：hostapd 绑定 phy 时 wlan0 得已经 up 且关联。
+	if grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null; then
+		if /usr/sbin/microduck-ap start >/dev/null 2>&1; then
+			kmsg "AP+STA coexist enabled ($(sed -n 's/^ADDR=//p' /etc/microduck/ap.conf))"
+			: > /run/microduck-ap.pid
+		else
+			kmsg "AP+STA coexist failed (see dmesg)"
+		fi
+	fi
 else
 	kmsg "STA failed / no config, starting AP portal"
 	start_ap

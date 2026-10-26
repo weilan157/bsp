@@ -46,10 +46,11 @@ done
 # 6) 蓝牙：bluetoothd 常驻 + 自动配对/回连 Xbox 手柄
 [ -x /usr/sbin/microduck-bt ] && /usr/sbin/microduck-bt >/dev/null 2>&1 &
 
-# 7) AP + STA 共存（/etc/microduck/ap.conf 里 ENABLED=1 时）
-if grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null; then
-	/usr/sbin/microduck-ap start >/dev/null 2>&1 &
-fi
+# 7) AP + STA 共存由 /usr/sbin/microduck-wifi 在 STA 关联成功后自己拉起。
+#    不要在开机早期起 hostapd —— 那时 wlan0 还没 up/关联，hostapd 会失败。
+# if grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null; then
+# 	/usr/sbin/microduck-ap start >/dev/null 2>&1 &
+# fi
 
 # 8) 校时（板子没有 RTC 电池；无网络时是空操作）
 [ -x /usr/sbin/microduck-timesync ] && /usr/sbin/microduck-timesync >/dev/null 2>&1 &
