@@ -28,14 +28,20 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	parted \
 	alsa-utils \
 	i2c-tools \
-	openssh-server \
+	openssh-server dbus avahi-daemon libnss-mdns \
 	iproute2 procps
 
-echo ">>> 用 sysvinit 取代 systemd"
-${APT} sysvinit-core
-# 只卸 systemd 本体；udev 保留（bluez 依赖它，且不启动它就不占启动时间）
-apt-get purge -y systemd-sysv systemd 2>/dev/null || true
-apt-get autoremove -y --purge 2>/dev/null || true
+INIT="${ROOTFS_INIT:-sysvinit}"
+if [ "$INIT" = "systemd" ]; then
+	echo ">>> systemd（product profile，不装 NetworkManager）"
+	${APT} systemd-sysv systemd
+else
+	echo ">>> 用 sysvinit 取代 systemd"
+	${APT} sysvinit-core
+	# 只卸 systemd 本体；udev 保留（bluez 依赖它）
+	apt-get purge -y systemd-sysv systemd 2>/dev/null || true
+	apt-get autoremove -y --purge 2>/dev/null || true
+fi
 
 # 蓝牙策略：已配对设备（手柄/键鼠/耳机）开机自动重连。
 # 注意不能把这个文件放进 overlay —— 它是 bluez 的 conffile，overlay 里的版本
@@ -64,26 +70,55 @@ touch /etc/hosts
 grep -q "^127.0.1.1" /etc/hosts || echo "127.0.1.1 ${HOSTNAME}" >> /etc/hosts
 echo "root:${ROOT_PASSWORD}" | chpasswd
 
-# SSH：允许 root 用密码登录（板子没 RTC，密钥交换不受时间影响，
-# 但旧版客户端可能因为时钟漂移报错，密码登录最省事）。
-# 注意不要把这些配置放进 overlay —— sshd_config 是 openssh-server 的 conffile，
-# overlay 里带同名文件会让 dpkg 弹交互提示（参考 bluez main.conf 那个坑）。
-echo ">>> SSH 配置"
-SSHD_CFG=/etc/ssh/sshd_config
-if [ -f "${SSHD_CFG}" ]; then
-	# 顶层配置段里改；Include 在文件末尾，改完仍生效
-	sed -i -E 's|^#?[[:space:]]*PermitRootLogin[[:space:]].*|PermitRootLogin yes|' "${SSHD_CFG}"
-	sed -i -E 's|^#?[[:space:]]*PasswordAuthentication[[:space:]].*|PasswordAuthentication yes|' "${SSHD_CFG}"
-	sed -i -E 's|^#?[[:space:]]*PermitEmptyPasswords[[:space:]].*|PermitEmptyPasswords no|' "${SSHD_CFG}"
-	# 允许 Keyboard-Interactive（部分客户端默认用它）
-	sed -i -E 's|^#?[[:space:]]*KbdInteractiveAuthentication[[:space:]].*|KbdInteractiveAuthentication yes|' "${SSHD_CFG}"
-	grep -qE '^[[:space:]]*PermitRootLogin' "${SSHD_CFG}" || echo 'PermitRootLogin yes' >> "${SSHD_CFG}"
-	grep -qE '^[[:space:]]*PasswordAuthentication' "${SSHD_CFG}" || echo 'PasswordAuthentication yes' >> "${SSHD_CFG}"
+echo ">>> SSH / mDNS"
+# 现场排查优先：允许 root 密码登录（产品镜像请改 sshd_config / 用密钥）。
+# 用 sshd_config.d 的 drop-in，而不是改 sshd_config 本体 —— 两者都是
+# conffile，但 drop-in 是我们新建的文件，不参与 dpkg 的 conffile 冲突检查。
+mkdir -p /run/sshd /run/dbus /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/10-microduck.conf <<'EOF'
+PermitRootLogin yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication yes
+PermitEmptyPasswords no
+UseDNS no
+EOF
+# 主机密钥不在镜像里生成（否则所有板子共用同一份 key），
+# 由首次启动的 /usr/sbin/microduck-sshd 执行 ssh-keygen -A 补齐。
+
+if [ "$INIT" = "systemd" ]; then
+	echo ">>> 启用 systemd 服务（不含 NetworkManager）"
+	enable_unit() {
+		unit="$1"; target="$2"
+		systemctl enable "$unit" >/dev/null 2>&1 && return 0
+		link="$(readlink -f "/lib/systemd/system/$unit" 2>/dev/null || true)"
+		[ -n "$link" ] || link="/usr/lib/systemd/system/$unit"
+		mkdir -p "/etc/systemd/system/${target}.wants"
+		ln -sf "$link" "/etc/systemd/system/${target}.wants/$unit"
+	}
+	for u in ssh.service avahi-daemon.service bluetooth.service \
+		microduck-net.service microduck-bt.service microduck-ap.service; do
+		enable_unit "$u" multi-user.target
+	done
+	for u in microduck-grow.service microduck-zram.service; do
+		enable_unit "$u" sysinit.target
+	done
+	enable_unit getty@tty1.service getty.target
 fi
-# 主机密钥在首次启动时由 microduck-sshd 用 ssh-keygen -A 生成
-mkdir -p /run/sshd /var/run/sshd 2>/dev/null || true
+# avahi 只广播主机名；不装一堆 service 文件
+sed -i 's/^#*hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf 2>/dev/null || true
 
 echo ">>> 精简"
+if [ "${ROOTFS_TINY:-n}" = y ]; then
+	echo ">>> 极致精简（去掉 apt/hwdb/perl 运行时）"
+	# apt 在 Debian 里是 Essential，必须带 --allow-remove-essential；sqv 是它的依赖
+	apt-get purge -y --allow-remove-essential apt >/dev/null 2>&1 || true
+	apt-get purge -y sqv >/dev/null 2>&1 || true
+	# udev 的硬件数据库对这块板子没用（12.9 MB 的 hwdb.bin + 7 MB 源文件）
+	rm -rf /usr/lib/udev/hwdb.d /usr/lib/udev/hwdb.bin
+	# perl 运行时（dpkg 本体是 C，不需要 perl；adduser 也不用）
+	rm -rf /usr/lib/aarch64-linux-gnu/perl* /usr/lib/arm-linux-gnueabihf/perl* \
+		/usr/share/perl* /usr/bin/perl* /usr/lib/*/perl-base 2>/dev/null || true
+fi
 apt-get clean || true
 rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
 	/usr/share/doc/* /usr/share/man/* /usr/share/info/* \

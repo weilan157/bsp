@@ -4,6 +4,7 @@
 # 驱动用 Radxa 官方 USB 驱动包（vendor/a733/aic8800-usb，构建时单独编译）：
 #   aic_load_fw   —— 负责 8d80（Boot ROM）阶段的固件下载/启动
 #   aic8800_fdrv  —— 负责 8d81（运行态）建 wlan0
+#   aic_btusb     —— 同一个 8d81 的 BT 接口（BlueZ 模式）
 aic_load_fw
 aic8800_fdrv
 aic_btusb

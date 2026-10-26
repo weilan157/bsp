@@ -1,0 +1,14 @@
+[Unit]
+Description=microduck: AP+STA 热点（duck-XXXX 配网页面）
+After=microduck-net.service
+ConditionPathExists=/usr/sbin/microduck-ap
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/microduck-ap start
+ExecStop=/usr/sbin/microduck-ap stop
+# ap.conf 里 ENABLED=0 时脚本自己会 return 0
+
+[Install]
+WantedBy=multi-user.target

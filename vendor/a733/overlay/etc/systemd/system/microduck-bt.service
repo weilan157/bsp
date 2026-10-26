@@ -1,0 +1,14 @@
+[Unit]
+Description=microduck: 蓝牙手柄自动配对/回连（bluetoothd 常驻）
+After=bluetooth.service microduck-net.service
+Wants=bluetooth.service
+ConditionPathExists=/usr/sbin/microduck-bt
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/microduck-bt
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+#!/bin/sh
+# microduck-ip —— 一眼看清设备地址（SSH 排查用）
+set -u
+
+HOST=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo microduck)
+printf '主机: %s（mDNS: %s.local，如果 avahi 在跑）\n' "$HOST" "$HOST"
+
+for dev in wlan0 usb0 eth0; do
+	[ -e "/sys/class/net/$dev" ] || continue
+	ip -4 addr show dev "$dev" 2>/dev/null | awk -v d="$dev" '
+		/inet / { printf "  %-6s %-16s %s\n", d, $2, $NF }
+	'
+	ssid=$(iwgetid -r "$dev" 2>/dev/null || true)
+	[ -n "$ssid" ] && printf '         SSID: %s\n' "$ssid"
+done
+
+printf 'SSH:  ssh microduck@%s.local   （或上面任一 IP）\n' "$HOST"

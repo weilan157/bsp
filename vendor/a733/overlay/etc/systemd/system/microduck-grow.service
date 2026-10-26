@@ -1,0 +1,14 @@
+[Unit]
+Description=microduck: 扩展 rootfs 到分区末尾
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target microduck-net.service
+ConditionPathExists=/usr/sbin/microduck-grow
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/microduck-grow
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

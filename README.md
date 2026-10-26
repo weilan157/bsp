@@ -251,6 +251,55 @@ docker run --rm --network host \
 > 仍未验证：修完 boot0 注入和 BL31 后的真机启动（上一版是**完全无输出**的），
 > 以及 `/boot.scr` 里 `load mmc 0:2` 的实机启动。依据与状态见 `vendor/a733/README.md`。
 
+### 配网 / SSH / 手柄（产品体验）
+
+设计评审与改进方案见 [docs/ux-network-gamepad.md](docs/ux-network-gamepad.md)。
+最小镜像（micro rootfs）里已经带上便于现场排查的一套：
+
+- `microduck-net`：多 WiFi profile，`scan / add <SSID> <PSK> / list / switch <SSID> /
+  forget / status / auto`，换网不用重刷镜像；
+- `microduck-ip`：一条命令列出 wlan0/usb0/eth0 的地址和当前 SSID（SSH 排查用）；
+- `sshd` + `avahi` 默认开：`ssh root@<hostname>.local`，主机名默认 `microduck`；`microduck-bt` 常驻 bluetoothd 并自动配对/回连 Xbox 手柄；`microduck-ap` 可开 AP+STA（`ap.conf` ENABLED=1）做 captive portal；
+- `microduck-pad` + `90-microduck-pad.rules`：手柄（USB/蓝牙都算）插拔时写
+  `/run/microduck/pad.json` 并尝试拉起 `robotd`，产品层据此进入可操控/急停。
+
+配网/换网要“傻瓜式”的关键（AP 先起、每台独立 SSID/PSK、captive portal、蓝牙手柄回连、
+断开急停）属于产品镜像层，方案和优先级都在那份文档里。
+### 与 microduck 软件栈的适配
+
+当前的 sysvinit 极简镜像**不能直接**跑 [weilan157/microduck](https://github.com/weilan157/microduck)
+的软件栈（它假设 Armbian+systemd、`/dev/ttyS2` 舵机总线、RKNN NPU、GStreamer/MPP）。
+兼容矩阵、三条适配路线和 BSP 待办见 [docs/software-adapter.md](docs/software-adapter.md)；
+A（systemd 产品镜像）和 B（改成 sysvinit）的逐项对比、工作量与推荐见
+[docs/route-a-vs-b.md](docs/route-a-vs-b.md)；A2 不装 NetworkManager 的可行性与代价见
+[docs/a2-without-networkmanager.md](docs/a2-without-networkmanager.md)。已实现：`A733_ROOTFS_INIT=systemd`（不装 NM，systemd 257 + 五个 microduck unit，镜像约 254 MB/不带模块）。
+已加 `/dev/microduck-servo` udev 别名（指向 ttyS0）方便软件改配置。
+
+### NPU（VeriSilicon VIPLite）
+
+参考 [jackhe183/radxa-dev](https://github.com/jackhe183/radxa-dev)：A733 的 NPU 是
+VIPLite 3 TOPS，节点 `/dev/vipcore`。`A733_WITH_NPU=y`（默认）会打开
+`AW_NNA_VIP` + `NNA_VIP2`（外加 `DEBUG_FS`/`NPU_SET_CLK_VOL` 才能编过），
+`A733_NPU_RUNTIME=y`（默认）会把 VIPLite 库 + `vpm_run` + LeNet 样例装进 rootfs，
+板端 `microduck-npu` 即可跑冒烟测试。细节、模型转换（Acuity）和开关见
+[docs/npu.md](docs/npu.md)。
+
+### 镜像体积
+
+实测从 **400 MB 缩到 271 MB**（rootfs 261→215 MB，ext4 368→239 MB，模块 929→740 个），
+手段和还能再缩的地方见 [docs/image-size.md](docs/image-size.md)。默认
+`ROOTFS_TINY=y`、`MICRODUCK_MIN_MODULES=y`，调试时可关掉。
+
+### 调试串口 vs 舵机总线
+
+40-pin 的 8/10（UART0）既是官方调试口，也是 HAT 的舵机总线；console 和舵机不能共用。
+分析、四种方案对比和推荐（优先把调试口换到 UART2/7-11，其次 USB-C gadget，不建议只用
+SSH）见 [docs/uart-console-vs-servo.md](docs/uart-console-vs-servo.md)。
+
+当前分支的状态：`&uart0` 给舵机，`boot.cmd` 用 `console=tty1`（A7Z 无显示时等于没有
+console），现场排查依赖 SSH。`./bsp uboot` 和官方 u-boot 的差异、以及 boot0 里 DDR 初始化为啥慢、能不能改，见 [docs/uboot-vs-official.md](docs/uboot-vs-official.md)。已加 `A733_DEBUG_UART=uart4`（PJ24/PJ25 = 40-pin 16/18，
+HAT 未占用）把 boot0/u-boot/kernel 的 console 一起挪到 UART4；`uart2`（7/11）因为 7 脚是
+HAT 的 Stemma SDA 不推荐。
 ### 板级相关配置（与 SDK 对齐）
 
 | 配置 | 默认值 | 对应 SDK |

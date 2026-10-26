@@ -343,3 +343,41 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 `lz4 -l` legacy 格式）。**注意**：radxa/u-boot 2018.07 的 `cmd/` 里没有 `lz4` 命令，
 也没有 lz4 的解压路径，所以这个产物目前只是留档/实验；要真用必须改 u-boot（加 lz4 命令或
 在 bootm 里解压），和“完全用官方 u-boot”的前提冲突。默认启动仍走未压缩 `Image`。
+## 配网 / SSH / 手柄
+
+- `overlay/usr/sbin/microduck-net`：多 WiFi profile（wpa_supplicant，无 NetworkManager），
+  `auto` 开机自动连；`add/switch/forget/list/scan/status` 现场换网；
+- `overlay/usr/sbin/microduck-ip`：打印所有接口地址和 SSID；
+- `overlay/usr/sbin/microduck-pad` + `etc/udev/rules.d/90-microduck-pad.rules`：
+  joystick 热插拔 → `/run/microduck/pad.json` + 拉起 robotd；
+- `etc/microduck/rc.d/20-network.sh`：rcS 末尾启动 udevd → dbus/avahi → sshd → WiFi → 蓝牙 →（可选）AP；`microduck-bt`（bluetoothd 常驻 + Xbox 自动配对/回连）、`microduck-ap`（AP+STA 共存 + busybox httpd 配网页）；
+- micro rootfs 里装了 `openssh-server`（root 密码登录，`sshd_config.d/10-microduck.conf`）、
+  `dbus`、`avahi-daemon`、`libnss-mdns`（`<host>.local` 可解析）。
+
+产品层的完整“傻瓜式”方案（AP 先起、per-device SSID/PSK、captive portal、换网常驻页面、
+蓝牙手柄自动回连、断开急停）见 `docs/ux-network-gamepad.md`。
+## 调试串口
+
+`&uart0`（PB9/PB10 = 40-pin 8/10）给了舵机，`boot.cmd` 的 console 是 `tty1`；
+A7Z 无显示时相当于没有 console。换口方案（UART2/7-11、USB-C gadget、SSH-only 的取舍）
+见 [`docs/uart-console-vs-servo.md`](../../docs/uart-console-vs-servo.md)。
+## u-boot 与官方差异 / DDR 初始化
+
+`./bsp uboot` 用的就是官方 `radxa/u-boot` 源码，只改构建配置和两处小修；与 rsdk 的差别
+主要在 boot0 是预编译还是现编、boot_package 里有没有 ARISC/NOR 变体。boot0 的 DRAM
+初始化（“DDR 速率探测”）在预编译 boot0 里，sys_config 没有 `[dram_para]`，改它要重编
+brandy/dramlib，难度高。详见 [`docs/uboot-vs-official.md`](../../docs/uboot-vs-official.md)。
+生产默认 `debug_mode=0`（`A733_BOOT0_DEBUG=y` 可恢复 boot0 日志）。
+## 镜像体积
+
+400 MB → 271 MB：pack 尺寸公式 + `resize2fs -M` + `-m 0`（−110 MB）、
+`ROOTFS_TINY=y` 去 apt/hwdb/perl（−40 MB）、`MICRODUCK_MIN_MODULES=y` 裁其它平台模块
+（−11 MB）。详见 [`docs/image-size.md`](../../docs/image-size.md)。
+## NPU（VIPLite）
+
+`A733_WITH_NPU=y`（默认）打开 `AW_NNA_VIP` + `NNA_VIP2`（需要 `CONFIG_DEBUG_FS` 和
+`CONFIG_NPU_SET_CLK_VOL`，否则 vip2 编不过）；`A733_NPU_RUNTIME=y`（默认）用
+`vendor/a733/npu/fetch-runtime.sh` 拉 ai-sdk、交叉编译 `vpm_run`，把
+`/usr/lib/viplite`、`/usr/bin/vpm_run`、`/usr/share/npu`（LeNet）装进 rootfs，
+板端跑 `/usr/sbin/microduck-npu`。参考 `jackhe183/radxa-dev`，详见
+[`docs/npu.md`](../../docs/npu.md)。

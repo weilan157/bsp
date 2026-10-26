@@ -26,6 +26,12 @@ A733_DTS_NAME="${A733_DTS_NAME:-sun60i-a733-cubie-a7z}"
 A733_CROSS_COMPILE="${A733_CROSS_COMPILE:-aarch64-linux-gnu-}"
 A733_BRANDY_DEFCONFIG="${A733_BRANDY_DEFCONFIG:-sun60iw2p1_a733_defconfig}"
 A733_IMAGE_NAME="${A733_IMAGE_NAME:-a733-micro.img}"
+# 调试串口：none | uart2（PB0/PB1 = 40-pin 7/11）| uart4（PJ24/PJ25 = 40-pin 16/18）
+A733_DEBUG_UART="${A733_DEBUG_UART:-none}"
+# NPU：A733 的 VIP9000（aw_nna_vip/vip2）。默认不开（驱动默认 n、官方 min defconfig 也没开）
+A733_WITH_NPU="${A733_WITH_NPU:-y}"
+# 是否把 NPU 用户态 runtime（VIPLite/vpm_run）也装进 rootfs
+A733_NPU_RUNTIME="${A733_NPU_RUNTIME:-y}"
 
 
 A733_DIR="${SOURCES_DIR}/a733"
@@ -44,8 +50,8 @@ cmd_a733_env() {
 		# A733 的 u-boot 是 AArch32，必须用 soft-float 的 gnueabi 工具链
 		gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
 		python3 python3-setuptools swig rsync curl wget git
-		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio
-		dosfstools mtools u-boot-tools binutils-aarch64-linux-gnu lz4
+		libncurses-dev libgnutls28-dev uuid-dev zstd kmod cpio xxd
+		dosfstools fdisk uuid-runtime mtools u-boot-tools binutils-aarch64-linux-gnu lz4
 	)
 	info "安装 A733 构建依赖（需要 sudo）..."
 	run_root apt-get update
@@ -116,6 +122,11 @@ cmd_a733_uboot() {
 	extra_cflags="${extra_cflags} -Wno-maybe-uninitialized -Wno-misleading-indentation"
 	extra_cflags="${extra_cflags} -Wno-stringop-overflow -Wno-stringop-truncation"
 
+	# 环境里缺 xxd 时，u-boot 的 prepare 会留下 0 字节的 sunxi_challenge.c，
+	# make 之后看到文件已存在就不再生成，链接时报 undefined reference。
+	if [[ -f "${u}/board/sunxi/sunxi_challenge.c" && ! -s "${u}/board/sunxi/sunxi_challenge.c" ]]; then
+		rm -f "${u}/board/sunxi/sunxi_challenge.c"
+	fi
 	info "配置 u-boot: ${defconfig}（dt=${dt}）"
 	# u-boot 的 Makefile 以当前目录为 objtree，必须 cd 进去（make -C 会把
 	# arch/arm/dts 之类的路径解析到工作区根上）
@@ -195,6 +206,12 @@ cmd_a733_uboot() {
 			sed -i "s|^CONFIG_BOOTCOMMAND=.*|CONFIG_BOOTCOMMAND=\"${fastboot}\"|" .config
 			info "u-boot 快速启动：关 PCIe/UFS/USB，bootdelay=0，直接 sysboot extlinux"
 		fi
+		# 调试串口换到 UART2/4 时，u-boot 的 console 索引也跟着换
+		# （sunxi 的 CONFIG_CONS_INDEX 是 1-based：uart0=1, uart2=3, uart4=5）
+		case "${A733_DEBUG_UART:-}" in
+		uart2) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=3/' .config ;;
+		uart4) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=5/' .config ;;
+		esac
 		make ARCH=arm CROSS_COMPILE="${cc}" olddefconfig >/dev/null
 
 		info "编译 u-boot（ARCH=arm CROSS_COMPILE=${cc}）..."
@@ -254,6 +271,27 @@ a733_pack_bootloader() {
 
 	# sys_config.fex -> sys_config.bin（fex 需要 CRLF，官方用 unix2dos）
 	cp -f "${d}/configs/cubie_a7z/sys_config.fex" sys_config.fex
+	# boot0 的调试打印走 115200 串口，量不小；生产默认关掉（调试时 A733_BOOT0_DEBUG=y）
+	if [[ "${A733_BOOT0_DEBUG:-n}" != "y" ]]; then
+		sed -i 's/^debug_mode.*/debug_mode  = 0/' sys_config.fex
+	fi
+	# UART2 调试口（PB0/PB1）和 JTAG 复用同一组脚，用 uart2 时把 JTAG 关掉
+	if [[ "${A733_DEBUG_UART}" == "uart2" ]]; then
+		sed -i 's/^jtag_enable.*/jtag_enable     = 0/' sys_config.fex
+	fi
+	# 调试串口搬到 UART2/4（boot0 从 [uart_para] 读），UART0 留给舵机
+	case "${A733_DEBUG_UART}" in
+	uart4)
+		sed -i 's/^uart_debug_port.*/uart_debug_port = 4/' sys_config.fex
+		sed -i 's/^uart_debug_tx.*/uart_debug_tx   = port:PJ24<2><1><default><default>/' sys_config.fex
+		sed -i 's/^uart_debug_rx.*/uart_debug_rx   = port:PJ25<2><1><default><default>/' sys_config.fex
+		;;
+	uart2)
+		sed -i 's/^uart_debug_port.*/uart_debug_port = 2/' sys_config.fex
+		sed -i 's/^uart_debug_tx.*/uart_debug_tx   = port:PB00<2><1><default><default>/' sys_config.fex
+		sed -i 's/^uart_debug_rx.*/uart_debug_rx   = port:PB01<2><1><default><default>/' sys_config.fex
+		;;
+	esac
 	sed -i 's/\r$//; s/$/\r/' sys_config.fex
 	"${t}/mod_update/script" sys_config.fex >/dev/null || die "sys_config.fex 转换失败"
 	[[ -f sys_config.bin ]] || die "没有得到 sys_config.bin"
@@ -403,13 +441,59 @@ cmd_a733_kernel() {
 			cp -f "${BSP_ROOT}/vendor/a733/dts/microduck-a7z-camera.dtsi" "${dstdir}/"
 			echo '#include "microduck-a7z-camera.dtsi"'
 		fi
+		if [[ "${A733_DEBUG_UART}" == "uart2" || "${A733_DEBUG_UART}" == "uart4" ]]; then
+			echo '#include "microduck-debug-uart.dtsi"'
+		fi
 	} > "${dstdir}/${A733_DTS_NAME}.dts"
+
+	# 调试串口：UART0（8/10）留给舵机，按 A733 的 pinmux 表把 UART2/4 引到空闲脚。
+	#   uart2 -> PB0/PB1 = 40-pin 7/11（注意 7 脚 HAT 做 Stemma SDA 时不要用）
+	#   uart4 -> PJ24/PJ25 = 40-pin 16/18（HAT 的 GPIO23/24 没分配功能，推荐）
+	if [[ "${A733_DEBUG_UART}" == "uart2" ]]; then
+		debug_pins='"PB0", "PB1"'
+	elif [[ "${A733_DEBUG_UART}" == "uart4" ]]; then
+		debug_pins='"PJ24", "PJ25"'
+	else
+		debug_pins=""
+	fi
+	if [[ -n "${debug_pins}" ]]; then
+		cat > "${dstdir}/microduck-debug-uart.dtsi" <<EOF
+/* 由 ./bsp kernel 生成：${A733_DEBUG_UART} 调试串口（UART0 留给舵机） */
+&pio {
+	uart_debug_pins: uart-debug-pins {
+		pins = ${debug_pins};
+		function = "${A733_DEBUG_UART}";
+	};
+};
+
+&${A733_DEBUG_UART} {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart_debug_pins>;
+};
+EOF
+	fi
 	grep -q "${A733_DTS_NAME}.dtb" "${dstdir}/Makefile" || \
 		echo "dtb-\$(CONFIG_ARCH_SUNXI) += ${A733_DTS_NAME}.dtb" >> "${dstdir}/Makefile"
 
 	# 3) 配置：defconfig + 精简 fragment
 	install -m 644 "${BSP_ROOT}/vendor/a733/microduck.config" \
 		"${k}/arch/arm64/configs/microduck.config"
+	# A733 的 NPU 是 VIP9000（驱动里 sun60iw2 对应 vip2）；两个驱动都 match
+	# "allwinner,npu"，galcore 是另一套（源码 28MB），二选一，别同时开。
+	if [[ "${A733_WITH_NPU}" == "y" ]]; then
+		cat >> "${k}/arch/arm64/configs/microduck.config" <<EOF
+
+# ---- NPU（VIP9000 / vip2）----
+CONFIG_AW_NNA_VIP=y
+CONFIG_NNA_VIP2=y
+# CONFIG_NNA_VIP1 is not set
+# CONFIG_AW_NNA_GALCORE is not set
+# VIP2 的 debugfs 代码依赖 DEBUG_FS；NPU_SET_CLK_VOL 打开时钟/电压节点
+CONFIG_DEBUG_FS=y
+CONFIG_NPU_SET_CLK_VOL=y
+EOF
+	fi
 	# BSP 的 Kconfig 用 $(BSP_TOP)platform/Kconfig（结尾斜杠），
 	# nand/codec 的 Makefile 还依赖 LICHEE_KERN_DIR 和 PWD（codec 用 $(PWD) 拼绝对路径）。
 	export BSP_TOP="${k}/bsp/"
@@ -460,9 +544,31 @@ cmd_a733_rootfs() {
 	# 复用 microduck 的精简 rootfs（sysvinit + busybox + ZRAM + 扩容），
 	# 只额外盖一层 A733 的 console/模块清单
 	ROOTFS_OVERLAY_EXTRA="${BSP_ROOT}/vendor/a733/overlay" \
+		ROOTFS_TINY=y \
+		ROOTFS_INIT="${A733_ROOTFS_INIT:-sysvinit}" \
 		INSTALL_AP6212_FIRMWARE=n \
 		ROOTFS_STRIP=y \
-		cmd_rootfs_micro "$@"
+		cmd_rootfs_micro "$@" || return
+
+	# NPU 用户态：VIPLite 库 + vpm_run + LeNet 冒烟样例
+	# （参考 jackhe183/radxa-dev：A733 是 VeriSilicon VIPLite，节点 /dev/vipcore）
+	if [[ "${A733_WITH_NPU}" == "y" && "${A733_NPU_RUNTIME:-y}" == "y" ]]; then
+		local stage="${SOURCES_DIR}/a733/npu-runtime"
+		info "安装 NPU runtime（VIPLite + vpm_run）"
+		if A733_CROSS_COMPILE="${A733_CROSS_COMPILE}" \
+			bash "${BSP_ROOT}/vendor/a733/npu/fetch-runtime.sh" --dest "${stage}" >/dev/null 2>&1; then
+			run_root mkdir -p "${OUT_DIR}/rootfs/usr/lib/viplite" \
+				"${OUT_DIR}/rootfs/usr/bin" "${OUT_DIR}/rootfs/usr/share/npu"
+			run_root cp -f "${stage}/stage/lib/"*.so "${OUT_DIR}/rootfs/usr/lib/viplite/"
+			run_root cp -f "${stage}/stage/bin/vpm_run" "${OUT_DIR}/rootfs/usr/bin/vpm_run"
+			run_root cp -f "${stage}/stage/share/"* "${OUT_DIR}/rootfs/usr/share/npu/" 2>/dev/null || true
+			run_root chmod 755 "${OUT_DIR}/rootfs/usr/bin/vpm_run" "${OUT_DIR}/rootfs/usr/sbin/microduck-npu" 2>/dev/null || true
+			run_root strip --strip-unneeded "${OUT_DIR}/rootfs/usr/bin/vpm_run" 2>/dev/null || true
+			info "NPU runtime: $(run_root du -sh "${OUT_DIR}/rootfs/usr/lib/viplite" | cut -f1) + vpm_run $(run_root du -sh "${OUT_DIR}/rootfs/usr/share/npu" | cut -f1) 样例"
+		else
+			warn "NPU runtime 拉取/编译失败：镜像里只有内核驱动（/dev/vipcore），没有 vpm_run"
+		fi
+	fi
 }
 
 # 把 A733 内核树编出的模块装进 rootfs：rk3566 的 install_kernel_modules 只看
@@ -475,6 +581,20 @@ rootfs_install_platform_modules() {
 	[[ -f "${A733_OUT}/kernel/Image" ]] || return 0
 
 	info "编译并安装 A733 内核模块 -> ${rootfs}/lib/modules"
+	# 先把最新的 fragment 合进 .config：否则改了 microduck.config（比如关掉
+	# AW_INPUT_SENSORINIT）又没重跑 ./bsp kernel 时，modules 会按旧配置编出
+	# init-input.ko，modpost 报 irq_to_desc undefined。
+	(
+		cd "${k}" || exit 1
+		# Kconfig 的 bsp/Kconfig 用 $(BSP_TOP) 拼路径，这里也要带上
+		export BSP_TOP="${k}/bsp/"
+		export LICHEE_KERN_DIR="${k}"
+		install -m 644 "${BSP_ROOT}/vendor/a733/microduck.config" \
+			"${k}/arch/arm64/configs/microduck.config" || exit 1
+		bash "${k}/scripts/kconfig/merge_config.sh" -m -O "${k}" "${k}/.config" \
+			"${k}/arch/arm64/configs/microduck.config" >/dev/null 2>&1 || exit 1
+		make ARCH=arm64 CROSS_COMPILE="${A733_CROSS_COMPILE}" olddefconfig >/dev/null 2>&1 || exit 1
+	)
 	(
 		cd "${k}" || exit 1
 		export BSP_TOP="${b%/}/"
@@ -497,6 +617,27 @@ rootfs_install_platform_modules() {
 		run_root depmod -b "${rootfs}" -a "${rel}" || warn "depmod 失败"
 	fi
 	info "模块数: $(run_root find "${rootfs}/lib/modules" -name '*.ko*' | wc -l)"
+
+	# 只留和这块板子相关的模块：QCOM/Renesas/Rockchip/MediaTek/Tegra/Ath/Marvell/
+	# Broadcom 等其它平台的驱动对 A733 没用，937 个 .ko 里能砍掉十几 MB。
+	if [[ "${MICRODUCK_MIN_MODULES:-y}" == "y" ]]; then
+		local before after
+		before="$(run_root du -sk "${rootfs}/lib/modules" 2>/dev/null | cut -f1)"
+		run_root find "${rootfs}/lib/modules" -name '*.ko*' -print0 2>/dev/null |
+			while IFS= read -r -d '' ko; do
+				case "${ko}" in
+				*/qcom/*|*/renesas/*|*/rockchip/*|*/mediatek/*|*/tegra/*|*/ath/*/|*/ath[0-9]*)
+					run_root rm -f "${ko}" ;;
+				*/marvell/*|*/brcm/*|*/broadcom/*|*/samsung/*|*/fsl/*|*/imx/*|*/wcn/*|*/ti/*|*/hisilicon/*|*/amlogic/*|*/nvidia/*|*/intel/*|*/amd/*|*/xilinx/*)
+					run_root rm -f "${ko}" ;;
+				esac
+			done
+		run_root depmod -b "${rootfs}" -a "$(make -s -C "${k}" ARCH=arm64 \
+			CROSS_COMPILE="${A733_CROSS_COMPILE}" kernelrelease 2>/dev/null | tr -d '[:space:]')" \
+			>/dev/null 2>&1 || warn "裁剪后 depmod 失败"
+		after="$(run_root du -sk "${rootfs}/lib/modules" 2>/dev/null | cut -f1)"
+		info "模块裁剪: $((before / 1024)) MB -> $((after / 1024)) MB（$(run_root find "${rootfs}/lib/modules" -name '*.ko*' | wc -l) 个）"
+	fi
 }
 
 # 检查编出来的 dtb 是否满足 HAT 的 BSP/HAL 基本要求
@@ -529,6 +670,9 @@ cmd_a733_hal() {
 	check "关机检测 PB2（gpio-keys）" 'hat-power-detect'
 	if [[ "${A733_WITH_CAMERA:-n}" == "y" ]]; then
 		check "摄像头 IMX219（VIN sensor0）" 'imx219'
+	fi
+	if [[ "${A733_WITH_NPU:-n}" == "y" ]]; then
+		check "NPU 节点 npu@3600000" 'npu@3600000'
 	fi
 
 	rm -f "${txt}"
@@ -583,6 +727,11 @@ cmd_a733_pack() {
 	# loglevel=4：只保留 warning 以上。115200 下日志本身要占掉几百毫秒，
 	# 调试时临时改成 7/8 即可。
 	bootargs="console=ttyAS0,115200 root=/dev/mmcblk0p2 rw rootwait cma=128M loglevel=4"
+	# 可选：A733_CONSOLE 覆盖 console=，方便把调试串口换到 UART2/4。
+	# 注意内核串口是 BSP 驱动，注册名是 ttyAS*（不是 ttyS*）。
+	if [[ -n "${A733_CONSOLE:-}" ]]; then
+		bootargs="${bootargs/console=ttyAS0,115200/console=${A733_CONSOLE}}"
+	fi
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
@@ -716,11 +865,14 @@ EOF
 	fs_mb="$(run_root du --apparent-size -sm "${rootdir}" | cut -f1)"
 	local file_count
 	file_count="$(run_root find "${rootdir}" | wc -l)"
-	fs_mb=$(( fs_mb + file_count * 4 / 1024 + 64 ))
-	fs_mb=$(( fs_mb * 110 / 100 ))
+	# 尺寸 = 内容 + inode 表开销 + 一张很小的余量；以前是 +64MB 再 +10%，
+	# 在 300MB 级 rootfs 上会白占 ~100MB（mkfs 出来一半是空的）。
+	fs_mb=$(( fs_mb + file_count * 4 / 1024 + 24 ))
+	fs_mb=$(( fs_mb * 104 / 100 ))
 	info "rootfs.ext4: ${fs_mb} MiB，UUID=${rootfs_uuid}"
 	run_root rm -f "${OUT_DIR}/rootfs.ext4"
-	run_root mkfs.ext4 -d "${rootdir}" -L rootfs -U "${rootfs_uuid}" \
+	# -m 0：不留 5% 的 root 保留块（A7Z 的 rootfs 不会满到需要它）
+	run_root mkfs.ext4 -m 0 -d "${rootdir}" -L rootfs -U "${rootfs_uuid}" \
 		"${OUT_DIR}/rootfs.ext4" "${fs_mb}M" >/dev/null || die "mkfs.ext4 失败"
 	# 镜像大小按"实际生成的 rootfs.ext4"算，再留 8 MiB 给磁盘末尾的 GPT 备份
 	# 头/分区表（34 个扇区）。少了这段余量，p2 会比文件系统小几块，内核报
@@ -729,6 +881,22 @@ EOF
 	fs_bytes=$(run_root stat -c%s "${OUT_DIR}/rootfs.ext4")
 	img_size=$(( root_start * 512 + fs_bytes + 8 * 1048576 ))
 	img_size=$(( (img_size + 1048576 - 1) / 1048576 * 1048576 ))
+
+	# mkfs -d 的尺寸是估算的，实际会空出几十 MB。用 resize2fs -M 缩到最小，
+	# 再补 16 MiB 余量，镜像长度按真实文件大小算，省掉这块空白。
+	run_root e2fsck -fy "${OUT_DIR}/rootfs.ext4" >/dev/null 2>&1 || true
+	if run_root resize2fs -M "${OUT_DIR}/rootfs.ext4" >/dev/null 2>&1; then
+		local fs_blocks
+		fs_blocks="$(run_root dumpe2fs -h "${OUT_DIR}/rootfs.ext4" 2>/dev/null |
+			awk -F: '/Block count/{gsub(/[ \t]/,"",$2); print $2}')"
+		if [[ -n "${fs_blocks}" ]]; then
+			run_root resize2fs "${OUT_DIR}/rootfs.ext4" $(( fs_blocks + 4096 )) \
+				>/dev/null 2>&1 || true
+		fi
+		info "rootfs.ext4 收缩到 $(run_root du -sm "${OUT_DIR}/rootfs.ext4" | cut -f1) MiB（+16 MiB 余量）"
+	fi
+	fs_bytes="$(run_root stat -c%s "${OUT_DIR}/rootfs.ext4")"
+	img_size=$(( root_start * 512 + fs_bytes ))
 
 	# 3) config 分区（16 MiB FAT）
 	tmp_cfg="${A733_OUT}/config.fat"

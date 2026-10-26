@@ -1,0 +1,64 @@
+#!/bin/sh
+# microduck-pad —— 手柄热插拔钩子（udev 调用）
+#   microduck-pad add js0     手柄出现
+#   microduck-pad remove js0  手柄移除
+#
+# 说明：产品镜像里真正读手柄的是 padd（直接读 /dev/input/event*），
+# robotd 通过 padd 的 IPC 拿输入；本脚本只负责：
+#   1) 把 padd / robotd 拉起来（如果还没跑）；
+#   2) 写一份诊断状态 /run/microduck/pad.json，给 Studio / SSH 排查用。
+# padd 或 robotd 不需要读这个文件。
+set -u
+
+ACTION=${1:-add}
+DEV=${2:-pad}
+RUN=/run/microduck
+STATE="$RUN/pad.json"
+
+mkdir -p "$RUN"
+
+kmsg() { printf 'microduck-pad: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
+
+is_running() { pgrep -f "$1" >/dev/null 2>&1; }
+
+find_padd() {
+	for p in /opt/robot/*/padd /usr/local/bin/padd /usr/sbin/padd /opt/padd; do
+		[ -x "$p" ] && { echo "$p"; return 0; }
+	done
+	return 1
+}
+
+start_product() {
+	# robotd：有 init 脚本优先，其次直接拉起
+	if [ -x /etc/init.d/robotd ] && ! is_running robotd; then
+		/etc/init.d/robotd start >/dev/null 2>&1 && kmsg "robotd 已启动"
+	elif [ -x /usr/sbin/robotd ] && ! is_running robotd; then
+		/usr/sbin/robotd >/dev/null 2>&1 &
+		kmsg "robotd 已拉起"
+	fi
+	# padd：手柄输入的实际读取者
+	if padd=$(find_padd); then
+		if ! is_running "$padd"; then
+			"$padd" >/dev/null 2>&1 &
+			kmsg "padd 已拉起: $padd"
+		fi
+	fi
+}
+
+case "$ACTION" in
+add)
+	start_product
+	printf '{"state":"connected","dev":"%s","js":"%s","ts":%s,"source":"udev"}\n' \
+		"$DEV" "$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
+	kmsg "手柄连接: $DEV"
+	;;
+remove)
+	printf '{"state":"disconnected","dev":"%s","ts":%s,"source":"udev"}\n' \
+		"$DEV" "$(cut -d' ' -f1 /proc/uptime)" > "$STATE"
+	kmsg "手柄断开: $DEV"
+	;;
+*)
+	echo "用法: microduck-pad {add|remove} <dev>" >&2
+	exit 1
+	;;
+esac

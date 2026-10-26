@@ -1,0 +1,14 @@
+[Unit]
+Description=microduck: WiFi 自动连接（wpa_supplicant，多 profile）
+After=local-fs.target microduck-grow.service network-pre.target
+Wants=network-pre.target
+Before=ssh.service
+ConditionPathExists=/usr/sbin/microduck-net
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/microduck-net auto
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

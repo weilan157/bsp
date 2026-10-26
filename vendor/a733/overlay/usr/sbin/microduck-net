@@ -1,0 +1,235 @@
+#!/bin/sh
+# microduck-net —— 多 WiFi 配置 + 自动连接（wpa_supplicant，无 NetworkManager）
+#
+#   microduck-net auto              开机用：加载模块、起 wpa_supplicant、拿 IP
+#   microduck-net scan              扫描周边 SSID
+#   microduck-net add <SSID> <PSK>  新增/覆盖一个网络（写 wpa_supplicant.conf）
+#   microduck-net list              列出已保存的 SSID
+#   microduck-net switch <SSID>     切换（把它的 priority 提到最高并重连）
+#   microduck-net forget <SSID>     删除
+#   microduck-net status            wlan0 / IP / 当前 SSID
+#
+# 换网：add 新 SSID 后 switch，旧配置保留（连不上会自动回退到信号最好的已保存网络）。
+set -u
+
+CONF=${MICRODUCK_WPA_CONF:-/etc/wpa_supplicant/wpa_supplicant.conf}
+IFACE=${MICRODUCK_WIFI_IFACE:-wlan0}
+MODULES=${MICRODUCK_MODULES:-/etc/microduck-modules}
+RUN=/run/microduck
+
+msg() { printf '%s\n' "$*" >&2; }
+kmsg() { printf 'microduck-net: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
+
+ensure_conf() {
+	mkdir -p "$(dirname "$CONF")" /run/wpa_supplicant
+	[ -f "$CONF" ] || : > "$CONF"
+	grep -q '^ctrl_interface=' "$CONF" 2>/dev/null || \
+		printf 'ctrl_interface=/run/wpa_supplicant\nupdate_config=1\n' >> "$CONF"
+}
+
+load_modules() {
+	[ -f "$MODULES" ] || return 0
+	while read -r m; do
+		case "$m" in ''|\#*) continue ;; esac
+		modprobe "$m" 2>/dev/null || true
+	done < "$MODULES"
+}
+
+wait_iface() {
+	i=0
+	while [ ! -e "/sys/class/net/$IFACE" ] && [ "$i" -lt 50 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+	[ -e "/sys/class/net/$IFACE" ]
+}
+
+supplicant_running() { pgrep -f "wpa_supplicant.*-i *$IFACE" >/dev/null 2>&1; }
+
+reconfigure() {
+	supplicant_running || return 0
+	wpa_cli -i "$IFACE" reconfigure >/dev/null 2>&1 || true
+}
+
+start_supplicant() {
+	ensure_conf
+	if ! supplicant_running; then
+		wpa_supplicant -B -i "$IFACE" -c "$CONF" >/dev/null 2>&1 || {
+			kmsg "wpa_supplicant 启动失败"
+			return 1
+		}
+	fi
+}
+
+dhcp_start() {
+	pgrep -f "udhcpc.*-i *$IFACE" >/dev/null 2>&1 && return 0
+	busybox udhcpc -i "$IFACE" -b -q -t 5 -T 2 >/dev/null 2>&1 &
+}
+
+# 每行输出 "<block>:<ssid>"（只认 network={...} 里的 ssid）
+ssid_ids() {
+	[ -f "$CONF" ] || return 0
+	awk '
+	/^[ \t]*network=\{/ { n++; inb = 1; next }
+	inb && /^[ \t]*ssid=/ {
+		line = $0; sub(/^[^"]*"/, "", line); sub(/".*$/, "", line)
+		print n "\t" line
+	}
+	inb && /^\}/ { inb = 0 }
+	' "$CONF"
+}
+
+# 重写 conf：target 之外的块 priority=10，target 块 priority=100
+rewrite_priority() {
+	target="$1"
+	tmp="${CONF}.tmp.$$"
+	awk -v target="$target" '
+	/^[ \t]*network=\{/ {
+		inb = 1; buf = $0 "\n"; ssid = ""; hasprio = 0
+		next
+	}
+	inb && /^[ \t]*ssid=/ {
+		line = $0; sub(/^[^"]*"/, "", line); sub(/".*$/, "", line); ssid = line
+		buf = buf $0 "\n"; next
+	}
+	inb && /^[ \t]*priority=/ { hasprio = 1; buf = buf "	priority=" (ssid == target ? 100 : 10) "\n"; next }
+	inb && /^\}/ {
+		if (!hasprio)
+			buf = buf "	priority=" (ssid == target ? 100 : 10) "\n"
+		buf = buf "}\n"
+		printf "%s", buf
+		inb = 0; next
+	}
+	inb { buf = buf $0 "\n"; next }
+	{ print }
+	' "$CONF" > "$tmp" && mv "$tmp" "$CONF"
+}
+
+# 删除某个 ssid 的块
+drop_ssid() {
+	target="$1"
+	tmp="${CONF}.tmp.$$"
+	awk -v target="$target" '
+	/^[ \t]*network=\{/ { inb = 1; buf = $0 "\n"; ssid = ""; next }
+	inb && /^[ \t]*ssid=/ {
+		line = $0; sub(/^[^"]*"/, "", line); sub(/".*$/, "", line); ssid = line
+		buf = buf $0 "\n"; next
+	}
+	inb && /^\}/ {
+		buf = buf "}\n"
+		if (ssid != target) printf "%s", buf
+		inb = 0; next
+	}
+	inb { buf = buf $0 "\n"; next }
+	{ print }
+	' "$CONF" > "$tmp" && mv "$tmp" "$CONF"
+}
+
+cmd_auto() {
+	load_modules
+	if ! wait_iface; then
+		kmsg "没有 $IFACE（驱动没加载？）"
+		return 0
+	fi
+	ip link set "$IFACE" up 2>/dev/null || true
+	start_supplicant || return 1
+	dhcp_start
+	mkdir -p "$RUN"
+	printf '%s\n' "$(ip -4 addr show dev "$IFACE" 2>/dev/null | awk '/inet /{print $2}' | head -1)" \
+		> "$RUN/wifi-ip" 2>/dev/null || true
+	i=0
+	while [ "$i" -lt 30 ]; do
+		ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q 'inet ' && return 0
+		sleep 0.5
+		i=$((i + 1))
+	done
+	return 0
+}
+
+cmd_scan() {
+	load_modules
+	wait_iface || { msg "没有 $IFACE"; return 1; }
+	ip link set "$IFACE" up 2>/dev/null || true
+	iw dev "$IFACE" scan 2>/dev/null |
+		awk -F': ' '/^[ \t]*SSID:/{print $2}' | grep -v '^$' | sort -u
+}
+
+cmd_add() {
+	ssid=${1:-}; psk=${2:-}
+	[ -n "$ssid" ] || { msg "用法: microduck-net add <SSID> <PSK>"; return 1; }
+	[ -n "$psk" ] || { msg "缺少 PSK"; return 1; }
+	ensure_conf
+	if ssid_ids | awk -F'\t' -v s="$ssid" '$2 == s {found=1} END {exit !found}'; then
+		msg "已存在：$ssid（要改先 forget）"
+		return 1
+	fi
+	# wpa_passphrase 会生成带 hash 的 network 块，避免明文 PSK
+	{ printf '\n'; wpa_passphrase "$ssid" "$psk" | sed 's/^[ \t]*#psk=.*$//'; } >> "$CONF"
+	reconfigure
+	msg "已保存：$ssid"
+}
+
+cmd_list() {
+	ssid_ids | awk -F'\t' '!seen[$2]++ {print $2}'
+}
+
+cmd_switch() {
+	ssid=${1:-}
+	[ -n "$ssid" ] || { msg "用法: microduck-net switch <SSID>"; return 1; }
+	ensure_conf
+	ssid_ids | awk -F'\t' -v s="$ssid" '$2 == s {found=1} END {exit !found}' || {
+		msg "没有保存 $ssid"
+		return 1
+	}
+	rewrite_priority "$ssid"
+	reconfigure
+	# 直接让 wpa_supplicant 重连到目标（不一定立刻成功，失败会自己回退）
+	id=$(wpa_cli -i "$IFACE" list_networks 2>/dev/null |
+		awk -F'\t' -v s="$ssid" '$2 == s {print $1; exit}')
+	if [ -n "$id" ]; then
+		wpa_cli -i "$IFACE" select_network "$id" >/dev/null 2>&1 || true
+	fi
+	msg "切换到：$ssid"
+}
+
+cmd_forget() {
+	ssid=${1:-}
+	[ -n "$ssid" ] || { msg "用法: microduck-net forget <SSID>"; return 1; }
+	ensure_conf
+	drop_ssid "$ssid"
+	reconfigure
+	msg "已删除：$ssid"
+}
+
+cmd_combo() {
+	# 看驱动允许的接口组合（AP+STA 共存能力），以及当前是否已有 ap0
+	printf '=== iw list 接口组合 ===\n'
+	iw list 2>/dev/null | sed -n '/valid interface combinations/,/^[[:space:]]*$/p' | head -20
+	printf '\n=== 当前接口 ===\n'
+	iw dev 2>/dev/null | awk '/Interface|type/ {print "  " $0}'
+	printf '\nAP+STA：驱动声明 STATION+AP 组合、且 CONFIG_MCC=y 时可行；\n'
+	printf '同信道最稳，跨信道会有分时开销。用 microduck-ap start 开热点。\n'
+}
+cmd_status() {
+	printf '接口: %s %s\n' "$IFACE" "$([ -e "/sys/class/net/$IFACE" ] && echo 存在 || echo 不存在)"
+	printf 'SSID: %s\n' "$(iwgetid -r "$IFACE" 2>/dev/null || echo -)"
+	printf 'IP:   %s\n' "$(ip -4 addr show dev "$IFACE" 2>/dev/null | awk '/inet /{print $2}' | paste -sd, -)"
+	printf '已保存: %s\n' "$(cmd_list | paste -sd, -)"
+	if supplicant_running; then
+		printf 'wpa_supplicant: 运行中\n'
+	else
+		printf 'wpa_supplicant: 未运行\n'
+	fi
+}
+
+case "${1:-status}" in
+	auto) cmd_auto ;;
+	scan) cmd_scan ;;
+	add) shift; cmd_add "$@" ;;
+	list) cmd_list ;;
+	switch) shift; cmd_switch "$@" ;;
+	combo) cmd_combo ;;
+	forget) shift; cmd_forget "$@" ;;
+	status) cmd_status ;;
+	*) msg "用法: microduck-net {auto|scan|add|list|switch|forget|status|combo}"; exit 1 ;;
+esac
