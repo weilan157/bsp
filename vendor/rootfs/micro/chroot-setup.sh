@@ -29,6 +29,7 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	alsa-utils \
 	i2c-tools \
 	openssh-server dbus avahi-daemon libnss-mdns \
+	iptables \
 	iproute2 procps
 
 INIT="${ROOTFS_INIT:-sysvinit}"
