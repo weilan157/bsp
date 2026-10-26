@@ -21,7 +21,7 @@
 | 软件侧改动 | 少量：`board.rs` 加 A733、`robotd.toml` 端口、VIPLite 后端、cedar 媒体 | 大量：重写服务管理/日志/更新；NM 换成 wpa_supplicant |
 | 工作量（估） | 10–15 人日（含 NPU/媒体适配） | 15–30 人日，且大部分是重复劳动 |
 | 与上游关系 | 基本不用 fork，release/updater 原样可用 | 永久 fork；每个上游 release 都要重新移植 |
-| 镜像体积 | +100–150 MB（systemd/NM/journald/GStreamer），271 → 约 380–420 MB | 保持 271 MB 左右（甚至更小） |
+| 镜像体积 | 实测：systemd +9 MB、NetworkManager +23.5 MB、GStreamer 精选 ~30–40 MB（全量插件是 718 MB，别这么装）→ 271 → 约 **300 MB**（A2）/ **340 MB**（A1） | 保持 271 MB 左右 |
 | 启动时间 | systemd+NM 多 1–2 s（5 s 目标要看实测） | 快（sysvinit），但要自己保证服务顺序/重启 |
 | 功能完整度 | `updaterd`、`robotctl`、journal、sysusers 直接可用 | 这些都要自己补，或者砍掉（就没有 OTA 了） |
 | 风险 | 镜像变大、启动变慢；GStreamer/MPP→cedar 仍需改 | 改动面大、易漏（317 处 systemctl 引用）、回归难 |
@@ -58,3 +58,26 @@ B 只在一种情况下更优：**产品硬性要求无 systemd/镜像 <300 MB�
 - NPU：RKNN → VIPLite（`/dev/vipcore`、`.nb`）；
 - 摄像头：RKMPP → A733 的 VIN/cedar；
 - IMU：原版 imu_to_dxl（串口总线）vs 复刻 HAT 的 I2C BMI088，二选一。
+
+## 实测：systemd 到底占多少
+
+Debian 13（trixie）净 chroot，同一套包（busybox/kmod/e2fsprogs/util-linux/wpa/iw/bluez/iproute2/procps/
+openssh-server/dbus/avahi/hostapd/dnsmasq），只换 init：
+
+| 组合 | installed-size | 增量 |
+|---|---|---|
+| sysvinit-core（现状） | 192,949 KB | — |
+| systemd + systemd-sysv（含 journald） | 202,225 KB | **+9.1 MB** |
+| 再装 NetworkManager | 225,772 KB | **+23.5 MB** |
+| 再装 GStreamer（base+good+bad+libav+tools，全量） | 944,281 KB | **+718 MB**（bad 会拖 llvm/onnxruntime/mesa/gtk） |
+
+结论：
+
+- **systemd 本身只多 ~9 MB**：我们的镜像里已经有 `udev`（10.2 MB）和它依赖的
+  `libsystemd-shared`（6.8 MB），systemd 包本体 9.9 MB，换掉 sysvinit-core 又省回 ~1 MB；
+- 真正的大头是 **GStreamer**，而且**不能整包装**：`gstreamer1.0-plugins-bad` 会把
+  libllvm19（127 MB）、libonnxruntime、mesa、gtk 全拖进来。要用只装
+  `libgstreamer1.0-0`（5.2 MB）+ `gstreamer1.0-plugins-base`（2.6 MB）+
+  `gstreamer1.0-plugins-good`（8.1 MB）+ `libgstreamer-plugins-bad1.0-0`（3.3 MB，
+  webrtcbin 在这里），合计约 20 MB + 依赖，**30–40 MB 量级**；
+- 镜像打包是 1:1（resize2fs -M 后），rootfs 多 10 MB ≈ 镜像多 10 MB。
