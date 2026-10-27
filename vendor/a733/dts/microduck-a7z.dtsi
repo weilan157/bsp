@@ -158,10 +158,16 @@
 	status = "okay";
 	soundcard-mach,name = "microduck-audio";
 	soundcard-mach,format = "i2s";
-	/* TLV320AIC3104 需要 MCLK：由 SoC 提供，mclk-fs=256（48k*256=12.288MHz）。
-	 * frame/bitclock 也由 SoC 做主，codec 只当 slave。 */
-	soundcard-mach,frame-master = <&i2s0_cpu>;
-	soundcard-mach,bitclock-master = <&i2s0_cpu>;
+	/* 实验：codec 做 BCLK/WCLK 主（CBM_CFM），SoC 当从。
+	 * 用来区分两种情况：
+	 *   - 能出声  -> SoC 侧 BCLK/LRCK 输出有问题；
+	 *   - 卡住/xrun -> codec 没收到 MCLK。
+	 * 原配置（SoC 主，CBS_CFS）保留在注释里：
+	 *   soundcard-mach,frame-master = <&i2s0_cpu>;
+	 *   soundcard-mach,bitclock-master = <&i2s0_cpu>;
+	 */
+	soundcard-mach,frame-master = <&audio_codec>;
+	soundcard-mach,bitclock-master = <&audio_codec>;
 	soundcard-mach,slot-num = <2>;
 	/* 16 bit：aplay 送的是 S16_LE，TLV320AIC3104 默认也是 16 bit 字长。
 	 * 之前写 32（HDMI 那条通路的值）会让主机按 32 bit slot 发、codec 按
