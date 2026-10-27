@@ -90,14 +90,34 @@ try_sta() {
 
 	if wpa_cli -p /run/wpa_supplicant -i "$WIFI_IF" status 2>/dev/null \
 		| grep -q 'wpa_state=COMPLETED'; then
-		busybox udhcpc -i "$WIFI_IF" -b -q -t 5 -T 2 \
-			-s /usr/share/udhcpc/default.script >/dev/null 2>&1 || true
+		# 5GHz 首次关联后 DHCP 常常要十几秒，多试几轮
+		n=0
+		while [ $n -lt 3 ]; do
+			busybox udhcpc -i "$WIFI_IF" -b -q -t 6 -T 2 \
+				-s /usr/share/udhcpc/default.script >/dev/null 2>&1 && break
+			ip -4 addr show dev "$WIFI_IF" | grep -q 'inet ' && break
+			n=$((n + 1))
+			sleep 2
+		done
 		kmsg "wifi associated at $(cut -d' ' -f1 /proc/uptime)s"
 		/usr/sbin/microduck-timesync >/dev/null 2>&1 &
 		return 0
 	fi
 	pkill -f "wpa_supplicant.*$WIFI_IF" 2>/dev/null
 	return 1
+}
+
+# STA 成功且 ap.conf ENABLED=1 时拉起 AP+STA 共存（ap0 独立 vif）
+maybe_start_ap_coexist() {
+	grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null || return 0
+	# 已经开着就不重复起
+	[ -e "/sys/class/net/$(sed -n 's/^AP_IFACE=//p' /etc/microduck/ap.conf | head -1)" ] && return 0
+	if /usr/sbin/microduck-ap start >/dev/null 2>&1; then
+		kmsg "AP+STA coexist enabled"
+		: > /run/microduck-ap.pid
+	else
+		kmsg "AP+STA coexist failed (see dmesg)"
+	fi
 }
 
 start_ap() {
@@ -125,14 +145,7 @@ if try_sta; then
 	kmsg "online"
 	# AP+STA 共存：连上 STA 后再拉起热点（ap0 独立 vif，驱动 CONFIG_MCC=y）。
 	# 必须在 STA 成功之后做：hostapd 绑定 phy 时 wlan0 得已经 up 且关联。
-	if grep -q '^ENABLED=1' /etc/microduck/ap.conf 2>/dev/null; then
-		if /usr/sbin/microduck-ap start >/dev/null 2>&1; then
-			kmsg "AP+STA coexist enabled ($(sed -n 's/^ADDR=//p' /etc/microduck/ap.conf))"
-			: > /run/microduck-ap.pid
-		else
-			kmsg "AP+STA coexist failed (see dmesg)"
-		fi
-	fi
+	maybe_start_ap_coexist
 else
 	kmsg "STA failed / no config, starting AP portal"
 	start_ap
@@ -141,6 +154,8 @@ else
 		sleep "$STA_RETRY_INTERVAL"
 		if try_sta; then
 			kmsg "STA ok while AP was up, AP stopped"
+			# 之前这里只 break，导致「先 AP 配网、后连上 STA」时共存热点不会恢复
+			maybe_start_ap_coexist
 			break
 		fi
 		# try_sta 失败时可能把 AP 关了（它开头会 stop_ap），重新拉起
