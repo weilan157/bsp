@@ -44,7 +44,9 @@ grow_partition() {
 	fi
 
 	if command -v parted >/dev/null 2>&1; then
-		if parted -s "$disk" print 2>&1 | grep -qi 'fix the GPT'; then
+		# 注意不能用 parted -s：脚本模式会抑制 "you can fix the GPT ..."
+		# 这条警告，grep 永远匹配不到，备份头也就不会被移动。
+		if parted "$disk" print 2>&1 | grep -qi 'fix the GPT'; then
 			printf 'Fix\n' | parted ---pretend-input-tty "$disk" print >/dev/null 2>&1
 		fi
 		sectors=$(cat "/sys/class/block/$(basename "$disk")/size" 2>/dev/null)

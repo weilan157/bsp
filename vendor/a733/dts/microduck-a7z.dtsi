@@ -116,11 +116,22 @@
 		regulator-max-microvolt = <3300000>;
 		regulator-always-on;
 	};
+	/* TLV320AIC3104 的 DVDD 是数字核电源，必须 1.8V。
+	 * 之前四路全接 3.3V，驱动直接拒绝：
+	 *   tlv320aic3x 7-0018: Too high supply voltage(s) AVDD: 3300000, DVDD: 3300000
+	 * 结果 mic bias / 内部参考不按 3.3V 配置，麦克风增益异常。 */
+	codec_1v8: regulator-codec-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "codec-1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
 };
 
 &audio_codec {
 	AVDD-supply  = <&codec_3v3>;
-	DVDD-supply  = <&codec_3v3>;
+	DVDD-supply  = <&codec_1v8>;
 	IOVDD-supply = <&codec_3v3>;
 	DRVDD-supply = <&codec_3v3>;
 };

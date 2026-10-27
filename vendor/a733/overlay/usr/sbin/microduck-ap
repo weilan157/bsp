@@ -19,6 +19,9 @@ PSK_FILE=/etc/microduck/ap.psk
 PORTAL=1
 [ -f "$CONF" ] && . "$CONF"
 AP_IF=${AP_IFACE:-ap0}
+# STA 接口名：udev 可预测命名可能把它从 wlan0 改成 wlx<mac>
+STA_IF=$(for d in /sys/class/net/wlan0 /sys/class/net/wl*; do [ -e "$d" ] && basename "$d" && break; done)
+STA_IF=${STA_IF:-wlan0}
 
 kmsg() { printf 'microduck-ap: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
 die() { kmsg "$*"; printf '%s\n' "$*" >&2; exit 1; }
