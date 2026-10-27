@@ -1,10 +1,14 @@
 #!/bin/sh
-# microduck-audio-init —— 开机给 TLV320AIC3104 设一套可用通路
+# microduck-audio-init —— TLV320AIC3104 开机 mixer 设置
 #
-# TLV320AIC3104 通路（HAT）：
-#   播放：DAC -> HP（耳机）/ Line out
-#   录音：Line1L/R 或 Mic2L/R -> PGA -> ADC
-# 开机默认所有 mixer 都是关的，不设的话"能放能录但没声音"。
+# 依据参考实现（github.com/weilan157/microduck/deploy/audio/aic3104-init.sh）
+# 与 Pololu RPi Robot HAT 原理图：
+#   - 喇叭挂在 codec 的 **线输出** LEFT_LOP/RIGHT_LOP 上，经 U1 PAM8406 放大到 J1；
+#     HPOUT/HPROUT 在原理图上未接（插耳机孔永远没声）。
+#   - 'Line Playback Switch' 是 **LOP 输出级的 MUTE**（不是 line-in 旁路！），
+#     默认 off 就等于静音 —— 这是"有 I2S、无报错、完全没声"的常见原因。
+#   - 'Line Playback Volume' 是 LOP 增益，范围 0..9 dB。
+#   - 板上麦克风接 MIC3R（原理图 MK1 → MIC3R），采集走 Right PGA。
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
@@ -12,7 +16,6 @@ kmsg() { printf 'microduck-audio: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
 
 CARD="${AUDIO_CARD:-0}"
 
-# 等声卡出现（codec 是 i2c 设备，可能比本服务晚）
 i=0
 while [ ! -f "/proc/asound/card$CARD/id" ] && [ $i -lt 100 ]; do
 	sleep 0.1
@@ -20,31 +23,39 @@ while [ ! -f "/proc/asound/card$CARD/id" ] && [ $i -lt 100 ]; do
 done
 [ -f "/proc/asound/card$CARD/id" ] || { kmsg "没有 card$CARD"; exit 0; }
 
-# 控件名在不同 codec 上可能有差异，逐个尝试、缺了不算错
-setc() { amixer -c "$CARD" sset "$1" "$2" ${3:-} >/dev/null 2>&1 || true; }
-setb() { amixer -c "$CARD" sset "$1" "$2" >/dev/null 2>&1 || true; }
+# 容忍控件名差异：cset/sset 都试，失败不算错
+setv() { amixer -c "$CARD" cset name="$1" "$2" >/dev/null 2>&1 || amixer -c "$CARD" sset "$1" "$2" >/dev/null 2>&1 || true; }
 
-# 播放：PCM 音量 + HP 输出
-setc 'PCM' '80%'
-setc 'HP'  '80%'
-setb 'HP DAC' 'on'
-setb 'Left HP Mixer DACL1'  'on'
-setb 'Right HP Mixer DACR1' 'on'
-setb 'Left HPCOM Mixer DACL1'  'on'
-setb 'Right HPCOM Mixer DACR1' 'on'
-# Line out（如果接了 Line 输出）
-setb 'Line DAC' 'on'
-setb 'Left Line Mixer DACL1'  'on'
-setb 'Right Line Mixer DACR1' 'on'
+# ---- 播放：DAC -> Line 混合器 -> LOP 输出级（喇叭/功放）----
+setv 'PCM Playback Volume'       '127,127'
+setv 'Line DAC Playback Volume'  '118,118'
+setv 'Line Playback Switch'      'on,on'      # LOP 输出级静音位：必须 on
+setv 'Line Playback Volume'      '9,9'        # LOP 增益 0..9 dB
+# 保险：把 DAC -> Line 混合器的路由也打开（不同 codec 变体名字略有差异）
+setv 'Left Line Mixer DACL1'     'on'
+setv 'Right Line Mixer DACR1'    'on'
+setv 'Line DAC'                  'on'
+# 耳机输出未接，但一并打开无副作用
+setv 'HP DAC Playback Volume'    '118,118'
+setv 'HP Playback Switch'        'on,on'
 
-# 录音：Line 输入 + Mic2 输入都打开，PGA 适中
-setc 'Line' '70%'
-setc 'PGA'  '60%' 'cap'
-setb 'Left PGA Mixer Line1L' 'on'
-setb 'Right PGA Mixer Line1R' 'on'
-setb 'Left PGA Mixer Mic2L' 'on'
-setb 'Right PGA Mixer Mic2R' 'on'
-setb 'Left Line1L Mux' 'single-ended'
-setb 'Right Line1R Mux' 'single-ended'
+# ---- 采集：板上麦克风 -> MIC3R -> Right PGA ----
+setv 'Right PGA Mixer Mic3R' 'on'
+setv 'Left PGA Mixer Mic3R'  'off'
+setv 'Left PGA Mixer Mic3L'  'off'
+setv 'Right PGA Mixer Mic3L' 'off'
+setv 'Right PGA Mixer Line1R' 'off'
+setv 'Right PGA Mixer Line1L' 'off'
+setv 'Left PGA Mixer Line1R'  'off'
+setv 'Left PGA Mixer Line1L'  'off'
+setv 'Right PGA Mixer Line2R' 'off'
+setv 'PGA Capture Switch' 'on,on'
+setv 'PGA Capture Volume' '60,60'
 
-kmsg "已设置 mixer (card$CARD)"
+# 回读确认（日志里能看到，便于远程排查）
+for c in 'PCM Playback Volume' 'Line Playback Switch' 'Line Playback Volume'; do
+	v=$(amixer -c "$CARD" cget name="$c" 2>/dev/null | grep -m1 ': values=' | sed 's/.*: values=//')
+	[ -n "$v" ] && kmsg "$c = $v"
+done
+
+kmsg "mixer 已设置 (card$CARD)"
