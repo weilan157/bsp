@@ -1,0 +1,71 @@
+#!/bin/sh
+# microduck-audio —— 音频自检/测试
+#
+#   microduck-audio            列出声卡与常用 mixer，并做一次 3 秒录音
+#   microduck-audio play       播 440 Hz 正弦（2 秒，左右声道）
+#   microduck-audio rec [秒]   录一段到 /tmp/mic.wav（默认 5 秒）
+#   microduck-audio loop [秒]  录一段并立刻回放（验证 mic + 输出通路）
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+CARD="${AUDIO_CARD:-0}"
+CMD="${1:-info}"
+
+have_card() { [ -f "/proc/asound/card$CARD/id" ]; }
+
+if ! have_card; then
+	echo "没有 card$CARD：检查 codec（i2c 7-0018）与 snd-soc-tlv320aic3x 模块"
+	lsmod | grep -i tlv320 || true
+	ls /sys/bus/i2c/devices/ 2>/dev/null | grep -E '^7-' || true
+	exit 1
+fi
+
+ensure_mixer() {
+	if [ -x /usr/sbin/microduck-audio-init ]; then
+		/usr/sbin/microduck-audio-init >/dev/null 2>&1 || true
+	fi
+}
+
+case "$CMD" in
+info)
+	echo "=== 声卡 ==="
+	cat /proc/asound/cards
+	echo
+	echo "=== 采集/播放设备 ==="
+	arecord -l 2>&1 | head -6
+	aplay -l 2>&1 | head -6
+	echo "=== mixer（前 12 个）==="
+	amixer -c "$CARD" scontrols 2>&1 | head -12
+	echo
+	echo "=== 关键增益 ==="
+	for c in PCM HP Line PGA Capture; do
+		amixer -c "$CARD" sget "$c" 2>/dev/null | head -4
+	done
+	;;
+play)
+	ensure_mixer
+	echo "播放 440Hz 正弦 2 秒（左右声道）..."
+	speaker-test -D "hw:$CARD,0" -c 2 -t sine -f 440 -l 1 2>&1 | tail -5
+	;;
+rec)
+	N="${2:-5}"
+	ensure_mixer
+	echo "录音 ${N}s → /tmp/mic.wav"
+	arecord -D "hw:$CARD,0" -f S16_LE -r 48000 -c 2 -d "$N" /tmp/mic.wav && \
+		ls -l /tmp/mic.wav
+	;;
+loop)
+	N="${2:-5}"
+	ensure_mixer
+	echo "录音 ${N}s → 回放"
+	if arecord -D "hw:$CARD,0" -f S16_LE -r 48000 -c 2 -d "$N" /tmp/mic.wav; then
+		ls -l /tmp/mic.wav
+		echo "回放 ..."
+		aplay -D "hw:$CARD,0" /tmp/mic.wav
+		echo "完成（如果喇叭/耳机里能听到刚才的声音，说明 mic+输出都通）"
+	fi
+	;;
+*)
+	sed -n '2,10p' "$0"
+	;;
+esac

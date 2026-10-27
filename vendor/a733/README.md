@@ -278,6 +278,31 @@ resize2fs /dev/mmcblk0p2
 
 实测：`98304 -> 7786494 blocks`，`df /` 从 445M 变成 **28G**。
 
+## 音频（TLV320AIC3104）
+
+HAT 上的 codec 挂在 **TWI7 @0x18**，走 **I2S0**（PB4–PB8 = MCLK/BCLK/LRCK/DOUT/DIN）。
+
+- DT：`audio_codec: tlv320aic3104@18` + `&i2s0_mach`（name `microduck-audio`，
+  `mclk-fs=256`，frame/bitclock master = SoC）；
+- 供电：`AVDD/IOVDD/DRVDD` = 3.3V、**`DVDD` = 1.8V**（数字核；接 3.3V 时驱动报
+  `Too high supply voltage(s)`）；
+- 模块：`snd-soc-tlv320aic3x` + `snd-soc-tlv320aic3x-i2c`（写在 `/etc/microduck-modules`，
+  由 `microduck-wifi` 在开机时 modprobe）；
+- 开机由 `microduck-audio.service` 执行 `microduck-audio-init`，打开
+  DAC→HP/Line 与 Line/Mic2→PGA→ADC 通路（默认 mixer 全关，不设就"能放能录但没声"）。
+
+自检：
+
+```
+microduck-audio            # 列声卡 / 设备 / mixer
+microduck-audio play       # 440Hz 正弦 2s（左右声道）
+microduck-audio rec 5      # 录 5s → /tmp/mic.wav
+microduck-audio loop 5     # 录 + 回放，验证 mic 与输出通路
+```
+
+已知噪声：启动日志里的 4 条 `sound-mach: simple_dai_link_of failed` 来自未启用的
+`sndi2s1/2/3` 与 `sndowa`，与 `microduck-audio` 无关，可忽略。
+
 ## 已知限制 / 待办## 已知限制 / 待办
 
 - **蓝牙未通**：`aic_btusb` 需要 class `e0` 的 USB 接口，而 FCU760K 只有 1 个 `ff/ff/ff`

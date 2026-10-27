@@ -110,7 +110,8 @@ if [ "$INIT" = "systemd" ]; then
 	# 回退 + AP/STA 共存）—— 两者都会去管 wlan0，会互相抢。
 	# microduck-ap 也不要开机自启：它要在 STA 关联成功之后才由 wifi 服务拉起。
 	for u in ssh.service avahi-daemon.service bluetooth.service \
-		microduck-wifi.service microduck-sshd.service microduck-bt.service; do
+		microduck-wifi.service microduck-sshd.service microduck-bt.service \
+		microduck-audio.service; do
 		enable_unit "$u" multi-user.target
 	done
 	for u in microduck-grow.service microduck-zram.service; do

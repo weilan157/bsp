@@ -1,0 +1,13 @@
+[Unit]
+Description=microduck: 初始化 TLV320AIC3104 通道路由（播放/录音）
+After=alsa-restore.service sound.target
+Wants=alsa-restore.service
+ConditionPathExists=/usr/sbin/microduck-audio-init
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/microduck-audio-init
+
+[Install]
+WantedBy=multi-user.target
