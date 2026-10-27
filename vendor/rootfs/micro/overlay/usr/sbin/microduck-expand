@@ -29,6 +29,11 @@ echo
 echo "=== 2) 扩分区 ==="
 printf ',+,\n' | sfdisk --force --no-reread -N "$PART" "$DISK"
 echo
+echo "=== 2b) 让内核重读分区表 ==="
+partx -u "$DISK" 2>/dev/null || true
+partprobe "$DISK" 2>/dev/null || true
+lsblk "$DISK"
+echo
 echo "=== 3) 扩文件系统 ==="
 resize2fs "$DEV"
 echo

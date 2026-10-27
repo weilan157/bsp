@@ -39,6 +39,16 @@ disk_sectors() {
 	echo "$s"
 }
 
+
+# 让内核更新分区尺寸（sfdisk --no-reread 只写表，内核里的 p2 还是旧尺寸）。
+# 优先 partx -u（BLKPG，已挂载也能生效），再试 partprobe / blockdev --rereadpt。
+sync_partition() {
+	command -v partx >/dev/null 2>&1 && partx -u "$disk" >/dev/null 2>&1
+	command -v partprobe >/dev/null 2>&1 && partprobe "$disk" >/dev/null 2>&1
+	command -v blockdev >/dev/null 2>&1 && blockdev --rereadpt "$disk" >/dev/null 2>&1
+	sleep 1
+}
+
 # 1) 搬 GPT 备份头到卡尾
 move_gpt_backup() {
 	if command -v sgdisk >/dev/null 2>&1; then
@@ -78,9 +88,17 @@ grow_partition() {
 				kmsg "分区已扩到卡尾: $cur 扇区"
 				return 0
 			fi
+			# 表可能已经扩好，只是内核视图没更新——先同步再看
+			sync_partition
+			cur=$(part_end)
+			if [ -n "$cur" ] && [ $((disk_end - cur)) -lt 2048 ]; then
+				kmsg "分区已扩到卡尾（表已生效）: $cur 扇区"
+				return 0
+			fi
 			kmsg "sfdisk 只扩到 ${cur} 扇区（磁盘 $disk_end），再搬一次 GPT 后重试"
 			move_gpt_backup
 			printf ',+,\n' | sfdisk --force --no-reread -N "$part" "$disk" >/dev/null 2>&1
+			sync_partition
 			cur=$(part_end)
 			if [ -n "$cur" ] && [ $((disk_end - cur)) -lt 2048 ]; then
 				kmsg "分区已扩到卡尾: $cur 扇区"
@@ -101,7 +119,22 @@ grow_partition() {
 	return 1
 }
 
-grow_partition || kmsg "分区扩容失败"
+if ! grow_partition; then
+	kmsg "分区扩容未完成"
+	sync_partition
+	disk_end=$(disk_sectors); cur=$(part_end)
+	if [ -n "$cur" ] && [ -n "$disk_end" ] && [ $((disk_end - cur)) -lt 2048 ]; then
+		kmsg "表已到卡尾，内核视图稍后生效"
+	elif [ ! -f /var/lib/microduck/grow-rebooted ]; then
+		# 表已改好但内核拒绝更新已挂载分区的尺寸；重启一次让内核按新表挂载，
+		# 下次启动 grow 就能把 ext4 扩到整卡（标记文件防止重启循环）。
+		mkdir -p /var/lib/microduck 2>/dev/null
+		: > /var/lib/microduck/grow-rebooted 2>/dev/null
+		kmsg "分区表已更新，重启一次以生效"
+		sleep 2
+		reboot 2>/dev/null || microduck-reboot 2>/dev/null || true
+	fi
+fi
 
 # 3) 扩文件系统
 bs=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block size/{gsub(/ /,"",$2);print $2}')
