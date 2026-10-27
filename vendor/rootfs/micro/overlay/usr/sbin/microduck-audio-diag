@@ -1,0 +1,70 @@
+#!/bin/sh
+# microduck-audio-diag —— 音频无输出时的暴力排查
+#
+# 做四件事：
+#   1) dump 声卡 / codec 寄存器（regmap debugfs，若内核开了 DEBUG_FS）
+#   2) dump 时钟树里的 audio/i2s 相关项（判断 MCLK 有没有输出、速率对不对）
+#   3) 把 mixer 的所有开关打开、所有音量拉到最大（排除"通路没开"）
+#   4) 放 440Hz 正弦 + 录 3 秒，并打印期间 dmesg
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+C=${AUDIO_CARD:-0}
+
+hr() { echo "----- $* -----"; }
+
+hr "声卡"
+cat /proc/asound/cards 2>/dev/null || { echo "没有声卡"; exit 1; }
+
+hr "codec 寄存器（regmap debugfs）"
+REGMAP=$(ls -d /sys/kernel/debug/regmap/*7-0018* 2>/dev/null | head -1)
+if [ -n "$REGMAP" ] && [ -f "$REGMAP/registers" ]; then
+	head -20 "$REGMAP/registers"
+else
+	echo "(不可用：需要 CONFIG_DEBUG_FS + regmap debugfs，或 codec 不在 7-0018)"
+	ls /sys/kernel/debug/regmap/ 2>/dev/null | head -10
+fi
+
+hr "时钟树（audio / i2s）"
+if [ -f /sys/kernel/debug/clk/clk_summary ]; then
+	grep -iE 'audio|i2s0|mclk' /sys/kernel/debug/clk/clk_summary | head -20
+else
+	echo "(clk_summary 不可用)"
+fi
+
+hr "mixer 控件清单"
+amixer -c "$C" scontrols 2>/dev/null | head -40
+
+hr "把开关全开、音量拉满"
+amixer -c "$C" scontrols 2>/dev/null | sed "s/^Simple mixer control '//;s/',[0-9]*$//" | while IFS= read -r name; do
+	[ -n "$name" ] || continue
+	# 先试开关
+	amixer -c "$C" sset "$name" on   >/dev/null 2>&1 && continue
+	amixer -c "$C" sset "$name" 100% >/dev/null 2>&1 || true
+done
+echo "完成（静音开关的 'off' 已在上面逐项改成 on）"
+
+hr "确认关键项"
+for n in 'PCM' 'HP DAC' 'HP' 'Line DAC' 'PGA' 'Left HP Mixer DACL1' 'Right HP Mixer DACR1'; do
+	printf '%-28s ' "$n"
+	amixer -c "$C" sget "$n" 2>/dev/null | grep -E 'Front Left' | head -1 | sed 's/^ *//' || echo '(无此控件)'
+done
+
+hr "放音 3 秒（440Hz）"
+dmesg -C 2>/dev/null || true
+speaker-test -D "hw:$C,0" -c 2 -t sine -f 440 -l 2 2>&1 | tail -6
+
+hr "录音 3 秒 + 回放"
+arecord -D "hw:$C,0" -f S16_LE -r 48000 -c 2 -d 3 /tmp/diag-mic.wav 2>&1 | tail -2
+ls -l /tmp/diag-mic.wav 2>/dev/null
+aplay -D "hw:$C,0" /tmp/diag-mic.wav 2>&1 | tail -2
+
+hr "期间 dmesg"
+dmesg 2>/dev/null | grep -iE 'twi|tlv320|i2s|sound|dma' | tail -20
+
+hr "结论提示"
+cat <<'EOF'
+- 若 clk_summary 里没有 i2s0/mclk 或速率不是 12288000：MCLK 没送到 codec，
+  需要检查 PB4(pin36) 的 pinmux 与 pll-audio 分频。
+- 若 clk_summary 正常、mixer 全开仍无声：问题在 HAT 的功放(PA)使能脚或耳机检测。
+- 若寄存器 dump 里 0x02/0x03 全 0：codec 没被正确初始化（时钟/PLL 未锁定）。
+EOF
