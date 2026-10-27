@@ -1,14 +1,15 @@
 #!/bin/sh
 # 首次启动把 rootfs 扩到整张 SD 卡
-#  1) 用 parted 把 p2 分区扩到磁盘末尾（在线 BLKPG，不需要重读分区表）；
-#  2) 再用 resize2fs 把 ext4 扩到分区大小。
-# 旧版本只做了第 2 步，而镜像里的 p2 本身只有 rootfs 那么大（打包时按
-# rootfs.ext4 尺寸写的），SD 卡剩余空间永远用不上，apt 就会
-# "No space left on device"。
+#
+# 顺序很关键（踩过的坑都写在注释里）：
+#   0) 先解析真实块设备：/proc/mounts 里 root 是 /dev/root（非块设备），
+#      旧脚本在这里 exit 0，导致扩容从未执行；
+#   1) 把 GPT 备份头搬到卡尾（sgdisk -e）。镜像里的 GPT 备份头在镜像末尾，
+#      header 的 last usable LBA 也停在那里；不先搬走，sfdisk `,+,` 只能扩到
+#      镜像末尾附近（29.7G 卡实测只到 4xx MB）；
+#   2) sfdisk `,+,` 扩分区（对已挂载分区走 BLKPG，不需要重读分区表）；
+#   3) resize2fs 扩文件系统。
 dev=$(awk '$2=="/"{print $1}' /proc/mounts | head -1)
-# 内核 cmdline 是 root=/dev/mmcblk0p2，但 /proc/mounts 里会显示成 /dev/root，
-# 那不是块设备，旧脚本在这里 `exit 0` 静默退出，所以分区从来没扩过。
-# 依次兜底：/proc/cmdline 的 root= → 常见 SD 分区。
 if [ ! -b "$dev" ]; then
 	dev=$(sed -n 's/.*[[:space:]]root=\([^[:space:]]*\).*/\1/p' /proc/cmdline | head -1)
 fi
@@ -23,56 +24,86 @@ case "$dev" in
 	*) exit 0 ;;
 esac
 
-# 1) 扩分区
-#
-# 踩过的坑（按顺序）：
-#   a) /proc/mounts 里 root 是 /dev/root（不是块设备）→ 旧脚本直接 exit；
-#   b) 镜像的 GPT 备份头在 p2 末尾，parted 提示 "fix the GPT"；
-#   c) 即使修了 GPT，parted resizepart 仍报
-#      "Unable to satisfy all constraints on the partition"（对齐/备份头约束）。
-# 现在优先用 sfdisk（growpart 的标准做法，对已挂载分区走 BLKPG）：
-#     printf ',+,\n' | sfdisk --force --no-reread -N <part> <disk>
-# sfdisk 不可用时再退回 parted。
-grow_partition() {
-	if command -v sfdisk >/dev/null 2>&1; then
-		if printf ',+,\n' | sfdisk --force --no-reread -N "$part" "$disk" \
-			> /dev/null 2>&1; then
-			printf 'microduck: partition %s extended with sfdisk\n' "$dev" > /dev/kmsg 2>/dev/null
+kmsg() { printf 'microduck: %s\n' "$*" > /dev/kmsg 2>/dev/null; }
+
+# 分区当前结束扇区（start + size）
+part_end() {
+	set -- $(cat "/sys/class/block/$(basename "$dev")/start" \
+		"/sys/class/block/$(basename "$dev")/size" 2>/dev/null)
+	[ $# -eq 2 ] && echo $(( $1 + $2 ))
+}
+
+disk_sectors() {
+	s=$(cat "/sys/class/block/$(basename "$disk")/size" 2>/dev/null)
+	[ -n "$s" ] || s=$(blockdev --getsz "$disk" 2>/dev/null)
+	echo "$s"
+}
+
+# 1) 搬 GPT 备份头到卡尾
+move_gpt_backup() {
+	if command -v sgdisk >/dev/null 2>&1; then
+		if sgdisk -e "$disk" >/dev/null 2>&1; then
+			kmsg "GPT 备份头已搬到卡尾 (sgdisk -e)"
 			return 0
 		fi
-		printf 'microduck: sfdisk extend failed\n' > /dev/kmsg 2>/dev/null
+		kmsg "sgdisk -e 失败"
+	fi
+	if command -v parted >/dev/null 2>&1; then
+		printf 'Fix\n' | parted ---pretend-input-tty "$disk" print >/dev/null 2>&1 && \
+			kmsg "GPT 备份头已搬到卡尾 (parted Fix)"
+	fi
+	return 0
+}
+
+# 2) 扩分区
+grow_partition() {
+	disk_end=$(disk_sectors)
+	[ -n "$disk_end" ] && [ "$disk_end" -gt 0 ] || return 1
+
+	cur=$(part_end)
+	kmsg "分区结束于 ${cur:-?} / 磁盘 ${disk_end} 扇区"
+
+	# 已经没有空闲（差的少于 1 MiB）就直接返回
+	if [ -n "$cur" ] && [ $((disk_end - cur)) -lt 2048 ]; then
+		kmsg "分区已到卡尾，无需扩"
+		return 0
 	fi
 
-	# 优先用 sgdisk -e：把 GPT 备份头 + 备份表搬到卡的最后一个可用扇区，
-	# 同时更新 header 里的 last usable LBA。否则 sfdisk `,+,` 只能扩到
-	# 镜像里那个旧的 last usable LBA（29.7G 卡实测只到 451M）。
-	if command -v sgdisk >/dev/null 2>&1; then
-		sgdisk -e "$disk" >/dev/null 2>&1 && \
-			printf 'microduck: sgdisk 已把 GPT 备份头搬到卡尾\n' > /dev/kmsg 2>/dev/null
+	move_gpt_backup
+
+	if command -v sfdisk >/dev/null 2>&1; then
+		if printf ',+,\n' | sfdisk --force --no-reread -N "$part" "$disk" >/dev/null 2>&1; then
+			cur=$(part_end)
+			if [ -n "$cur" ] && [ $((disk_end - cur)) -lt 2048 ]; then
+				kmsg "分区已扩到卡尾: $cur 扇区"
+				return 0
+			fi
+			kmsg "sfdisk 只扩到 ${cur} 扇区（磁盘 $disk_end），再搬一次 GPT 后重试"
+			move_gpt_backup
+			printf ',+,\n' | sfdisk --force --no-reread -N "$part" "$disk" >/dev/null 2>&1
+			cur=$(part_end)
+			if [ -n "$cur" ] && [ $((disk_end - cur)) -lt 2048 ]; then
+				kmsg "分区已扩到卡尾: $cur 扇区"
+				return 0
+			fi
+			kmsg "sfdisk 扩分区仍不完整: $cur / $disk_end"
+		else
+			kmsg "sfdisk 扩分区失败"
+		fi
 	fi
 
 	if command -v parted >/dev/null 2>&1; then
-		# 注意不能用 parted -s：脚本模式会抑制 "you can fix the GPT ..."
-		# 这条警告，grep 永远匹配不到，备份头也就不会被移动。
-		if parted "$disk" print 2>&1 | grep -qi 'fix the GPT'; then
-			printf 'Fix\n' | parted ---pretend-input-tty "$disk" print >/dev/null 2>&1
-		fi
-		sectors=$(cat "/sys/class/block/$(basename "$disk")/size" 2>/dev/null)
-		[ -n "$sectors" ] || sectors=$(blockdev --getsz "$disk" 2>/dev/null)
-		if [ -n "$sectors" ] && [ "$sectors" -gt 0 ]; then
-			parted -s "$disk" unit s resizepart "$part" "$((sectors - 1))s" \
-				> /dev/null 2>&1 && {
-				printf 'microduck: partition %s extended with parted\n' "$dev" > /dev/kmsg 2>/dev/null
-				return 0
-			}
-		fi
+		parted -s "$disk" unit s resizepart "$part" "$((disk_end - 1))s" >/dev/null 2>&1 && {
+			kmsg "分区已用 parted 扩到 $((disk_end - 1))s"
+			return 0
+		}
 	fi
 	return 1
 }
 
-grow_partition || printf 'microduck: partition grow skipped/failed\n' > /dev/kmsg 2>/dev/null
+grow_partition || kmsg "分区扩容失败"
 
-# 2) 扩文件系统
+# 3) 扩文件系统
 bs=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block size/{gsub(/ /,"",$2);print $2}')
 fs_blocks=$(dumpe2fs -h "$dev" 2>/dev/null | awk -F: '/^Block count/{gsub(/ /,"",$2);print $2}')
 size_bytes=$(blockdev --getsize64 "$dev" 2>/dev/null) || exit 0

@@ -69,9 +69,23 @@ echo
 echo "=== 信任 ==="
 bluetoothctl trust "$MAC" 2>&1 | tail -3
 echo
-echo "=== 连接 ==="
-bluetoothctl connect "$MAC" 2>&1 | tail -6
-sleep 2
+echo "=== 连接（最多重试 10 次）==="
+# Xbox 手柄配对完成后通常会先断开一次（reason 3），再自己回来。
+# BlueZ 这时会把 bond 标成 Paired: no，但只要持续 connect 就能建起 HID 通道。
+i=0
+while [ $i -lt 10 ]; do
+	ls /dev/input/js* >/dev/null 2>&1 && break
+	bluetoothctl trust "$MAC" >/dev/null 2>&1
+	out=$(bluetoothctl connect "$MAC" 2>&1 | tail -2)
+	case "$out" in
+		*"Connection successful"*) echo "  第 $((i+1)) 次: 连接成功" ;;
+		*"already-connected"*)     echo "  第 $((i+1)) 次: 已连接（等 HID 通道）" ;;
+		*)                         echo "  第 $((i+1)) 次: $(echo "$out" | head -1)" ;;
+	esac
+	sleep 2
+	i=$((i + 1))
+done
+sleep 1
 echo
 echo "=== 结果 ==="
 bluetoothctl info "$MAC" 2>/dev/null | grep -E 'Name|Paired|Bonded|Trusted|Connected|Icon'

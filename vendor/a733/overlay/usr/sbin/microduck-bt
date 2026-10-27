@@ -112,7 +112,7 @@ while [ -d /sys/class/bluetooth/hci0 ]; do
 		esac
 	done
 	n=$((n + 1))
-	[ $((n % 12)) -eq 0 ] && reconnect_trusted
+	[ $((n % 2)) -eq 0 ] && reconnect_trusted
 	sleep 5
 done
 say "hci0 消失，退出"
