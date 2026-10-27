@@ -83,16 +83,20 @@ pair_one() {
 reconnect_trusted() {
 	bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
 		[ -n "${mac:-}" ] || continue
-		case "$name" in *Xbox*|*GameSir*|*8BitDo*|*DualSense*|*DualShock*|*"Pro Controller"*) ;; *) continue ;; esac
+		case "$name" in
+			*Xbox*|*GameSir*|*8BitDo*|*DualSense*|*DualShock*|*"Pro Controller"*|*Gamepad*|*Controller*) ;;
+			*) continue ;;
+		esac
 		info=$(bluetoothctl info "$mac" 2>/dev/null)
 		case "$info" in
-			*"Paired: yes"*)
-				case "$info" in
-					*"Connected: yes"*) ;;
-					*) printf 'connect %s\n' "$mac" >&3 ;;
-				esac
-				;;
+			*"Connected: yes"*) continue ;;
 		esac
+		# 注意：不能只重连 Paired: yes 的设备。
+		# Xbox 手柄配对成功后会主动断一次，BlueZ 随即把 bond 标成 Paired: no，
+		# 若这里过滤掉它们，就等于"必须手动再配一次"。只要名字像手柄、
+		# 且当前未连接，就持续重连（每轮先 trust，再 connect）。
+		printf 'trust %s\n' "$mac" >&3
+		printf 'connect %s\n' "$mac" >&3
 	done
 }
 
