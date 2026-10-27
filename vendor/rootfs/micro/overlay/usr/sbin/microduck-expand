@@ -1,0 +1,37 @@
+#!/bin/sh
+# microduck-expand —— 手动把 rootfs 扩到整张 SD 卡（带完整过程输出）
+#
+# 开机时 microduck-grow.service 已经会自动做一次；这个脚本用于：
+#   - 开机时扩容失败（例如换卡/改过分区表）后手动补做
+#   - 想看到每一步到底发生了什么
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+DISK=/dev/mmcblk0
+DEV=${DISK}p2
+PART=2
+
+echo "=== 当前状态 ==="
+df -h / | tail -1
+lsblk "$DISK" 2>/dev/null || cat /proc/partitions
+echo
+echo "=== GPT ==="
+sgdisk -p "$DISK" 2>&1 | head -10 || echo '(sgdisk 不可用)'
+echo
+echo "=== 1) 把 GPT 备份头搬到卡尾 ==="
+if sgdisk -e "$DISK"; then
+	echo "OK: 备份头已移动"
+else
+	echo "WARN: sgdisk -e 失败（继续尝试扩分区）"
+fi
+sgdisk -p "$DISK" 2>&1 | head -8
+echo
+echo "=== 2) 扩分区 ==="
+printf ',+,\n' | sfdisk --force --no-reread -N "$PART" "$DISK"
+echo
+echo "=== 3) 扩文件系统 ==="
+resize2fs "$DEV"
+echo
+echo "=== 结果 ==="
+df -h /
+lsblk "$DISK"

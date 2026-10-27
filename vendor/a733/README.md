@@ -126,6 +126,32 @@ ieee80211 phy0: New interface create wlan0
 2: wlan0: <BROADCAST,MULTICAST> mtu 1500 ... link/ether c3:82:00:80:ff:ff
 ```
 
+**蓝牙手柄（Xbox）已验证可用**（2026-10-27）：
+
+```
+Pairing successful → Paired: yes / Bonded: yes / Trusted: yes / Connected: yes
+microduck-pad: 手柄连接: js0
+input: Xbox Wireless Controller as /devices/virtual/misc/uhid/0005:045E:02FD.0001/input/input1
+/dev/input/js0  /dev/input/event1
+```
+
+三个必备条件（少一个都连不上）：
+1. `/etc/bluetooth/input.conf`：`UserspaceHID=true`、`ClassicBondedOnly=false`；
+2. **配对成功后必须持续 connect**：Xbox 手柄配对完会主动断一次（`reason 3`），
+   BlueZ 会把它标成 `Paired: no`，必须重连才能建起 HID 通道
+   （`microduck-bt-pair` 里是 10 次 / 2s 的重试环）；
+3. 内核：`CONFIG_UHID=y`（BlueZ 通过 uhid 创建输入设备）+ `CONFIG_INPUT_JOYDEV=y`。
+
+**WiFi STA + AP 共存已验证**（2026-10-27）：
+
+```
+wlan0  192.168.0.154  (STA, ZTE_B82B8E, ch36/80MHz)
+ap0    10.42.0.1      (AP, duck-061f, ch6)       ← 同时在线
+```
+
+注意：`net.ifnames=0` 必须加到内核 cmdline，否则 systemd/udev 会把 wlan0
+改名成 `wlx<mac>`（USB 网卡的可预测命名），脚本等不到 wlan0。
+
 **IMX219 1080p 抓帧成功**（2026-10-25）：
 
 ```
