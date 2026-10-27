@@ -98,6 +98,12 @@ reconnect_trusted() {
 
 n=0
 while [ -d /sys/class/bluetooth/hci0 ]; do
+	# 把当前的设备列表写进日志（microduck-diag 会带走），
+	# 排查"扫不到手柄"时能直接看到扫描结果。
+	{
+		printf '--- t=%ss devices ---\n' "$(cut -d' ' -f1 /proc/uptime)"
+		bluetoothctl devices 2>/dev/null || true
+	} >> "$LOG" 2>/dev/null || true
 	# 扫描结果里找手柄（新出现的设备）
 	bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
 		[ -n "${mac:-}" ] || continue

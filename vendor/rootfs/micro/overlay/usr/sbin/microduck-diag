@@ -59,6 +59,10 @@ run '/usr/sbin/microduck-ap status 2>&1'
 
 say "蓝牙"
 run 'hciconfig -a 2>&1 | head -20'
+run 'command -v btmgmt && btmgmt info 2>&1 | head -15'
+run 'tail -40 /run/bt.log 2>/dev/null'
+run 'pgrep -a -f "bluetoothctl|bluetoothd" 2>/dev/null'
+run 'rfkill list bluetooth 2>/dev/null'
 run 'bluetoothctl devices 2>&1 | head -10'
 run 'ls -l /dev/input/js* 2>/dev/null'
 run 'cat /etc/bluetooth/input.conf 2>/dev/null | grep -E "UserspaceHID|ClassicBondedOnly"'

@@ -1,0 +1,74 @@
+#!/bin/sh
+# microduck-bt-pair —— 手动配对蓝牙手柄（带完整可见输出，便于排查）
+#
+# 用法：
+#   microduck-bt-pair            # 扫描 25s，列出设备并尝试配对类手柄设备
+#   microduck-bt-pair <MAC>      # 直接对指定 MAC 配对
+#
+# 手柄需先进配对模式（Xbox：按住顶部配对键 3s，Logo 快闪）。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+MAC="$1"
+PATTERN='xbox|gamepad|game ?pad|controller|joystick|dualshock|dualsense|8bitdo|pro controller|joy-?con|gamesir|flydigi'
+
+echo "=== 控制器 ==="
+hciconfig -a 2>/dev/null | head -8 || echo '(hciconfig 不可用)'
+echo
+echo "=== bluetoothd ==="
+pgrep -x bluetoothd >/dev/null 2>&1 && echo "运行中 (pid $(pgrep -x bluetoothd | head -1))" || echo "未运行"
+
+if ! hciconfig 2>/dev/null | grep -q 'UP RUNNING'; then
+	echo
+	echo "控制器未 UP，尝试拉起..."
+	hciconfig hci0 up 2>/dev/null || true
+	rfkill unblock bluetooth 2>/dev/null || true
+	sleep 1
+fi
+
+echo
+echo "=== 上电 / 可配对 ==="
+bluetoothctl power on 2>&1 | tail -2
+bluetoothctl pairable on 2>&1 | tail -2
+bluetoothctl discoverable on 2>&1 | tail -2
+
+if [ -z "$MAC" ]; then
+	echo
+	echo "=== 扫描 25 秒（请此刻让手柄处于配对模式：Logo 快闪）==="
+	bluetoothctl --timeout 25 scan on 2>&1 | grep -E '\[NEW\] Device|Name:|\[CHG\].*Name' | head -40
+	echo
+	echo "=== 扫描到的设备 ==="
+	bluetoothctl devices 2>/dev/null | head -30
+	echo
+	MAC=$(bluetoothctl devices 2>/dev/null | grep -iE "$PATTERN" | head -1 | awk '{print $2}')
+	if [ -z "$MAC" ]; then
+		echo
+		echo "没有找到名字像手柄的设备。"
+		echo "可能原因："
+		echo "  1) 手柄没进配对模式（Xbox 需按住顶部配对键 3s，Logo 快闪；慢闪是它在找旧主机）"
+		echo "  2) 手柄已被手机/电脑占用，先在其上解除配对"
+		echo "  3) 电量不足"
+		echo
+		echo "若是已知 MAC，可直接：microduck-bt-pair <MAC>"
+		exit 1
+	fi
+	echo
+	echo "选中设备：$MAC"
+fi
+
+echo
+echo "=== 配对 $MAC ==="
+bluetoothctl pair "$MAC" 2>&1 | tail -8
+echo
+echo "=== 信任 ==="
+bluetoothctl trust "$MAC" 2>&1 | tail -3
+echo
+echo "=== 连接 ==="
+bluetoothctl connect "$MAC" 2>&1 | tail -6
+sleep 2
+echo
+echo "=== 结果 ==="
+bluetoothctl info "$MAC" 2>/dev/null | grep -E 'Name|Paired|Bonded|Trusted|Connected|Icon'
+echo
+ls -l /dev/input/js* /dev/input/event* 2>/dev/null
+dmesg | grep -iE 'uhid|hid-generic|input:.*(Xbox|Gamepad|Controller)' | tail -5
