@@ -37,6 +37,7 @@ ${APT} busybox-static kmod e2fsprogs util-linux \
 	parted \
 	alsa-utils \
 	i2c-tools \
+	gdisk \
 	openssh-server dbus avahi-daemon libnss-mdns \
 	iptables \
 	iproute2 procps

@@ -64,7 +64,7 @@ exec 3> "$AGENT_FIFO"
 printf 'agent NoInputNoOutput\n' >&3
 printf 'default-agent\n' >&3
 printf 'power on\n' >&3
-printf 'scan on\n' >&3
+printf 'scan le\n' >&3   # 手柄是 BLE HID；BR/EDR 会 Page Timeout
 say "开始扫描/配对（session pid=$BT_PID）"
 
 pair_one() {

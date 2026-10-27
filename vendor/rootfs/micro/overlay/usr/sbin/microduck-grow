@@ -43,6 +43,14 @@ grow_partition() {
 		printf 'microduck: sfdisk extend failed\n' > /dev/kmsg 2>/dev/null
 	fi
 
+	# 优先用 sgdisk -e：把 GPT 备份头 + 备份表搬到卡的最后一个可用扇区，
+	# 同时更新 header 里的 last usable LBA。否则 sfdisk `,+,` 只能扩到
+	# 镜像里那个旧的 last usable LBA（29.7G 卡实测只到 451M）。
+	if command -v sgdisk >/dev/null 2>&1; then
+		sgdisk -e "$disk" >/dev/null 2>&1 && \
+			printf 'microduck: sgdisk 已把 GPT 备份头搬到卡尾\n' > /dev/kmsg 2>/dev/null
+	fi
+
 	if command -v parted >/dev/null 2>&1; then
 		# 注意不能用 parted -s：脚本模式会抑制 "you can fix the GPT ..."
 		# 这条警告，grep 永远匹配不到，备份头也就不会被移动。
