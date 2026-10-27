@@ -26,6 +26,16 @@ wifi_if() {
 	done
 	echo wlan0
 }
+# 注意：不能在启动时就算死接口名 —— 那时驱动还没建出网卡。
+# 先轮询等任意 wl*/wlan0 出现，再定名。
+i=0
+while [ $i -lt 150 ]; do
+	for d in /sys/class/net/wlan0 /sys/class/net/wl*; do
+		[ -e "$d" ] && break 2
+	done
+	sleep 0.1
+	i=$((i + 1))
+done
 WIFI_IF=$(wifi_if)
 STA_RETRY_INTERVAL=30
 STA_WAIT=25
@@ -44,11 +54,6 @@ fi
 
 # Radxa 的 aic 驱动是「加载器 + 驱动」两段式：aic_load_fw 灌完固件后芯片会
 # 重新枚举成 a69c:8d81，然后 aic8800_fdrv 才建 wlan0。最多等 10 秒。
-i=0
-while [ ! -e "/sys/class/net/$WIFI_IF" ] && [ $i -lt 100 ]; do
-	sleep 0.1
-	i=$((i + 1))
-done
 if [ ! -e "/sys/class/net/$WIFI_IF" ]; then
 	kmsg "wlan0 never appeared"
 	exit 0

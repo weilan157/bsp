@@ -745,7 +745,7 @@ cmd_a733_pack() {
 	# rootfstype=ext4：显式指定文件系统类型。不加的话内核会依次尝试
 	# ext2/ext3/ext4，ext2 对带 extents/64bit/flex_bg 的 rootfs 会报
 	# "unsupported optional features (2c0)"，把真正的 ext4 报错盖住。
-	bootargs="console=${debug_console} root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait cma=128M loglevel=6"
+	bootargs="console=${debug_console} root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait cma=128M loglevel=6 net.ifnames=0 biosdevname=0"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
