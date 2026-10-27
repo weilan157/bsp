@@ -159,7 +159,10 @@
 	soundcard-mach,frame-master = <&i2s0_cpu>;
 	soundcard-mach,bitclock-master = <&i2s0_cpu>;
 	soundcard-mach,slot-num = <2>;
-	soundcard-mach,slot-width = <32>;
+	/* 16 bit：aplay 送的是 S16_LE，TLV320AIC3104 默认也是 16 bit 字长。
+	 * 之前写 32（HDMI 那条通路的值）会让主机按 32 bit slot 发、codec 按
+	 * 16 bit 收，数据错位，表现为"只有咔哒一声"。 */
+	soundcard-mach,slot-width = <16>;
 	i2s0_cpu: soundcard-mach,cpu {
 		sound-dai = <&i2s0_plat>;
 		soundcard-mach,pll-fs = <1>;
