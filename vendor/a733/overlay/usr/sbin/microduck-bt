@@ -1,100 +1,102 @@
 #!/bin/sh
-# microduck-bt —— bluetoothd 常驻 + 自动配对/回连手柄
+# microduck-bt —— 蓝牙常驻服务：自动配对手柄 + 定期重连
 #
-# 覆盖 Xbox Wireless Controller / Xbox 手柄（BLE 与经典 HID）。依据
-# 复刻仓库《踩坑记录》里新卡配对失败的结论：
-#   - 开机时蓝牙不可绑定 → pair 返回 No Bonding，密钥存不下；
-#   - BlueZ 默认 ClassicBondedOnly=true 会拒绝未绑定的 HID；
-#   - 必须在同一个 bluetoothctl 会话里做 agent → scan → pair → trust → connect。
+# 设计要点（都是踩过的坑）：
+#   1) 不要用 btmgmt：aic8800 上 `btmgmt power on` 会挂住不返回，
+#      整个服务卡死、后续扫描/配对全部不执行（表现为 Tasks 里挂着 btmgmt，
+#      /run/bt.log 不存在）。统一改用 `timeout N bluetoothctl ...`。
+#   2) Xbox 手柄配对成功后会长动断一次（reason 3），BlueZ 随即把它标成
+#      Paired: no。所以重连逻辑不能要求 Paired: yes，只要名字像手柄且未连接
+#      就每 10s trust+connect 一次。
+#   3) input.conf 要 UserspaceHID=true、ClassicBondedOnly=false，
+#      否则 HID 通道建不起来（没有 /dev/input/js*）。
 set -u
 
 RUN=/run/microduck
 LOG="$RUN/bt.log"
-AGENT_FIFO="$RUN/bt.fifo"
+FIFO="$RUN/bt.fifo"
 SEEN="$RUN/bt.seen"
 INPUT_CONF=/etc/bluetooth/input.conf
-PAD_NAME_RE='[Xx][Bb][Oo][Xx]|GameSir|G50|8BitDo|DualSense|DualShock|Switch Pro|Pro Controller'
+PAD_RE='[Xx][Bb][Oo][Xx]|[Gg]ame[Ss]ir|8[Bb]it[Dd]o|[Dd]ual[Ss]ense|[Dd]ual[Ss]hock|Pro Controller|[Gg]amepad|[Cc]ontroller'
 
 mkdir -p "$RUN" /var/lib/bluetooth /run/bluetooth 2>/dev/null
 kmsg() { printf 'microduck-bt: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
-say() { kmsg "$*"; }
 
-# 1) input.conf：让 HID 走 userspace、允许未绑定 HID（新卡配对失败的两项）
+kmsg "start"
+
+# 1) input.conf：HID 走 userspace、允许未绑定的 classic HID
 if [ -f "$INPUT_CONF" ]; then
-	grep -q '^UserspaceHID=' "$INPUT_CONF" && \
-		sed -i 's/^UserspaceHID=.*/UserspaceHID=true/' "$INPUT_CONF" || \
+	if grep -q '^UserspaceHID=' "$INPUT_CONF"; then
+		sed -i 's/^UserspaceHID=.*/UserspaceHID=true/' "$INPUT_CONF"
+	else
 		echo 'UserspaceHID=true' >> "$INPUT_CONF"
-	grep -q '^ClassicBondedOnly=' "$INPUT_CONF" && \
-		sed -i 's/^ClassicBondedOnly=.*/ClassicBondedOnly=false/' "$INPUT_CONF" || \
+	fi
+	if grep -q '^ClassicBondedOnly=' "$INPUT_CONF"; then
+		sed -i 's/^ClassicBondedOnly=.*/ClassicBondedOnly=false/' "$INPUT_CONF"
+	else
 		echo 'ClassicBondedOnly=false' >> "$INPUT_CONF"
+	fi
 fi
 
-# 2) 等 BT 控制器（AIC8800 的 btusb 异步 probe）
+# 2) 等 hci0（AIC8800 的 btusb 是异步 probe）
 i=0
 while [ ! -d /sys/class/bluetooth/hci0 ] && [ "$i" -lt 150 ]; do
 	sleep 0.1
 	i=$((i + 1))
 done
 if [ ! -d /sys/class/bluetooth/hci0 ]; then
-	say "没有 hci0（btusb/hci_uart 没加载？）"
+	kmsg "没有 hci0（btusb/hci_uart 没加载？）"
 	exit 0
 fi
+kmsg "hci0 就绪"
 
-# 3) bluetoothd 常驻
+# 3) bluetoothd（systemd 已拉起时跳过）
 if ! pgrep -x bluetoothd >/dev/null 2>&1; then
 	bluetoothd -n >/dev/null 2>&1 &
 	sleep 1
-	say "bluetoothd 已启动"
+	kmsg "bluetoothd 已启动"
 fi
 
-# 4) 可发现 / 可绑定（踩坑记录里的关键一步）
-btmgmt power on >/dev/null 2>&1 || true
-btmgmt bondable on >/dev/null 2>&1 || true
-btmgmt connectable on >/dev/null 2>&1 || true
+# 4) 上电/可配对（全部带 timeout，绝不允许挂住）
+timeout 5 bluetoothctl power on    >/dev/null 2>&1 || true
+timeout 5 bluetoothctl pairable on >/dev/null 2>&1 || true
+timeout 5 hciconfig hci0 up        >/dev/null 2>&1 || true
+kmsg "已上电/可配对"
 
-# 5) 单个 bluetoothctl 会话：agent → scan → 配对新设备 → 回连已信任设备
-rm -f "$AGENT_FIFO" "$SEEN"
-mkfifo "$AGENT_FIFO"
+# 5) 常驻 bluetoothctl 会话（agent + 扫描）
+rm -f "$FIFO" "$SEEN"
+mkfifo "$FIFO" 2>/dev/null || exit 0
 : > "$SEEN"
-
+: > "$LOG"
 # shellcheck disable=SC2094
-bluetoothctl < "$AGENT_FIFO" > "$LOG" 2>&1 &
+bluetoothctl < "$FIFO" > "$LOG" 2>&1 &
 BT_PID=$!
-exec 3> "$AGENT_FIFO"
+exec 3> "$FIFO"
 printf 'agent NoInputNoOutput\n' >&3
 printf 'default-agent\n' >&3
 printf 'power on\n' >&3
-printf 'scan le\n' >&3   # 手柄是 BLE HID；BR/EDR 会 Page Timeout
-say "开始扫描/配对（session pid=$BT_PID）"
+printf 'pairable on\n' >&3
+printf 'scan le\n' >&3
+kmsg "开始扫描（session pid=$BT_PID）"
 
 pair_one() {
 	mac=$1 name=$2
 	grep -qx "$mac" "$SEEN" 2>/dev/null && return 0
+	kmsg "尝试配对: $name ($mac)"
 	printf 'pair %s\n' "$mac" >&3
-	sleep 6
+	sleep 4
 	printf 'trust %s\n' "$mac" >&3
-	sleep 1
 	printf 'connect %s\n' "$mac" >&3
-	sleep 2
 	echo "$mac" >> "$SEEN"
-	say "已尝试配对: $name ($mac)"
 }
 
-reconnect_trusted() {
-	bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
+# 已配对/已信任的手柄重连：不要求 Paired=yes（Xbox 断开后 bond 会消失）
+reconnect_pads() {
+	timeout 5 bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
 		[ -n "${mac:-}" ] || continue
-		case "$name" in
-			*Xbox*|*GameSir*|*8BitDo*|*DualSense*|*DualShock*|*"Pro Controller"*|*Gamepad*|*Controller*) ;;
-			*) continue ;;
-		esac
-		info=$(bluetoothctl info "$mac" 2>/dev/null)
-		case "$info" in
-			*"Connected: yes"*) continue ;;
-		esac
-		# 注意：不能只重连 Paired: yes 的设备。
-		# Xbox 手柄配对成功后会主动断一次，BlueZ 随即把 bond 标成 Paired: no，
-		# 若这里过滤掉它们，就等于"必须手动再配一次"。只要名字像手柄、
-		# 且当前未连接，就持续重连（每轮先 trust，再 connect）。
+		printf '%s' "$name" | grep -qE "$PAD_RE" || continue
+		info=$(timeout 5 bluetoothctl info "$mac" 2>/dev/null)
+		printf '%s' "$info" | grep -q 'Connected: yes' && continue
 		printf 'trust %s\n' "$mac" >&3
 		printf 'connect %s\n' "$mac" >&3
 	done
@@ -102,21 +104,21 @@ reconnect_trusted() {
 
 n=0
 while [ -d /sys/class/bluetooth/hci0 ]; do
-	# 把当前的设备列表写进日志（microduck-diag 会带走），
-	# 排查"扫不到手柄"时能直接看到扫描结果。
+	# 记录扫描结果（microduck-diag 会带走）
 	{
-		printf '--- t=%ss devices ---\n' "$(cut -d' ' -f1 /proc/uptime)"
-		bluetoothctl devices 2>/dev/null || true
+		printf -- '--- t=%ss devices ---\n' "$(cut -d' ' -f1 /proc/uptime)"
+		timeout 5 bluetoothctl devices 2>/dev/null || true
 	} >> "$LOG" 2>/dev/null || true
-	# 扫描结果里找手柄（新出现的设备）
-	bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
+
+	# 新手柄（在配对模式里被发现）自动配对
+	timeout 5 bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
 		[ -n "${mac:-}" ] || continue
-		case "$name" in *Xbox*|*GameSir*|*G50*|*8BitDo*|*DualSense*|*DualShock*|*"Pro Controller"*)
-			pair_one "$mac" "$name" ;;
-		esac
+		printf '%s' "$name" | grep -qE "$PAD_RE" || continue
+		pair_one "$mac" "$name"
 	done
+
 	n=$((n + 1))
-	[ $((n % 2)) -eq 0 ] && reconnect_trusted
+	[ $((n % 2)) -eq 0 ] && reconnect_pads
 	sleep 5
 done
-say "hci0 消失，退出"
+kmsg "hci0 消失，退出"
