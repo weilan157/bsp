@@ -469,6 +469,15 @@ cmd_a733_kernel() {
 	uart_debug_pins: uart-debug-pins {
 		pins = ${debug_pins};
 		function = "${A733_DEBUG_UART}";
+		drive-strength = <10>;
+		/* 原理图（Pololu RPi Robot HAT / Audio 页）：
+		 *   40-pin pin16 = IO_23(BCM23) = PAM8406 MODE
+		 *   40-pin pin18 = IO_24(BCM24) = PAM8406 MUTE
+		 * uart2(PB0/PB1=pin7/11) 不受影响；
+		 * uart4(PJ24/PJ25=pin16/18) 与功放控制脚复用，所以这里默认内部下拉：
+		 * MUTE 悬空会让功放静音（表现为有 I2S 无声音），下拉后保持未静音。
+		 * 代价：该脚作 UART RX 时收不到数据（调试口只剩输出，可用 SSH 登录）。 */
+		bias-pull-down;
 	};
 };
 

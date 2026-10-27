@@ -166,8 +166,8 @@
 	 *   soundcard-mach,frame-master = <&i2s0_cpu>;
 	 *   soundcard-mach,bitclock-master = <&i2s0_cpu>;
 	 */
-	soundcard-mach,frame-master = <&audio_codec>;
-	soundcard-mach,bitclock-master = <&audio_codec>;
+	soundcard-mach,frame-master = <&i2s0_cpu>;
+	soundcard-mach,bitclock-master = <&i2s0_cpu>;
 	soundcard-mach,slot-num = <2>;
 	/* 16 bit：aplay 送的是 S16_LE，TLV320AIC3104 默认也是 16 bit 字长。
 	 * 之前写 32（HDMI 那条通路的值）会让主机按 32 bit slot 发、codec 按
@@ -176,7 +176,13 @@
 	i2s0_cpu: soundcard-mach,cpu {
 		sound-dai = <&i2s0_plat>;
 		soundcard-mach,pll-fs = <1>;
-		soundcard-mach,mclk-fs = <256>;
+		/* MCLK 由 HAT 上的 Y1「12 MHz」有源晶振直接供给 codec（原理图：
+		 * U2 pin5 MCLK <- Y1 OUT），不是 SoC 的 PB4！
+		 * 48000 * 250 = 12,000,000 -> 告诉驱动真实的 12 MHz，
+		 * aic3x 才会启用内部 PLL 得到正确的 48 kHz。
+		 * （之前写 256 会让驱动以为 MCLK=12.288M 而旁路 PLL，
+		 *   实际 fs = 48k*250/256 = 46.875k。） */
+		soundcard-mach,mclk-fs = <250>;   /* MCLK_12M_OSC */
 	};
 	soundcard-mach,codec {
 		sound-dai = <&audio_codec>;

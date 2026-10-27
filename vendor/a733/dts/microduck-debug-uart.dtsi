@@ -13,7 +13,11 @@
 		pins = "PJ24", "PJ25";
 		function = "uart4";
 		drive-strength = <10>;
-		bias-pull-up;
+		/* 原理图：40-pin pin18 = IO_24 = PAM8406 MUTE。
+		 * 这里当 UART4 RX 用时是输入（悬空），而功放 MUTE 悬空会导致
+		 * 无声，所以默认下拉，让 MUTE 保持低电平（未静音）。
+		 * 代价：该脚作为串口 RX 基本收不到数据（调试口变成只输出）。 */
+		bias-pull-down;
 	};
 };
 
