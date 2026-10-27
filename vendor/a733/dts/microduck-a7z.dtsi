@@ -60,7 +60,11 @@
  * ===================================================================== */
 &twi7 {
 	status = "okay";
-	clock-frequency = <400000>;
+	/* 100 kHz：实测 400 kHz 下 codec（0x18）的寄存器读写频繁失败
+	 *   twi: Bus error / STOP failed / bus state 0x0 isn't idle
+	 *   tlv320aic3x 7-0018: ASoC: error at ... register ... -22
+	 * 结果 DAC/ADC 从未配置成功，播放只有咔哒声。降速优先保证可靠。 */
+	clock-frequency = <100000>;   /* SPEED100K */
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&twi7_pins_default>;
 	pinctrl-1 = <&twi7_pins_sleep>;
@@ -75,19 +79,19 @@
 	tof: vl53l5cx@29 {
 		compatible = "st,vl53l5cx";
 		reg = <0x29>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	bmi088_accel: bmi088-accel@19 {
 		compatible = "bosch,bmi088-accel";
 		reg = <0x19>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	bmi088_gyro: bmi088-gyro@68 {
 		compatible = "bosch,bmi088-gyro";
 		reg = <0x68>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	/* D1 版 HAT：BMI088 换成 LSM6DSV16X（0x6A），需要时取消注释
