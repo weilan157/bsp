@@ -37,11 +37,11 @@ if [ -z "$MAC" ]; then
 	# 用普通 scan on 时 BlueZ 可能把它标成 BR/EDR，pair 会 Page Timeout(0x04)。
 	# 所以先只扫 LE，让 BlueZ 以 LE 身份发现它。
 	echo
-	echo "=== LE 扫描 20 秒（请此刻让手柄处于配对模式：Logo 快闪）==="
-	bluetoothctl --timeout 20 scan le 2>&1 | grep -E '\[NEW\] Device|Name:' | head -40
-	echo
-	echo "=== BR/EDR 扫描 10 秒（兜底）==="
-	bluetoothctl --timeout 10 scan bredr 2>&1 | grep -E '\[NEW\] Device|Name:' | head -20
+	# scan on = 同时做 BR/EDR inquiry 和 LE 扫描。
+	# 实测这只 Xbox 手柄（model 1708）只在 BR/EDR 侧应答，
+	# 用 scan le 会 20 秒什么都扫不到。
+	echo "=== 扫描 25 秒（BR/EDR + LE；请此刻让手柄处于配对模式：Logo 快闪）==="
+	bluetoothctl --timeout 25 scan on 2>&1 | grep -E '\[NEW\] Device|Name:' | head -40
 	echo
 	echo "=== 扫描到的设备 ==="
 	bluetoothctl devices 2>/dev/null | head -30

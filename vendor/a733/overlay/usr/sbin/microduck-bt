@@ -76,7 +76,7 @@ printf 'agent NoInputNoOutput\n' >&3
 printf 'default-agent\n' >&3
 printf 'power on\n' >&3
 printf 'pairable on\n' >&3
-printf 'scan le\n' >&3
+printf 'scan on\n' >&3   # 同时扫 BR/EDR + LE（Xbox 1708 只在 BR/EDR 侧应答）
 kmsg "开始扫描（session pid=$BT_PID）"
 
 pair_one() {
