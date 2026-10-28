@@ -319,8 +319,14 @@ resize2fs /dev/mmcblk0p2
 - 喇叭接 **J1 螺钉端子**；codec 的 HPOUT/HPROUT 在原理图上未接，插耳机孔不会响；
 - 声音走 codec 线输出 LEFT_LOP/RIGHT_LOP（mixer 的 `Line Playback Switch`
   是 LOP 输出级静音位，必须 on）；
-- **MUTE（pin18/PJ25）由 DT 里的 `regulator-pa-mute` 在开机拉低**；
-  MODE（pin16/PJ24）留给 UART4 TX 调试输出。
+- **MUTE（pin18 = PJ25）不需要软件驱动**。PAM8406 的 MUTE 是"低有效 +
+  内部上拉"：悬空 = 高 = **不静音**，拉低才会静音
+  （Solid 文档 / DIODES 数据手册）。曾错误地加过 `regulator-pa-mute`
+  并把 GPIO 配置成 ACTIVE_LOW + always-on，实际会把 MUTE **拉低=静音**，
+  方向是反的，已删除。
+- **MODE（pin16 = PJ24）**：芯片不允许悬空；HAT 上它接我们的 UART4 TX，
+  串口空闲为高 → **Class-D**，正好是默认工作模式，无需额外处理。
+- 结论：功放侧软件不需要任何动作；喇叭必须接 **J1 螺钉端子**。
 
 HAT 上的 codec 挂在 **TWI7 @0x18**，走 **I2S0**（PB4–PB8 = MCLK/BCLK/LRCK/DOUT/DIN）。
 
