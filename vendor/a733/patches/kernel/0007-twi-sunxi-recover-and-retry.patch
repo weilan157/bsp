@@ -1,0 +1,41 @@
+diff --git a/drivers/twi/twi-sunxi.c b/drivers/twi/twi-sunxi.c
+--- a/drivers/twi/twi-sunxi.c
++++ b/drivers/twi/twi-sunxi.c
+@@ -2338,8 +2338,37 @@
+ 	if (twi->twi_drv_used)
+ 		ret = sunxi_twi_drv_xfer(twi, msgs, num);
+ 	else
+ 		ret = sunxi_twi_engine_xfer(twi, msgs, num);
+ 
++	/* RECOVER: a single bus glitch (e.g. the class-D amplifier switching
++	 * right next to the I2C lines on the 40-pin ribbon) leaves this
++	 * controller stuck in "bus state isn't idle / STOP failed", and every
++	 * following transfer then times out after 600 ms - the codec never
++	 * answers again until the next reboot. Reset the controller, run the
++	 * generic 9-clock bus recovery and retry the message set, so that a
++	 * transient glitch no longer kills the codec I2C for the whole boot.
++	 */
++	if (ret < 0) {
++		int retry;
++
++		for (retry = 0; retry < 2 && ret < 0; retry++) {
++			sunxi_err(twi->dev,
++				"xfer failed(%d), bus recovery + retry %d/2\n",
++				ret, retry + 1);
++			sunxi_twi_soft_reset(twi);
++			i2c_recover_bus(&twi->adap);
++			sunxi_twi_soft_reset(twi);
++			spin_lock_irqsave(&twi->lock, flags);
++			twi->status = SUNXI_TWI_XFER_STATUS_RUNNING;
++			spin_unlock_irqrestore(&twi->lock, flags);
++			usleep_range(200, 400);
++			if (twi->twi_drv_used)
++				ret = sunxi_twi_drv_xfer(twi, msgs, num);
++			else
++				ret = sunxi_twi_engine_xfer(twi, msgs, num);
++		}
++	}
++
+ out:
+ 	/*
+ 	 * xfer indicates that twi transmission is completed and is in idle

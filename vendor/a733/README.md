@@ -294,7 +294,7 @@ resize2fs /dev/mmcblk0p2
 | PCM_DIN（codec DOUT → SoC） | 38 | GPIO20 | PB8 | `i2s0_din0` | SoC 入 |
 | PCM_DOUT（SoC → codec DIN） | 40 | GPIO21 | PB7 | `i2s0_dout0` | SoC 出 |
 | PA MODE | 16 | GPIO23 | PJ24 | gpio | — |
-| PA MUTE | 18 | GPIO24 | PJ25 | gpio | 低=未静音 |
+| PA MUTE | 18 | GPIO24 | PJ25 | gpio | **低=静音**（低有效 + 内部上拉；悬空/高=不静音） |
 
 注意 RPi 的命名视角：`PCM_DIN` 是"进 SoC"的数据，也就是 codec 的 DOUT；
 `PCM_DOUT` 是"SoC 出"的数据，也就是 codec 的 DIN。所以
