@@ -1,0 +1,17 @@
+[Unit]
+Description=microduck: 复位卡死的 TLV320AIC3104 I2C（9 clocks + STOP）
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=microduck-audio.service
+ConditionPathExists=/usr/sbin/microduck-i2c-recover
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 失败不算错：芯片本来就正常时，这段只是打几个无害的时钟
+ExecStart=/usr/sbin/microduck-i2c-recover
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

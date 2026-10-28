@@ -1,6 +1,7 @@
 [Unit]
 Description=microduck: 初始化 TLV320AIC3104 通道路由（播放/录音）
-After=alsa-restore.service sound.target
+After=alsa-restore.service sound.target microduck-i2c-recover.service
+Wants=microduck-i2c-recover.service
 Wants=alsa-restore.service
 ConditionPathExists=/usr/sbin/microduck-audio-init
 
