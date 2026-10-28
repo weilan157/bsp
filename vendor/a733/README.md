@@ -396,6 +396,19 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 在 bootm 里解压），和“完全用官方 u-boot”的前提冲突。默认启动仍走未压缩 `Image`。
 ## 配网 / SSH / 手柄
 
+### AP 什么时候开、什么时候关
+
+- `ap.conf` 的 `ENABLED=1` 只表示“**没有 STA 连接时**开热点做配网”；
+- **`AFTER_STA=0`（默认）**：STA 连上后，热点再保留 `AP_GRACE`（默认 120）秒让配网页
+  看到结果，然后自动关闭——电池机器人不长期背着一个 AP；
+- `AFTER_STA=1`：保留 AP+STA 共存（家里网络挂了还能连 `duck-XXXX` 进去），代价是
+  多 0.3–0.8 W；
+- 配网页提交后会**立即**起 `wpa_supplicant` + DHCP，不再等 `microduck-wifi` 的 30 秒
+  重试；热点期间 STA 失败也会保留热点，方便重试；
+- 需要恢复热点：SSH 里 `microduck-ap start`、或创建 `/etc/microduck/ap-first` 后重启
+  （强制先进配网模式）。
+
+
 - `overlay/usr/sbin/microduck-net`：多 WiFi profile（wpa_supplicant，无 NetworkManager），
   `auto` 开机自动连；`add/switch/forget/list/scan/status` 现场换网；
 - `overlay/usr/sbin/microduck-ip`：打印所有接口地址和 SSID；

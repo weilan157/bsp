@@ -27,6 +27,13 @@ else
 	echo '<p>已更新，设备正在切换网络（约 5–15 秒）。</p>'
 fi
 
-echo '<p>连上后可以关掉热点，改用：</p>'
-echo '<pre>ssh root@duck-xxxx.local</pre>'
+# 立刻让新配置生效（不等 microduck-wifi 的 30s 重试）
+IF=$(for d in /sys/class/net/wlan0 /sys/class/net/wl*; do [ -e "$d" ] && basename "$d" && break; done)
+IF=${IF:-wlan0}
+pkill -f "wpa_supplicant.*$IF" 2>/dev/null
+wpa_supplicant -B -i "$IF" -c /etc/wpa_supplicant/wpa_supplicant.conf >/dev/null 2>&1
+( busybox udhcpc -i "$IF" -b -q -t 6 -T 2 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 & )
+
+echo '<p>热点会保留约 2 分钟，之后自动关闭（省电）。</p>'
+echo '<p>连上后可以用：</p><pre>ssh root@duck-xxxx.local</pre>'
 echo '<p><a href="/">再配一个网络</a></p></body></html>'
