@@ -1,19 +1,28 @@
 #!/bin/sh
 # microduck-audio-probe —— 播放时抓 codec 关键寄存器 + 时钟树 + mixer 状态
 #
-# 目的是不用示波器也能判断：
-#   1) 驱动有没有把 sysclk(12MHz) 送进 codec 并启用 PLL；
-#   2) LOP/HP 输出级是否打开；
-#   3) SoC 侧 I2S 时钟是否在跑。
+# 注意：codec 现在挂在 i2c-gpio 上，总线号不再是 7，所以 regmap 路径
+# 必须动态发现（0-0018 / 7-0018 都可能），否则读到空文件还以为"寄存器都是 0"。
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 C=${AUDIO_CARD:-0}
 
+echo "===== 0) codec 挂在哪条 I2C 上 ====="
+DEV=$(ls /sys/bus/i2c/devices/ 2>/dev/null | grep -E '^[0-9]+-0018$' | head -1)
+echo "device = ${DEV:-<未找到>}"
+BUS=$(echo "${DEV:-0-0018}" | cut -d- -f1)
+echo "bus    = i2c-$BUS"
+REGMAP=$(ls -d /sys/kernel/debug/regmap/*0018* 2>/dev/null | head -1)
+echo "regmap = ${REGMAP:-<无>}"
+
+echo
 echo "===== 1) 播放时抓 hw_params ====="
 speaker-test -D "hw:$C,0" -c 2 -t sine -f 440 -l 1 >/dev/null 2>&1 &
 ST=$!
 sleep 1.5
 cat /proc/asound/card$C/pcm0p/sub0/hw_params 2>/dev/null
+wait $ST 2>/dev/null
+
 echo
 echo "===== 2) mixer 关键项 ====="
 for n in 'PCM Playback Volume' 'Line DAC Playback Volume' 'Line Playback Switch' \
@@ -21,39 +30,48 @@ for n in 'PCM Playback Volume' 'Line DAC Playback Volume' 'Line Playback Switch'
 	v=$(amixer -c "$C" cget name="$n" 2>/dev/null | grep -m1 ': values=' | sed 's/.*: values=//')
 	[ -n "$v" ] && printf '%-28s %s\n' "$n" "$v"
 done
-wait $ST 2>/dev/null
 
 echo
-echo "===== 3) codec 寄存器快照（regmap debugfs）====="
-R=/sys/kernel/debug/regmap/7-0018/registers
-if [ -f "$R" ]; then
-	# regmap 每行 16 字节，这里只取前 0x70
-	head -8 "$R"
+echo "===== 3) codec 寄存器快照 ====="
+if [ -n "${REGMAP:-}" ] && [ -f "$REGMAP/registers" ]; then
+	# regmap 每行 16 字节：00: .. / 10: .. / ...
+	head -8 "$REGMAP/registers"
 else
-	for a in 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10 \
-		 19 25 2b 2c 33 3a 41 48 51 65 66; do
-		printf '%s=%s ' "$a" "$(i2cget -y -f 7 0x18 0x$a 2>/dev/null)"
+	echo "(没有 regmap debugfs，改用解绑驱动后直接 i2cget)"
+fi
+
+echo
+echo "===== 4) 直接问芯片「你还在吗」（解绑驱动，纯软件）====="
+DRV=/sys/bus/i2c/drivers/tlv320aic3x
+if [ -n "${DEV:-}" ] && [ -d "$DRV" ]; then
+	echo "$DEV" > "$DRV/unbind" 2>/dev/null && sleep 0.3
+	for a in 02 03 08 09 0b; do
+		v=$(i2cget -y "$BUS" 0x18 0x$a 2>&1)
+		printf 'reg 0x%s -> %s\n' "$a" "$v"
 	done
-	echo
-fi
-
-echo
-echo "===== 4) I2S / audio 时钟 ====="
-if [ -f /sys/kernel/debug/clk/clk_summary ]; then
-	grep -iE 'i2s0|pll-audio' /sys/kernel/debug/clk/clk_summary | head -12
+	echo "$DEV" > "$DRV/bind" 2>/dev/null
+	echo "(已重新绑定驱动)"
 else
-	echo "(clk_summary 不可用，先 mount -t debugfs none /sys/kernel/debug)"
+	echo "找不到驱动 $DRV 或设备，跳过"
 fi
 
 echo
-echo "===== 5) 判读提示 ====="
+echo "===== 5) I2S / audio 时钟 ====="
+grep -iE 'i2s0|pll-audio' /sys/kernel/debug/clk/clk_summary 2>/dev/null | head -12 || \
+	echo "(clk_summary 不可用)"
+
+echo
+echo "===== 6) 最近 NAK 计数 ====="
+echo "NAK bailout = $(dmesg | grep -c 'NAK bailout')"
+
+echo
+echo "===== 判读 ====="
 cat <<'EOF'
-reg 0x03 bit7 = PLL 使能（应为 1）；bit3:0 = PLL Q
-reg 0x04~0x06 = PLL R/J/D（12MHz -> 48k 时应为非 0）
-reg 0x02      = 采样率分频（48k 时通常 0x00）
-reg 0x65      = Clock Gen：D7 PLL 使能、D6:4 CLKDIV_IN、D3:2 CLKDIV_OUT
-reg 0x25/0x2b = HP/LOP 输出级电平（0 = 静音）
-reg 0x0b      = DAC 数据通路（LDAC2LCH|RDAC2RCH|FSREF_48000 应为 0xc0 左右）
-若 0x03 bit7=0 且 0x04~0x06 全 0：驱动没把 sysclk 送进 codec（PLL 未启用）。
-若 0x03 bit7=1 但无声：多半是 MCLK 没到达 codec（Y1 晶振/OE），或 I2S 数据线。
+第 4 段是决定性证据：
+- 解绑驱动后 i2cget 能读到真实值（如 0x02=0x00、0x03=0x11）：
+  芯片本身活着且应答，问题在驱动/寄存器写入序列。
+- 全部返回 "Error: Read failed / NAK" ：
+  芯片在这条总线上不再应答 —— 与驱动配置无关，是 codec 侧（供电/复位/时钟）
+  或板级连线的问题，软件无法绕过。
+- 返回 "Device or resource busy"：说明解绑没成功，重跑一次。
 EOF
