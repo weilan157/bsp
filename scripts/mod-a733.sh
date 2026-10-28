@@ -470,10 +470,14 @@ cmd_a733_kernel() {
 		pins = ${debug_pins};
 		function = "${A733_DEBUG_UART}";
 		drive-strength = <10>;
-		/* 注意：HAT 原理图上 40-pin pin16/18 = IO_23/IO_24 = PAM8406 MODE/MUTE，
-		 * 与 uart4 的 PJ24/PJ25 复用。但参考实现（github.com/weilan157/microduck）
-		 * 完全不驱动这两个脚也能出声，说明 MUTE 悬空不会静音，
-		 * 因此这里不加 bias，保持串口 RX 正常工作。 */
+		/* HAT 原理图：40-pin pin16/18 = IO_23/IO_24 = PAM8406 MODE/MUTE，
+		 * 与 uart4 的 PJ24/PJ25 复用。
+		 * 实测（EV）去掉下拉后，播放期间 TWI7 出现大量
+		 *   Bus error / Arbitration lost / xfer failed(0x18)
+		 * 说明 MUTE 悬空时功放状态抖动会干扰总线/供电；加下拉（保持未静音）
+		 * 时总线干净（ET/EU 那两版播放期间 twi 报错为 0）。
+		 * 代价：该脚作 UART RX 收不到数据，需要输入请用 SSH。 */
+		bias-pull-down;
 	};
 };
 
