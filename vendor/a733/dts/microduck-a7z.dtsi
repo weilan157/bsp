@@ -156,55 +156,16 @@
 
 
 /* =====================================================================
- * I2S0 数据线方向（按 Pololu RPI Robot HAT 原理图 + A733 40-pin 引脚表）
+ * I2S0 数据线（按 HAT 原理图放大图核对，**不要改方向**）：
  *
- *   HAT 把 codec 的 DIN(数据输入) 接在 40-pin pin38 = PB8，
- *   把 codec 的 DOUT(数据输出) 接在 40-pin pin40 = PB7。
- *   而这两个脚的 I2S0 功能是双向可选的：
- *       PB8: i2s0_din0(0x3) / i2s0_dout1(0x4)
- *       PB7: i2s0_dout0(0x3) / i2s0_din1(0x4)
- *   所以：
- *       PB8 必须配 i2s0_dout1 -> SoC 输出数据 -> codec DIN（播放）
- *       PB7 必须配 i2s0_din1  -> codec DOUT -> SoC 输入（录音）
- *   之前把 PB8 配成 din0、PB7 配成 dout0，方向全反，结果播放和录音
- *   都没有任何数据（但 I2C、时钟、mixer 全部正常，完全没报错）。
+ *   IO_19 -> codec WCLK  = 40pin 35 = PB6 = i2s0_lrck
+ *   IO_18 -> codec BCLK  = 40pin 12 = PB5 = i2s0_bclk
+ *   IO_21 -> codec DIN   = 40pin 40 = PB7 = i2s0_dout0   (SoC 输出)
+ *   IO_20 <- codec DOUT  = 40pin 38 = PB8 = i2s0_din0    (SoC 输入)
+ *
+ * 曾误以为 DIN/DOUT 与 PB7/PB8 交叉，改成 PB8=dout1/PB7=din1，
+ * 真机更差（codec 掉线 + 总线报错），已回退为 board dts 的默认引脚组。
  * ===================================================================== */
-&pio {
-	i2s0_md_bclk: i2s0-md-bclk {
-		pins = "PB5";
-		function = "i2s0_bclk";
-		drive-strength = <10>;
-		bias-disable;
-	};
-	i2s0_md_lrck: i2s0-md-lrck {
-		pins = "PB6";
-		function = "i2s0_lrck";
-		drive-strength = <10>;
-		bias-disable;
-	};
-	i2s0_md_dout: i2s0-md-dout {
-		pins = "PB8";
-		function = "i2s0_dout1";
-		drive-strength = <10>;
-		bias-disable;
-	};
-	i2s0_md_din: i2s0-md-din {
-		pins = "PB7";
-		function = "i2s0_din1";
-		drive-strength = <10>;
-		bias-disable;
-	};
-};
-
-&i2s0_plat {
-	status = "okay";
-	/* 只启用数据线 1（pin1 = DOUT1/DIN1），与上面的 pinctrl 对应 */
-	tx-pin = <1>;
-	rx-pin = <1>;
-	pinctrl-names = "default", "sleep";
-	pinctrl-0 = <&i2s0_md_bclk &i2s0_md_lrck &i2s0_md_dout &i2s0_md_din>;
-	pinctrl-1 = <&i2s0_md_bclk &i2s0_md_lrck &i2s0_md_dout &i2s0_md_din>;
-};
 
 &i2s0_mach {
 	status = "okay";

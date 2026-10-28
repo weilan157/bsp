@@ -458,7 +458,9 @@ cmd_a733_kernel() {
 	if [[ "${A733_DEBUG_UART}" == "uart2" ]]; then
 		debug_pins='"PB0", "PB1"'
 	elif [[ "${A733_DEBUG_UART}" == "uart4" ]]; then
-		debug_pins='"PJ24", "PJ25"'
+		# 只占 PJ24(TX)：40-pin pin18 = PJ25 = IO_24 = PAM8406 MUTE，
+		# 必须留给功放做 GPIO 输出低，否则功放静音且总线受扰。
+		debug_pins='"PJ24"'
 	else
 		debug_pins=""
 	fi
@@ -485,6 +487,21 @@ cmd_a733_kernel() {
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart_debug_pins>;
+};
+
+/* HAT 功放 PAM8406 的 MUTE（40-pin pin18 = IO_24 = PJ25）。
+ * 它默认悬空会让功放处于静音/状态抖动，实测会连累 TWI7（codec 掉线），
+ * 所以这里用 regulator-fixed + GPIO_ACTIVE_LOW 在开机就把它拉低（未静音）。 */
+/ {
+	pa_mute: regulator-pa-mute {
+		compatible = "regulator-fixed";
+		regulator-name = "pa-mute";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pio PJ 25 1>;
+		enable-active-low;
+		regulator-always-on;
+	};
 };
 EOF
 	fi
