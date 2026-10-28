@@ -280,6 +280,48 @@ resize2fs /dev/mmcblk0p2
 
 ## 音频（TLV320AIC3104）
 
+### 引脚定义（三方对齐，不要再猜）
+
+依据：HAT 原理图 Audio 页放大图 + Cubie A7Z 40-pin 引脚表 +
+参考实现（github.com/weilan157/microduck、fanhao375/microduck-replica）。
+
+| 信号 | 40pin | BCM | A733 | I2S0 功能 | 方向 |
+|---|---|---|---|---|---|
+| SCL | 5 | GPIO3 | PJ22 | twi7 | SoC 出 |
+| SDA | 3 | GPIO2 | PJ23 | twi7 | 双向 |
+| PCM_CLK / BCLK | 12 | GPIO18 | PB5 | `i2s0_bclk` | SoC 出 |
+| PCM_FS / WCLK | 35 | GPIO19 | PB6 | `i2s0_lrck` | SoC 出 |
+| PCM_DIN（codec DOUT → SoC） | 38 | GPIO20 | PB8 | `i2s0_din0` | SoC 入 |
+| PCM_DOUT（SoC → codec DIN） | 40 | GPIO21 | PB7 | `i2s0_dout0` | SoC 出 |
+| PA MODE | 16 | GPIO23 | PJ24 | gpio | — |
+| PA MUTE | 18 | GPIO24 | PJ25 | gpio | 低=未静音 |
+
+注意 RPi 的命名视角：`PCM_DIN` 是"进 SoC"的数据，也就是 codec 的 DOUT；
+`PCM_DOUT` 是"SoC 出"的数据，也就是 codec 的 DIN。所以
+`docs/硬件入门.md` 的 "GPIO18/19/20/21 = Clk/FS/Din/Dout" 与原理图放大图
+`IO_21 → DIN`、`IO_20 → DOUT` 并不矛盾，是同一个接线。
+
+**踩过的坑**：曾按"codec DIN 接 PB7 的 dout0"理解反了，把 PB8 改成
+`i2s0_dout1`、PB7 改成 `i2s0_din1`，真机更差（codec 掉线、TWI 报错）。
+现固定为 board dts 的默认引脚组：PB7=`i2s0_dout0`、PB8=`i2s0_din0`。
+
+### 时钟
+
+- codec MCLK：板上 **Y1 12.000 MHz** 有源晶振直接进 U2（不是 SoC 的 PB4）；
+- SoC I2S sysclk：参考实现用 **12.288 MHz**（256×48k）；
+- 但 Allwinner 的 `soundcard-mach` 只支持**一个** mclk 值同时给 cpu 和 codec，
+  所以这里取 `mclk-fs = <250>`（48000×250 = 12.000 MHz），保证 codec 的
+  sysclk 与真实晶振一致（codec PLL 由它换算）；SoC 的 PB4 未接到 codec，
+  其数值不影响出声。
+
+### 功放（PAM8406）
+
+- 喇叭接 **J1 螺钉端子**；codec 的 HPOUT/HPROUT 在原理图上未接，插耳机孔不会响；
+- 声音走 codec 线输出 LEFT_LOP/RIGHT_LOP（mixer 的 `Line Playback Switch`
+  是 LOP 输出级静音位，必须 on）；
+- **MUTE（pin18/PJ25）由 DT 里的 `regulator-pa-mute` 在开机拉低**；
+  MODE（pin16/PJ24）留给 UART4 TX 调试输出。
+
 HAT 上的 codec 挂在 **TWI7 @0x18**，走 **I2S0**（PB4–PB8 = MCLK/BCLK/LRCK/DOUT/DIN）。
 
 - DT：`audio_codec: tlv320aic3104@18` + `&i2s0_mach`（name `microduck-audio`，
