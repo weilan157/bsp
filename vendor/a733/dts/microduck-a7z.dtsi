@@ -485,3 +485,45 @@
 &mipi1 { /delete-property/ iommus; };
 &isp00 { /delete-property/ iommus; };
 &vinc00 { /delete-property/ iommus; };
+
+/* =====================================================================
+ * 音频卡：改用 simple-audio-card（与参考实现完全一致）
+ *
+ * 参考实现（weilan157/microduck deploy/audio/aic3104-i2c3.dts）用的就是
+ * simple-audio-card，并给 codec 单独挂 clocks = 12 MHz fixed-clock：
+ *   - cpu 侧：system-clock-frequency = 12288000（256×48k，SoC 出 BCLK/LRCK）
+ *   - codec 侧：clocks 指向 12 MHz（板上 Y1 有源晶振的真实频率）
+ * 两者不同，而 Allwinner 的 soundcard-mach 只能把同一个 mclk 值同时写给
+ * cpu 和 codec，无法表达这种差异，所以这里换成简单卡。
+ * ===================================================================== */
+/ {
+	codec_mclk: codec-mclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <12000000>;
+	};
+
+	sound_aic3104: sound-aic3104 {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "aic3104";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,bitclock-master = <&sc_cpu>;
+		simple-audio-card,frame-master = <&sc_cpu>;
+
+		sc_cpu: simple-audio-card,cpu {
+			sound-dai = <&i2s0_plat>;
+			system-clock-frequency = <12288000>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&audio_codec>;
+			clocks = <&codec_mclk>;
+			clock-names = "mclk";
+		};
+	};
+};
+
+/* 原来的 sunxi mach 卡停用，避免两张卡同名/抢 DAI */
+&i2s0_mach {
+	status = "disabled";
+};

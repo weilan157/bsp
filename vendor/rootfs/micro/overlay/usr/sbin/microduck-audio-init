@@ -17,7 +17,7 @@ kmsg() { printf 'microduck-audio: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
 CARD="${AUDIO_CARD:-0}"
 
 i=0
-while [ ! -f "/proc/asound/card$CARD/id" ] && [ $i -lt 100 ]; do
+while [ ! -f "/proc/asound/card$CARD/id" ] && [ $i -lt 300 ]; do
 	sleep 0.1
 	i=$((i + 1))
 done
