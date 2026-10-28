@@ -213,13 +213,20 @@
 	i2s0_cpu: soundcard-mach,cpu {
 		sound-dai = <&i2s0_plat>;
 		soundcard-mach,pll-fs = <1>;
-		/* MCLK 由 HAT 上的 Y1「12 MHz」有源晶振直接供给 codec（原理图：
-		 * U2 pin5 MCLK <- Y1 OUT），不是 SoC 的 PB4！
-		 * 48000 * 250 = 12,000,000 -> 告诉驱动真实的 12 MHz，
-		 * aic3x 才会启用内部 PLL 得到正确的 48 kHz。
-		 * （之前写 256 会让驱动以为 MCLK=12.288M 而旁路 PLL，
-		 *   实际 fs = 48k*250/256 = 46.875k。） */
-		soundcard-mach,mclk-fs = <250>;   /* MCLK_12M_OSC */
+		/* 实验：mclk-fs=256 -> 驱动算 48000*256 = 12.288MHz，
+		 * aic3x 的 bypass 判断 12.288e6/(128*Q)==48000 在 Q=2 成立，
+		 * 于是 **旁路 PLL**（不写 0x03~0x06）。
+		 *
+		 * 为什么这么做：真机上每次开始播放，第一批失败的都是
+		 *   Unable to sync registers 0x3-0x5  (PLL 寄存器)
+		 * 之后 codec 就不再应答 I2C（NAK）- 静音播放也一样，
+		 * 与功放电流无关。怀疑"使能 PLL 但 MCLK 锁不住"导致数字核心
+		 * 失时钟。旁路 PLL 可以完全绕开这条路径。
+		 *
+		 * 副作用：若板上 MCLK 实际是 12.000MHz，则采样率会偏 2.4%
+		 * （音调略低），但"能不能出声"足以判定 MCLK 是否存在、以及
+		 * PLL 路径是否是元凶。 */
+		soundcard-mach,mclk-fs = <256>;   /* BYPASS_PLL_TEST */
 	};
 	soundcard-mach,codec {
 		sound-dai = <&audio_codec>;
