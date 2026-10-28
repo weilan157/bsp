@@ -39,11 +39,15 @@ setv 'Line DAC'                  'on'
 setv 'HP DAC Playback Volume'    '118,118'
 setv 'HP Playback Switch'        'on,on'
 
-# ---- 采集：板上麦克风 -> MIC3R -> Right PGA ----
-setv 'Right PGA Mixer Mic3R' 'on'
+# ---- 采集：板上麦克风 -> MIC2R -> Right PGA ----
+# 注意：TLV320AIC3104 只有 MIC2 / LINE2，没有 MIC3（MIC3 是 AIC3106/33 的）。
+# 参考实现里写 Mic3R 是给别的 codec 变体用的，照抄到 3104 上不对。
+setv 'Right PGA Mixer Mic2R' 'on'
+setv 'Left PGA Mixer Mic2R'  'off'
+setv 'Left PGA Mixer Mic2L'  'off'
+setv 'Right PGA Mixer Mic2L' 'off'
+setv 'Right PGA Mixer Mic3R' 'off'
 setv 'Left PGA Mixer Mic3R'  'off'
-setv 'Left PGA Mixer Mic3L'  'off'
-setv 'Right PGA Mixer Mic3L' 'off'
 setv 'Right PGA Mixer Line1R' 'off'
 setv 'Right PGA Mixer Line1L' 'off'
 setv 'Left PGA Mixer Line1R'  'off'
