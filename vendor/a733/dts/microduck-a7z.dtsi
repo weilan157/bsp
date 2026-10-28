@@ -59,12 +59,16 @@
  *      0x6A LSM6DSV16X     D1 版 HAT 用它替代 BMI088（默认不打开）
  * ===================================================================== */
 &twi7 {
-	/* codec 已改到下面的 i2c-gpio 软件总线：
+	status = "okay";
+	/* 说明：曾把 codec 改到 i2c-gpio（参考实现早期也这么做），但真机上
+	 * SCL 会被拉死在低电平（i2c-gpio 报 "can't read SCL"），恢复时序也救不回来，
+	 * 属于总线电气/器件状态问题，与软件配置无关。这里回到常规的硬件 TWI7。
+	 *
+	 * 旧的说明保留如下：
 	 * 播放时硬件 TWI7 会大量出现 Arbitration lost / Bus error / STOP failed
 	 * （codec 把 SDA 拖住），导致寄存器读写连锁失败。参考实现早期也用
 	 * i2c-gpio 跑这颗 codec（i2c-gpio-pihat），对时钟拉伸/边沿更宽容。
 	 * 引脚不变（PJ22=SCL / PJ23=SDA），纯软件改动。 */
-	status = "disabled";
 	/* 100 kHz：实测 400 kHz 下 codec（0x18）的寄存器读写频繁失败
 	 *   twi: Bus error / STOP failed / bus state 0x0 isn't idle
 	 *   tlv320aic3x 7-0018: ASoC: error at ... register ... -22
@@ -74,6 +78,13 @@
 	pinctrl-0 = <&twi7_pins_default>;
 	pinctrl-1 = <&twi7_pins_sleep>;
 
+
+	audio_codec: tlv320aic3104@18 {
+		compatible = "ti,tlv320aic3104";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
 
 	tof: vl53l5cx@29 {
 		compatible = "st,vl53l5cx";
@@ -132,30 +143,6 @@
 	};
 };
 
-/* =====================================================================
- * codec 用软件 I2C（i2c-gpio）挂在同一对引脚上
- *   PJ23 = SDA（40-pin pin3）、PJ22 = SCL（40-pin pin5）
- * 原因见上面 &twi7 的注释：硬件 TWI7 在放音时会 Arbitration lost / SDA 卡低。
- * ===================================================================== */
-/ {
-	i2c_gpio_codec: i2c-gpio-codec {
-		compatible = "i2c-gpio";
-		sda-gpios = <&pio PJ 23 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
-		scl-gpios = <&pio PJ 22 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
-		i2c-gpio,delay-us = <5>;	/* 约 100 kHz */
-		i2c-gpio,scl-output-only;	/* codec 不做时钟拉伸 */
-		#address-cells = <1>;
-		#size-cells = <0>;
-		status = "okay";
-
-	audio_codec: tlv320aic3104@18 {
-		compatible = "ti,tlv320aic3104";
-		reg = <0x18>;
-		#sound-dai-cells = <0>;
-		status = "okay";
-	};
-	};
-};
 
 &audio_codec {
 	AVDD-supply  = <&codec_3v3>;

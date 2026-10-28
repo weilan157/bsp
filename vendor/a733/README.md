@@ -305,6 +305,33 @@ resize2fs /dev/mmcblk0p2
 `i2s0_dout1`、PB7 改成 `i2s0_din1`，真机更差（codec 掉线、TWI 报错）。
 现固定为 board dts 的默认引脚组：PB7=`i2s0_dout0`、PB8=`i2s0_din0`。
 
+### 现状与结论（2026-10-28，真机排查记录）
+
+音频**软件侧已全部对齐但仍无输出**，证据链如下（都是真机日志）：
+
+| 观察 | 结论 |
+|---|---|
+| `i2cdetect -y 0`（i2c-gpio 版本）只看到 `0x18` 与 `0x6a` | 总线能工作；`0x6a` = D1 版 HAT 的 **LSM6DSV16X** |
+| 多数时候解绑驱动后 `i2cget 0-0018 0x02` 全部 `Error: Read failed` | codec **不应答** |
+| `i2c i2c-0: Not I2C compliant: can't read SCL` / `Bus may be unreliable` | **SCL 被拉死在低电平**（器件卡住或线路问题）|
+| 打过 9 clocks + STOP 后偶发恢复（一次 5/5 可读，寄存器全 0x00） | 状态**间歇性**，典型接触/器件异常 |
+| 播放时（经 hw TWI7 或 i2c-gpio）一律 `NAK bailout`，静音播放同样 | 与功放电流无关，是 codec 掉线 |
+
+结论：**codec 侧 I2C 电气异常（SCL 被拉低 / 芯片不应答），属于板级硬件问题，
+在不改动硬件的条件下软件无法绕过**。已排除的软件因素：
+TWI 速率（400k→100k）、I2C 驱动实现（硬件 TWI 与 i2c-gpio 都试过）、
+引脚定义（PB5/6/7/8 与 PJ22/23 均按原理图与 40pin 表核对）、
+mixer（含 LOP 静音位）、mclk-fs（250/256）、PLL 旁路、
+`simple-audio-card` 与 `soundcard-mach` 两种建卡方式、PA MUTE 极性。
+
+保留的排查工具（纯软件）：
+- `microduck-audio-probe`：hw_params / mixer / 寄存器 / 时钟 / NAK 计数；
+- `microduck-i2c-recover`：解绑 i2c-gpio 后打 9 clocks + STOP 尝试救回总线；
+- `i2c-recover`：静态小程序，直接用 GPIO（SCL=310/SDA=311）打时序。
+
+若后续换一块 HAT 或修复该总线，只需把 `microduck-audio.service` 打开即可验证：
+`systemctl status microduck-audio` / `speaker-test -D hw:0,0`。
+
 ### 时钟
 
 - codec MCLK：板上 **Y1 12.000 MHz** 有源晶振直接进 U2（不是 SoC 的 PB4）；
