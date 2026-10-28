@@ -69,9 +69,9 @@
 	 * （codec 把 SDA 拖住），导致寄存器读写连锁失败。参考实现早期也用
 	 * i2c-gpio 跑这颗 codec（i2c-gpio-pihat），对时钟拉伸/边沿更宽容。
 	 * 引脚不变（PJ22=SCL / PJ23=SDA），纯软件改动。 */
-	/* 50 kHz：HAT 原理图上 I2C 上拉 R36/R37 是 DNP（未贴片），总线的上拉
-	 * 只剩主板 SoC 内部上拉（board dts 给 PJ22/PJ23 配了 bias-pull-up，
-	 * 约 50kΩ）。排线有几十 pF 容性，100 kHz 时上升沿已经偏慢，
+	/* 50 kHz：HAT 侧的 I2C 上拉是 R12/R13 = 10k（原理图确认已贴装，
+	 * 接到 J5 Stemma 座），主板 SoC 侧另有内部上拉。上拉不是瓶颈，
+	 * 但排线/连接器有几十 pF 容性，100 kHz 时上升沿余量偏小，
 	 * 真机出现过
 	 *   twi: Bus error / STOP failed / bus state 0x0 isn't idle
 	 *   tlv320aic3x: Unable to sync registers / register ... -22

@@ -313,7 +313,7 @@ resize2fs /dev/mmcblk0p2
 |---|---|
 | `i2cdetect -y 0`（i2c-gpio 版本）只看到 `0x18` 与 `0x6a` | 总线能工作；`0x6a` = D1 版 HAT 的 **LSM6DSV16X** |
 | 多数时候解绑驱动后 `i2cget 0-0018 0x02` 全部 `Error: Read failed` | codec **不应答** |
-| `i2c i2c-0: Not I2C compliant: can't read SCL` / `Bus may be unreliable` | **SCL 被拉死在低电平**（器件卡住或线路问题）|
+| `i2c i2c-0: Not I2C compliant: can't read SCL` / `Bus may be unreliable` | i2c-gpio 模式下 SCL 回读为低（改用硬件 TWI7 后不再出现）|
 | 打过 9 clocks + STOP 后偶发恢复（一次 5/5 可读，寄存器全 0x00） | 状态**间歇性**，典型接触/器件异常 |
 | 播放时（经 hw TWI7 或 i2c-gpio）一律 `NAK bailout`，静音播放同样 | 与功放电流无关，是 codec 掉线 |
 
@@ -323,6 +323,10 @@ TWI 速率（400k→100k）、I2C 驱动实现（硬件 TWI 与 i2c-gpio 都试�
 引脚定义（PB5/6/7/8 与 PJ22/23 均按原理图与 40pin 表核对）、
 mixer（含 LOP 静音位）、mclk-fs（250/256）、PLL 旁路、
 `simple-audio-card` 与 `soundcard-mach` 两种建卡方式、PA MUTE 极性。
+
+补充（原理图核对）：HAT 的 I2C 上拉是 **R12/R13 = 10k 且已贴装**
+（接到 J5 Stemma 座），主板 SoC 侧另有 `bias-pull-up`，因此**上拉不是瓶颈**；
+TWI7 降到 50 kHz 只是为了给排线/连接器容性留上升沿余量，不是补上拉。
 
 保留的排查工具（纯软件）：
 - `microduck-audio-probe`：hw_params / mixer / 寄存器 / 时钟 / NAK 计数；
