@@ -1,16 +1,13 @@
 #!/bin/sh
-# microduck-i2c-recover —— 把卡死的 codec（SDA 被拉低）从总线上救回来
+# microduck-i2c-recover —— 把卡死的 TLV320AIC3104 从 I2C 总线上救回来
 #
-# 背景：真机上 codec 在某个时刻后完全不应答（解绑驱动后 i2cget 仍 Read failed），
-# 早期硬件 I2C 日志里出现过 "twi bus barrier failed, sda is still low!"，
-# 这是典型的"从机在一次传输中途卡住、把 SDA 一直拉低"。
-# 标准恢复办法：手工打 9 个 SCL 时钟 + STOP。
+# 背景：codec 在传输中途卡住后会把 SDA/SCL 拖住，之后所有寄存器访问
+# 都是 NAK（真机验证：恢复前 0/5 可读，恢复后 5/5）。
+# 做法：解绑 i2c-gpio 释放引脚 -> 打 9 个 SCL 时钟 + STOP -> 重新绑定。
 #
-# 做法（全部软件）：
-#   1) 解绑 i2c-gpio，释放 PJ22/PJ23 两根 GPIO；
-#   2) 用静态小程序 i2c-recover 打时序（SCL=310, SDA=311，取自 i2c-gpio 启动日志）；
-#   3) 重新绑定 i2c-gpio 与 codec 驱动；
-#   4) 直读几个寄存器验证是否恢复应答。
+# 注意：解绑会让声卡被销毁、重绑后重建，所以**不要在开机早期跑**
+# （那时 codec 还没 power-up 完成，而且会把声卡弄没）。
+# 恢复成功后会重启 microduck-audio 把 mixer 重新设一遍。
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
@@ -23,43 +20,44 @@ SDA=${SDA_LINE:-311}
 
 say() { printf 'i2c-recover: %s\n' "$*"; }
 
-say "1) 解绑 i2c-gpio"
-if [ -e "$PLAT/$DEV" ]; then
-	echo "$DEV" > "$PLAT/unbind" 2>/dev/null && say "   unbind ok" || say "   unbind 失败"
+probe_once() {
+	BUS=$(echo "$SLV" | cut -d- -f1)
+	echo "$SLV" > "$I2CDRV/unbind" 2>/dev/null
+	sleep 0.2
+	ok=0
+	for a in 02 03 08 09 0b; do
+		v=$(i2cget -y "$BUS" 0x18 "0x$a" 2>&1)
+		printf '   reg 0x%s -> %s\n' "$a" "$v"
+		case "$v" in Error*) ;; *) ok=$((ok + 1)) ;; esac
+	done
+	echo "$SLV" > "$I2CDRV/bind" 2>/dev/null
+	[ "$ok" -gt 0 ]
+}
+
+try=0
+while [ "$try" -lt 3 ]; do
+	try=$((try + 1))
+	say "第 $try 次：解绑 i2c-gpio"
+	echo "$DEV" > "$PLAT/unbind" 2>/dev/null
 	sleep 0.3
-else
-	say "   找不到 $PLAT/$DEV（检查 DT 节点名）"
-	ls "$PLAT" 2>/dev/null | head
-fi
 
-say "2) 打 9 个 SCL 时钟 + STOP (SCL=$SCL SDA=$SDA)"
-i2c-recover "$SCL" "$SDA" || say "   i2c-recover 失败"
+	say "打 9 个 SCL 时钟 + STOP (SCL=$SCL SDA=$SDA)"
+	i2c-recover "$SCL" "$SDA"
 
-say "3) 重新绑定"
-echo "$DEV" > "$PLAT/bind" 2>/dev/null && say "   i2c-gpio bind ok" || say "   i2c-gpio bind 失败"
-sleep 0.5
-if [ -e "/sys/bus/i2c/devices/$SLV" ] && [ -d "$I2CDRV" ]; then
-	echo "$SLV" > "$I2CDRV/bind" 2>/dev/null && say "   codec bind ok"
-fi
+	say "重新绑定 i2c-gpio"
+	echo "$DEV" > "$PLAT/bind" 2>/dev/null
+	sleep 0.6
+	[ -e "/sys/bus/i2c/devices/$SLV" ] && echo "$SLV" > "$I2CDRV/bind" 2>/dev/null
+	sleep 0.2
 
-say "4) 验证：直读寄存器"
-BUS=$(echo "$SLV" | cut -d- -f1)
-echo "$SLV" > "$I2CDRV/unbind" 2>/dev/null
-sleep 0.3
-ok=0
-for a in 02 03 08 09 0b; do
-	v=$(i2cget -y "$BUS" 0x18 "0x$a" 2>&1)
-	printf '   reg 0x%s -> %s\n' "$a" "$v"
-	case "$v" in
-		Error*) ;;
-		*) ok=$((ok + 1)) ;;
-	esac
+	say "验证"
+	if probe_once; then
+		say "OK：芯片已恢复应答（第 $try 次）"
+		systemctl restart microduck-audio 2>/dev/null && say "已重新应用 mixer"
+		exit 0
+	fi
+	sleep 0.5
 done
-echo "$SLV" > "$I2CDRV/bind" 2>/dev/null
 
-say "结果：$ok/5 个寄存器可读"
-if [ "$ok" -eq 0 ]; then
-	say "芯片仍无应答 —— 软件恢复无效，需查 codec 供电/复位/晶振（硬件层面）"
-else
-	say "芯片已恢复应答，可继续测试放音"
-fi
+say "3 次尝试后仍无应答 —— 需要查 codec 供电/复位/晶振（硬件层面）"
+exit 1
