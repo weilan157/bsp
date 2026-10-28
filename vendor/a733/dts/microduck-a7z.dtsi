@@ -73,12 +73,14 @@
 	 * 写 50k 会直接报 "unsupport duty with bus freq 50000" 并打乱时序。
 	 * 100k 是这颗 codec 的常规速率。
 	 *
-	 * twi_drv_used = 1：切到驱动里的 drv-mode 传输引擎（默认是 engine-mode，
-	 * 我们之前的 Bus error / STOP failed / bus state isn't idle 都出现在
-	 * engine-mode 路径上）。drv-mode 不依赖时钟拉伸，而这颗 codec 不做
-	 * 时钟拉伸，因此可以安全切换，用来验证是否是引擎本身的问题。 */
+	 * 试过 twi_drv_used = <1>（切 drv-mode 引擎）：真机更差，
+	 * 每次传输都是 "drv-mode: Address + Write bit transmitted, ACK not received"
+	 * （地址阶段就没有 ACK），48 条错误。已回退，保持默认 engine-mode。
+	 *
+	 * 结论：engine-mode 与 drv-mode 都失败，i2c-gpio（软件 I2C）下
+	 * i2cdetect 却能同时看到 0x18（codec）与 0x6a（D1 版 HAT 的 LSM6DSV16X），
+	 * 说明这是总线信号/接触的边际问题，不是控制器或配置问题。 */
 	clock-frequency = <100000>;
-	twi_drv_used = <1>;
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&twi7_pins_default>;
 	pinctrl-1 = <&twi7_pins_sleep>;

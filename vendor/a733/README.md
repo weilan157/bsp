@@ -328,6 +328,17 @@ mixer（含 LOP 静音位）、mclk-fs（250/256）、PLL 旁路、
 （接到 J5 Stemma 座），主板 SoC 侧另有 `bias-pull-up`，因此**上拉不是瓶颈**；
 TWI7 降到 50 kHz 只是为了给排线/连接器容性留上升沿余量，不是补上拉。
 
+补充证据（2026-10-28 深夜，两套传输引擎对比）：
+
+| 配置 | 现象 |
+|---|---|
+| 硬件 TWI7 + engine-mode（100 kHz） | 播放时 `Bus error / STOP failed / bus state isn't idle`，寄存器读写失败 |
+| 硬件 TWI7 + **drv-mode**（`twi_drv_used=1`） | 更差：`drv-mode: Address + Write bit transmitted, ACK not received`，**地址阶段就无 ACK** |
+| i2c-gpio（软件 I2C，同一对 PJ22/PJ23） | `i2cdetect` 能同时看到 **0x18（codec）** 与 **0x6a（D1 版 HAT 的 LSM6DSV16X）**，但数据阶段读回失败 |
+
+两套控制器行为不一致、地址 ACK 时有时无 → 判定为**总线信号完整性/接触边际**问题。
+另外 `twi-sunxi` 驱动只支持 100k/400k（50k 会报 `unsupport duty`），该限制已记录。
+
 保留的排查工具（纯软件）：
 - `microduck-audio-probe`：hw_params / mixer / 寄存器 / 时钟 / NAK 计数；
 - `microduck-i2c-recover`：解绑 i2c-gpio 后打 9 clocks + STOP 尝试救回总线；
