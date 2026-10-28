@@ -1,21 +1,28 @@
 #!/bin/sh
-# microduck-audio-init —— TLV320AIC3104 开机 mixer 设置
+# microduck-audio-init —— TLV320AIC3104 开机 mixer 设置（带重试）
 #
-# 依据参考实现（github.com/weilan157/microduck/deploy/audio/aic3104-init.sh）
-# 与 Pololu RPi Robot HAT 原理图：
-#   - 喇叭挂在 codec 的 **线输出** LEFT_LOP/RIGHT_LOP 上，经 U1 PAM8406 放大到 J1；
-#     HPOUT/HPROUT 在原理图上未接（插耳机孔永远没声）。
-#   - 'Line Playback Switch' 是 **LOP 输出级的 MUTE**（不是 line-in 旁路！），
-#     默认 off 就等于静音 —— 这是"有 I2S、无报错、完全没声"的常见原因。
-#   - 'Line Playback Volume' 是 LOP 增益，范围 0..9 dB。
-#   - 板上麦克风接 MIC3R（原理图 MK1 → MIC3R），采集走 Right PGA。
+# 背景（真机实测）：这颗 codec 的 I2C 是**间歇性**可用 —— 大部分传输报
+#   twi: Bus error / STOP failed / bus state isn't idle
+# 但偶尔整段都能成功。codec 没有外接复位脚（原理图 RESET 只有 10k 上拉），
+# 寄存器状态会保持到断电，所以**只要成功写进一次配置，之后就一直能正常出声**
+# （实测确实有一次配置成功后能播放正弦波）。
+#
+# 因此这里不是"设一次就完"，而是循环重试：每轮把关键控件全写一遍，
+# 再回读 Line Playback Switch / PCM Playback Volume / Line Playback Volume
+# 校验，三个都正确才认为成功。
+#
+# 输出通路依据参考实现 + 原理图：
+#   - 喇叭挂在 codec 的线输出 LEFT_LOP/RIGHT_LOP，经 U1 PAM8406 到 J1；
+#     HPOUT/HPROUT 未接（插耳机孔不会响）；
+#   - 'Line Playback Switch' 是 LOP 输出级静音位，必须 on；
+#   - 'Line Playback Volume' 是 LOP 增益（0..9 dB）；
+#   - 采集走 MIC2R（AIC3104 只有 MIC2/LINE2，没有 MIC3）。
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 kmsg() { printf 'microduck-audio: %s\n' "$*" > /dev/kmsg 2>/dev/null || true; }
 
 CARD="${AUDIO_CARD:-0}"
-
 i=0
 while [ ! -f "/proc/asound/card$CARD/id" ] && [ $i -lt 300 ]; do
 	sleep 0.1
@@ -23,43 +30,41 @@ while [ ! -f "/proc/asound/card$CARD/id" ] && [ $i -lt 300 ]; do
 done
 [ -f "/proc/asound/card$CARD/id" ] || { kmsg "没有 card$CARD"; exit 0; }
 
-# 容忍控件名差异：cset/sset 都试，失败不算错
 setv() { amixer -c "$CARD" cset name="$1" "$2" >/dev/null 2>&1 || amixer -c "$CARD" sset "$1" "$2" >/dev/null 2>&1 || true; }
+getv() { amixer -c "$CARD" cget name="$1" 2>/dev/null | grep -m1 ': values=' | sed 's/.*: values=//'; }
 
-# ---- 播放：DAC -> Line 混合器 -> LOP 输出级（喇叭/功放）----
-setv 'PCM Playback Volume'       '127,127'
-setv 'Line DAC Playback Volume'  '118,118'
-setv 'Line Playback Switch'      'on,on'      # LOP 输出级静音位：必须 on
-setv 'Line Playback Volume'      '9,9'        # LOP 增益 0..9 dB
-# 保险：把 DAC -> Line 混合器的路由也打开（不同 codec 变体名字略有差异）
-setv 'Left Line Mixer DACL1'     'on'
-setv 'Right Line Mixer DACR1'    'on'
-setv 'Line DAC'                  'on'
-# 耳机输出未接，但一并打开无副作用
-setv 'HP DAC Playback Volume'    '118,118'
-setv 'HP Playback Switch'        'on,on'
+apply_all() {
+	setv 'PCM Playback Volume'      '127,127'
+	setv 'Line DAC Playback Volume' '118,118'
+	setv 'Line Playback Switch'     'on,on'
+	setv 'Line Playback Volume'     '9,9'
+	setv 'Left Line Mixer DACL1'    'on'
+	setv 'Right Line Mixer DACR1'   'on'
+	setv 'Line DAC'                 'on'
+	setv 'HP DAC Playback Volume'   '118,118'
+	setv 'HP Playback Switch'       'on,on'
+	setv 'Right PGA Mixer Mic2R' 'on'
+	setv 'Left PGA Mixer Mic2R'  'off'
+	setv 'Left PGA Mixer Mic2L'  'off'
+	setv 'Right PGA Mixer Mic2L' 'off'
+	setv 'PGA Capture Switch'    'on,on'
+	setv 'PGA Capture Volume'    '60,60'
+}
 
-# ---- 采集：板上麦克风 -> MIC2R -> Right PGA ----
-# 注意：TLV320AIC3104 只有 MIC2 / LINE2，没有 MIC3（MIC3 是 AIC3106/33 的）。
-# 参考实现里写 Mic3R 是给别的 codec 变体用的，照抄到 3104 上不对。
-setv 'Right PGA Mixer Mic2R' 'on'
-setv 'Left PGA Mixer Mic2R'  'off'
-setv 'Left PGA Mixer Mic2L'  'off'
-setv 'Right PGA Mixer Mic2L' 'off'
-setv 'Right PGA Mixer Mic3R' 'off'
-setv 'Left PGA Mixer Mic3R'  'off'
-setv 'Right PGA Mixer Line1R' 'off'
-setv 'Right PGA Mixer Line1L' 'off'
-setv 'Left PGA Mixer Line1R'  'off'
-setv 'Left PGA Mixer Line1L'  'off'
-setv 'Right PGA Mixer Line2R' 'off'
-setv 'PGA Capture Switch' 'on,on'
-setv 'PGA Capture Volume' '60,60'
+try=0
+while [ "$try" -lt 40 ]; do
+	try=$((try + 1))
+	apply_all
 
-# 回读确认（日志里能看到，便于远程排查）
-for c in 'PCM Playback Volume' 'Line Playback Switch' 'Line Playback Volume'; do
-	v=$(amixer -c "$CARD" cget name="$c" 2>/dev/null | grep -m1 ': values=' | sed 's/.*: values=//')
-	[ -n "$v" ] && kmsg "$c = $v"
+	sw=$(getv 'Line Playback Switch')
+	pcm=$(getv 'PCM Playback Volume')
+	ldv=$(getv 'Line Playback Volume')
+	if [ "$sw" = "on,on" ] && [ "$pcm" = "127,127" ] && [ "$ldv" = "9,9" ]; then
+		kmsg "mixer OK（第 $try 轮）: Line Switch=$sw PCM=$pcm LOP=$ldv"
+		exit 0
+	fi
+	sleep 0.2
 done
 
-kmsg "mixer 已设置 (card$CARD)"
+kmsg "40 轮重试仍未写成功（I2C 持续失败）: Line Switch=${sw:-?} PCM=${pcm:-?} LOP=${ldv:-?}"
+exit 0
