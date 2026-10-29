@@ -13,11 +13,10 @@
 		pins = "PJ24", "PJ25";
 		function = "uart4";
 		drive-strength = <10>;
-		/* 原理图：40-pin pin18 = IO_24 = PAM8406 MUTE（低有效 + 内部上拉，
-		 * 拉低才会静音）；pin16 = IO_23 = MODE（不能悬空，高 = Class-D）。
-		 * 所以这里用 pulls-up：RX 空闲为高（UART 正常电平），同时让
-		 * MUTE 保持高 = 不静音。曾经改成 bias-pull-down（极性理解反了），
-		 * 效果是把功放静音 —— 那之后一直没声。 */
+		/* D1 原理图（audio.kicad_sch）：40-pin 16/18 = IO_23/IO_24，HAT 上
+		 * **不接** PAM8406 —— U1 的 ~SHND/~MUTE/MODE 由 R3/R4/R5 = 0R 直接接 +5V
+		 * （常开、常不静音、常 Class-D）。所以 UART4 用这两个脚不冲突；
+		 * bias-pull-up 只是为了 RX 空闲为高（UART 正常电平）。 */
 		bias-pull-up;
 	};
 };

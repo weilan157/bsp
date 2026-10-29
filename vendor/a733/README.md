@@ -293,8 +293,8 @@ resize2fs /dev/mmcblk0p2
 | PCM_FS / WCLK | 35 | GPIO19 | PB6 | `i2s0_lrck` | SoC 出 |
 | PCM_DIN（codec DOUT → SoC） | 38 | GPIO20 | PB8 | `i2s0_din0` | SoC 入 |
 | PCM_DOUT（SoC → codec DIN） | 40 | GPIO21 | PB7 | `i2s0_dout0` | SoC 出 |
-| PA MODE | 16 | GPIO23 | PJ24 | gpio | — |
-| PA MUTE | 18 | GPIO24 | PJ25 | gpio | **低=静音**（低有效 + 内部上拉；悬空/高=不静音） |
+| PA MODE | 16 | GPIO23 | PJ24 | — | **HAT 上不接**（U1 MODE 由 R5 0R 接 +5V，常 Class-D） |
+| PA MUTE | 18 | GPIO24 | PJ25 | — | **HAT 上不接**（U1 ~MUTE 由 R4 0R 接 +5V，常不静音） |
 
 注意 RPi 的命名视角：`PCM_DIN` 是"进 SoC"的数据，也就是 codec 的 DOUT；
 `PCM_DOUT` 是"SoC 出"的数据，也就是 codec 的 DIN。所以
@@ -344,7 +344,8 @@ i2cget -y -f 7 0x18 0x02        # 返回值 -> mixer 初始化是凶手；仍 NA
 - `twi-sunxi` 只支持 100k/400k（50k 报 `unsupport duty with bus freq 50000`）；
 - drv-mode（`twi_drv_used=1`）比 engine-mode 更差（地址阶段就无 ACK），不要用；
 - i2c-gpio 会丢掉 twi7 的 pinctrl（上拉/驱动强度），不如硬件 TWI7；
-- **PA MUTE（pin18 = PJ25）低有效**：拉低 = 静音，`bias-pull-up` 才是不静音；
+- **PA MUTE/MODE 在 D1 HAT 上由 R3/R4/R5=0R 接 +5V**（常开/常不静音/常 Class-D），
+  不归 GPIO 管；UART4 用 40-pin 16/18 不冲突；
 - **`mclk-fs` 必须是 250**（Y1 = 12.000 MHz）：256 会命中 aic3x 的旁路 PLL 分支，
   按 12.288 MHz 算分频，实际时钟只有 12.000 MHz → codec 内部 fs 46875 Hz 与
   I2S 的 48000 Hz 错位；
@@ -369,19 +370,63 @@ i2cget -y -f 7 0x18 0x02        # 返回值 -> mixer 初始化是凶手；仍 NA
 - 喇叭接 **J1 螺钉端子**；codec 的 HPOUT/HPROUT 在原理图上未接，插耳机孔不会响；
 - 声音走 codec 线输出 LEFT_LOP/RIGHT_LOP（mixer 的 `Line Playback Switch`
   是 LOP 输出级静音位，必须 on）；
-- **MUTE（pin18 = PJ25）不需要软件驱动**。PAM8406 的 MUTE 是"低有效 +
-  内部上拉"：悬空 = 高 = **不静音**，拉低才会静音
-  （Solid 文档 / DIODES 数据手册）。曾错误地加过 `regulator-pa-mute`
-  并把 GPIO 配置成 ACTIVE_LOW + always-on，实际会把 MUTE **拉低=静音**，
-  方向是反的，已删除。
-- **MODE（pin16 = PJ24）**：芯片不允许悬空；HAT 上它接我们的 UART4 TX，
-  串口空闲为高 → **Class-D**，正好是默认工作模式，无需额外处理。
+- **MUTE（pin18 = PJ25）/ MODE（pin16 = PJ24）在 D1 HAT 上都不接 GPIO**：
+  原理图里 U1 的 `~SHND`(12)、`~MUTE`(5)、`MODE`(9) 分别经 **R3/R4/R5 = 0R 直接接 +5V**
+  → 常开、常不静音、常 Class-D。**功放没有任何软件控制**，UART4 用 16/18 也不冲突。
+  （早期 "PA MUTE 低有效、需要 bias-pull-up" 的判断来自别的板子，已作废。）
 - 结论：功放侧软件不需要任何动作；喇叭必须接 **J1 螺钉端子**。
+
+### 原理图核对（D1，2026-10-29，依据 ASE01187-D1）
+
+Audio sheet（`audio.kicad_sch`，6/6）的实际连接：
+
+| 项 | 连接 |
+|---|---|
+| U2 I2C | SCL=`IO_03`（40pin5/PJ22）、SDA=`IO_02`（40pin3/PJ23），地址 0x18 |
+| U2 I2S | WCLK=`IO_19`(PB6)、BCLK=`IO_18`(PB5)、DIN=`IO_21`(PB7)、DOUT=`IO_20`(PB8)、MCLK=`Y1` |
+| U2 供电 | AVDD(25)/DRVDD(18,24)/IOVDD(7) ← **+3V3**；DVDD(32) ← **+1V8** |
+| +1V8 | U3 `XC6206P182MR`：VI ← +3V3，VO → +1V8（C12 10u / C26 100n；codec 侧 C27 1u / C28 100n） |
+| U2 RESET(31) | R6 10k → +3V3，C38 100n → GND；**没有 GPIO** |
+| U2 HP 输出 | HPOUT/HPLOUT/HPRCOM/HPLCOM 全 NC；只有 LEFT_LOP/RIGHT_LOP 去功放 |
+| U1 PAM8406 | VDD/PVDD ← **+5V**；~SHND/~MUTE/MODE ← **+5V via R3/R4/R5=0R**；IN ← LOP/ROP via C1/C2 1u + R1/R2 10k；OUT → J1 |
+| Y1 12 MHz | VDD + Tri-State ← +3V3，OUT → MCLK |
+
+**由原理图得到的三条硬结论：**
+
+1. codec 的复位、功放的使能/静音/模式**都没有 GPIO**——软件（UART4、GPIO、regulator）
+   不可能在 10 s 把它们拉掉；
+2. +3V3 同时供 IMU 和 codec 的 AVDD/IOVDD/DRVDD；真机上 IMU（0x6a）一直活着，说明
+   **+3V3 没掉**；
+3. codec 独有的电源只有 **+1V8（DVDD，U3）**。
+
+所以 10.36 s 的 "codec 从 I2C 消失" 只剩两种可能：
+
+- **+1V8 塌了**：U3 限流/热保护/焊接，或 codec 的 DVDD 侧短路/过流；
+- **codec 自己被复位/闩锁**：输出级或内部 POR，+1V8 仍在。
+
+触发点仍是 10.4 s 的 `microduck-audio-init`（`Line Playback Switch on` 给 LOP 输出级上电）。
+"没播放也掉线" 不矛盾：audio-init 在开机时就打开了输出级。
+
+**分流测量（按顺序）：**
+
+1. `systemctl mask microduck-audio.service alsa-restore.service` → 重启，轮询 0x18 至少 60 s：
+   活着 → 确认触发是 mixer/DAPM，继续第 2 步；仍死 → 第 3 步。
+2. 只写 `PCM/Line DAC`、**不写 `Line Playback Switch`**；再单独写 `Line Playback Switch`。
+   同时用示波器看 **+1V8（U3 VO / C12）** 和 **+3V3**：
+   - +1V8 掉 → U3/负载问题（见下）；
+   - +1V8 稳、codec 仍 NACK → codec 输出级/内部闩锁。
+3. 断开发往功放的 `C1/C2`（或 R1/R2）再开 Line Out：
+   - 活着 → LOP/ROP 或功放输入侧有短路/过流；
+   - 仍死 → codec 自身（换片/补焊）。
+4. 量 U2 `RESET`(31) 应为稳定 3.3 V；`MCLK`(1) 应为 12 MHz；摸 U2 温度。
+
+**如果 +1V8 掉：** 先量 U3 输入 +3V3 是否稳；换 U3 为更大电流的 1.8 V LDO（≥300 mA）并在
+DVDD 加 22 uF 体电容；若换 LDO 仍掉，说明 codec DVDD 侧有短路（换 codec / 查 C27/C28）。
 
 HAT 上的 codec 挂在 **TWI7 @0x18**，走 **I2S0**（PB4–PB8 = MCLK/BCLK/LRCK/DOUT/DIN）。
 
 - DT：`audio_codec: tlv320aic3104@18` + `&i2s0_mach`（name `microduck-audio`，
-  `mclk-fs=256`，frame/bitclock master = SoC）；
+  `mclk-fs=250`，frame/bitclock master = SoC）；
 - 供电：`AVDD/IOVDD/DRVDD` = 3.3V、**`DVDD` = 1.8V**（数字核；接 3.3V 时驱动报
   `Too high supply voltage(s)`）；
 - 模块：`snd-soc-tlv320aic3x` + `snd-soc-tlv320aic3x-i2c`（写在 `/etc/microduck-modules`，
