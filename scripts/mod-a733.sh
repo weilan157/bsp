@@ -473,18 +473,11 @@ cmd_a733_kernel() {
 		pins = ${debug_pins};
 		function = "${A733_DEBUG_UART}";
 		drive-strength = <10>;
-		/* HAT 原理图：40-pin pin16/18 = IO_23/IO_24 = PAM8406 MODE/MUTE，
-		 * 与 uart4 的 PJ24/PJ25 复用。PAM8406 数据手册（DIODES，
-		 * 也与 Soldered 的 PAM8406 文档一致）：
-		 *   MUTE 低有效 + 内部上拉：悬空=高=不静音，**拉低才会静音**；
-		 *   MODE 不能悬空，高=Class-D（默认），低=Class-AB。
-		 *
-		 * 所以这里必须是 pull-up 而不是 pull-down：J25（调试口 RX）是
-		 * 输入，做 UART RX 时应该空闲为高（下拉会让 RX 处于 break 电平，
-		 * 收不到字节）；而它同时是功放 MUTE，被下拉就等于把功放静音。
-		 * f17e3e9 曾把这里改成 bias-pull-down 并注释"拉低=未静音"，
-		 * 极性写反了：那之后一直没声，而下拉时代看到的"播放时 TWI7
-		 * 零报错"其实是功放被静音后的副作用，不是修好了。 */
+		/* D1 原理图（audio.kicad_sch 6/6）逐脚核对：40-pin 16/18 = IO_23/IO_24
+		 * 在 HAT 上**不接音频** —— U1 PAM8406 的 ~SHDN/~MUTE/MODE 由
+		 * R3/R4/R5 = 0R 直接接 +5V（常开、常不静音、常 Class-D）。
+		 * 所以 UART4 占用这两个脚与功放不冲突；
+		 * bias-pull-up 只是为了 RX 空闲为高（UART 正常电平）。 */
 		bias-pull-up;
 	};
 };
