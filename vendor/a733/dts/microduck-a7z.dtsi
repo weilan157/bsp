@@ -95,7 +95,12 @@
 		compatible = "ti,tlv320aic3x";
 		reg = <0x18>;
 		#sound-dai-cells = <0>;
-		status = "okay";
+		/* 2026-10-29 裸总线排查：暂时停掉 HAT 上所有 I2C 设备驱动。
+		 * codec 是唯一会让驱动 bind 的设备（ToF/BMI088 本来是 disabled），
+		 * 关掉后 0x18 不再显示 UU，也没有任何后台寄存器访问，
+		 * i2cdetect 看到的就是裸 TWI7。恢复音频时改回 okay，
+		 * 并把下面 &i2s0_mach 的 status 一起改回来。 */
+		status = "disabled";
 	};
 
 	tof: vl53l5cx@29 {
@@ -191,7 +196,9 @@
  * ===================================================================== */
 
 &i2s0_mach {
-	status = "okay";
+	/* 裸总线排查期间不建声卡：codec 已 disabled，卡也就没有 codec DAI。
+	 * 恢复音频时先把 audio_codec 改回 okay，再打开这里。 */
+	status = "disabled";
 	soundcard-mach,name = "microduck-audio";
 	soundcard-mach,format = "i2s";
 	/* 实验：codec 做 BCLK/WCLK 主（CBM_CFM），SoC 当从。
