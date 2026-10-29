@@ -305,47 +305,55 @@ resize2fs /dev/mmcblk0p2
 `i2s0_dout1`、PB7 改成 `i2s0_din1`，真机更差（codec 掉线、TWI 报错）。
 现固定为 board dts 的默认引脚组：PB7=`i2s0_dout0`、PB8=`i2s0_din0`。
 
-### 现状与结论（2026-10-28，真机排查记录）
+### 现状与结论（2026-10-29 更新，**取代** 10-28 的判断）
 
-音频**软件侧已全部对齐但仍无输出**，证据链如下（都是真机日志）：
+真机证据链（镜像 `a733-GO-mclk250-pullup.img`，内核 #76）：
 
-| 观察 | 结论 |
+| 观察（真机日志） | 结论 |
 |---|---|
-| `i2cdetect -y 0`（i2c-gpio 版本）只看到 `0x18` 与 `0x6a` | 总线能工作；`0x6a` = D1 版 HAT 的 **LSM6DSV16X** |
-| 多数时候解绑驱动后 `i2cget 0-0018 0x02` 全部 `Error: Read failed` | codec **不应答** |
-| `i2c i2c-0: Not I2C compliant: can't read SCL` / `Bus may be unreliable` | i2c-gpio 模式下 SCL 回读为低（改用硬件 TWI7 后不再出现）|
-| 打过 9 clocks + STOP 后偶发恢复（一次 5/5 可读，寄存器全 0x00） | 状态**间歇性**，典型接触/器件异常 |
-| 播放时（经 hw TWI7 或 i2c-gpio）一律 `NAK bailout`，静音播放同样 | 与功放电流无关，是 codec 掉线 |
+| 开机 ~10.4s：`mixer OK（第 1 轮）: Line Switch=on,on PCM=127,127 LOP=9,9` | 那一刻 codec **是活的**：几十个寄存器写入 + 回读校验全部成功 |
+| 开机 10.36s 起每秒 `i2cget -y -f 7 0x18 0x02`，**全部** `SLA+W … ACK not received`（状态 0x20） | codec 在**开机 10 秒前后自己掉线**（掉电或复位），与"播放"无关 |
+| 同一时刻 `i2cdetect -y 7`：`0x6a` 有应答（0x69 之后直接跳到 0x6b），`0x18` 显示 `UU` | `0x6a` = HAT 的 LSM6DSV16X，走**同一对 PJ22/PJ23** → 总线/上拉/控制器都正常，只有 codec 掉了 |
+| 播放时成片的 `Bus error` / `STOP failed` / `SCL is stuck low` / `sda is still low` | 是 codec 掉电过程中拉扯总线的**副产品**，不是原因 |
+| 采样率 8k/16k/44.1k/48k 的新增报错数 90/30/45/45 | 与 I2S BCLK 频率无关，**排除时钟串扰** |
+| 换成 0x02 / 0x07 / 0x08 / 0x18 等任意寄存器，全部 0x20 | 与具体寄存器无关："地址阶段就不 ACK" |
 
-结论：**codec 侧 I2C 电气异常（SCL 被拉低 / 芯片不应答），属于板级硬件问题，
-在不改动硬件的条件下软件无法绕过**。已排除的软件因素：
-TWI 速率（400k→100k）、I2C 驱动实现（硬件 TWI 与 i2c-gpio 都试过）、
-引脚定义（PB5/6/7/8 与 PJ22/23 均按原理图与 40pin 表核对）、
-mixer（含 LOP 静音位）、mclk-fs（250/256）、PLL 旁路、
-`simple-audio-card` 与 `soundcard-mach` 两种建卡方式、PA MUTE 极性。
+**10-28 那条"codec 侧 I2C 电气异常、板级硬件问题、软件无法绕过"的结论是错的。**
+真实现象是 **codec 在开机约 10 秒时掉电/复位**，待分流的两条路：
 
-补充（原理图核对）：HAT 的 I2C 上拉是 **R12/R13 = 10k 且已贴装**
-（接到 J5 Stemma 座），主板 SoC 侧另有 `bias-pull-up`，因此**上拉不是瓶颈**；
-TWI7 降到 50 kHz 只是为了给排线/连接器容性留上升沿余量，不是补上拉。
+1. mixer 初始化（`Line Playback Switch on` → DAPM 把 Line Out 输出级上电，
+   写 `0x56/0x5D` 的 bit0）导致供电塌陷；
+2. 内核/驱动在开机末期关掉了 codec 那条 regulator。
 
-补充证据（2026-10-28 深夜，两套传输引擎对比）：
+取证工具：`tools/codec-poll.sh` —— 开机后每 0.3s 轮询 0x18，只记录状态跳变
+（WAIT/OK/DEAD）和跳变瞬间的 `dmesg` 尾巴；按脚本头部注释装成 systemd 服务，
+写进 SD 卡即生效，**不需要重刷镜像**。
 
-| 配置 | 现象 |
-|---|---|
-| 硬件 TWI7 + engine-mode（100 kHz） | 播放时 `Bus error / STOP failed / bus state isn't idle`，寄存器读写失败 |
-| 硬件 TWI7 + **drv-mode**（`twi_drv_used=1`） | 更差：`drv-mode: Address + Write bit transmitted, ACK not received`，**地址阶段就无 ACK** |
-| i2c-gpio（软件 I2C，同一对 PJ22/PJ23） | `i2cdetect` 能同时看到 **0x18（codec）** 与 **0x6a（D1 版 HAT 的 LSM6DSV16X）**，但数据阶段读回失败 |
+A/B 分流：
 
-两套控制器行为不一致、地址 ACK 时有时无 → 判定为**总线信号完整性/接触边际**问题。
-另外 `twi-sunxi` 驱动只支持 100k/400k（50k 会报 `unsupport duty`），该限制已记录。
+```sh
+systemctl disable microduck-audio.service alsa-restore.service
+reboot
+i2cget -y -f 7 0x18 0x02        # 返回值 -> mixer 初始化是凶手；仍 NACK -> regulator/供电
+```
 
-保留的排查工具（纯软件）：
-- `microduck-audio-probe`：hw_params / mixer / 寄存器 / 时钟 / NAK 计数；
-- `microduck-i2c-recover`：解绑 i2c-gpio 后打 9 clocks + STOP 尝试救回总线；
-- `i2c-recover`：静态小程序，直接用 GPIO（SCL=310/SDA=311）打时序。
+已确认成立、不必再试的事实：
 
-若后续换一块 HAT 或修复该总线，只需把 `microduck-audio.service` 打开即可验证：
-`systemctl status microduck-audio` / `speaker-test -D hw:0,0`。
+- HAT 的 I2C 上拉 **R12/R13 = 10k 且已贴装**（接 J5 Stemma 座），SoC 侧另有
+  `bias-pull-up`，**上拉不是瓶颈**；
+- `twi-sunxi` 只支持 100k/400k（50k 报 `unsupport duty with bus freq 50000`）；
+- drv-mode（`twi_drv_used=1`）比 engine-mode 更差（地址阶段就无 ACK），不要用；
+- i2c-gpio 会丢掉 twi7 的 pinctrl（上拉/驱动强度），不如硬件 TWI7；
+- **PA MUTE（pin18 = PJ25）低有效**：拉低 = 静音，`bias-pull-up` 才是不静音；
+- **`mclk-fs` 必须是 250**（Y1 = 12.000 MHz）：256 会命中 aic3x 的旁路 PLL 分支，
+  按 12.288 MHz 算分频，实际时钟只有 12.000 MHz → codec 内部 fs 46875 Hz 与
+  I2S 的 48000 Hz 错位；
+- 播放链路：codec `Line Out` → U1 PAM8406 → **J1 螺钉端子**（HPOUT 未接）；
+- 10-28 留档（仍成立的部分）：`i2cdetect` 在 i2c-gpio 下能同时看到 `0x18` 与 `0x6a`；
+  TWI7 100k engine-mode 与 i2c-gpio 的报错形态不同，但都源于 codec 不在总线上。
+
+早期排查工具（仍可用）：`microduck-audio-probe`（hw_params/mixer/寄存器/时钟）、
+`microduck-i2c-recover`、`i2c-recover`（GPIO 打 9 clocks + STOP）。
 
 ### 时钟
 
