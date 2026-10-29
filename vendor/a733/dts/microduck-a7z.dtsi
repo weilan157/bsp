@@ -87,7 +87,12 @@
 
 
 	audio_codec: tlv320aic3104@18 {
-		compatible = "ti,tlv320aic3104";
+		/* 官方 RPi/RK 移植（microduck/deploy/audio/aic3104-i2c3.dts）用的是
+		 * 通用 "ti,tlv320aic3x"，不是 "ti,tlv320aic3104"：驱动对 3104 型号
+		 * 会少加 aic3x_extra_snd_controls（Line2 bypass 等），控件集和 RPi
+		 * overlay 不一致；两者都能驱动本芯片。要对齐官方就保持通用名。
+		 * 回退：改回 "ti,tlv320aic3104"。 */
+		compatible = "ti,tlv320aic3x";
 		reg = <0x18>;
 		#sound-dai-cells = <0>;
 		status = "okay";
@@ -207,16 +212,15 @@
 	i2s0_cpu: soundcard-mach,cpu {
 		sound-dai = <&i2s0_plat>;
 		soundcard-mach,pll-fs = <1>;
-		/* mclk-fs 必须 = 250，不是 256：
-		 *   板上 Y1 有源晶振 = 12.000 MHz，48000 * 250 = 12.000 MHz。
-		 * 之前留着的 mclk-fs=256（12.288 MHz）实验有副作用：
-		 * aic3x 的 bypass 判断 12288000/(128*Q)==48000 在 Q=2 成立，
-		 * 于是走"旁路 PLL"分支、按 MCLK=12.288MHz 设置分频，
-		 * 而实际只有 12.000MHz -> codec 内部 fs 变成 46875Hz，
-		 * 与 I2S 送来的 48000Hz 对不上（DAC 与数据流不同步）。
-		 * 用 250 时 bypass 判断不成立，驱动才会写 0x03~0x06 让
-		 * 内部 PLL 把 12.000MHz 精确换成 48kHz 需要的时钟。 */
-		soundcard-mach,mclk-fs = <250>;
+		/* MCLK 钉死在 12.000 MHz（Y1），与采样率无关：
+		 *   mclk = mclk_fp[rate_family] * mclk_fs
+		 * 这样 44.1k（22579200 族）和 48k（24576000 族）都给 codec
+		 * 12.000 MHz。之前 mclk-fs=250 在 48k 正好是 12.000 MHz，
+		 * 但 44.1k 会算成 44100*250 = 11.025 MHz，和 Y1 对不上，
+		 * 44.1k 播放会失谐——官方移植正是用 fixed-clock 12 MHz 避开这点。
+		 * 回退：删掉 mclk-fp，把 mclk-fs 改回 <250>。 */
+		soundcard-mach,mclk-fs = <1>;
+		soundcard-mach,mclk-fp = <12000000 12000000>;
 	};
 	soundcard-mach,codec {
 		sound-dai = <&audio_codec>;

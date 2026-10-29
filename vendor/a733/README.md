@@ -346,9 +346,10 @@ i2cget -y -f 7 0x18 0x02        # 返回值 -> mixer 初始化是凶手；仍 NA
 - i2c-gpio 会丢掉 twi7 的 pinctrl（上拉/驱动强度），不如硬件 TWI7；
 - **PA MUTE/MODE 在 D1 HAT 上由 R3/R4/R5=0R 接 +5V**（常开/常不静音/常 Class-D），
   不归 GPIO 管；UART4 用 40-pin 16/18 不冲突；
-- **`mclk-fs` 必须是 250**（Y1 = 12.000 MHz）：256 会命中 aic3x 的旁路 PLL 分支，
-  按 12.288 MHz 算分频，实际时钟只有 12.000 MHz → codec 内部 fs 46875 Hz 与
-  I2S 的 48000 Hz 错位；
+- **MCLK 钉死在 12.000 MHz**（Y1）：`mclk-fs = <1>` + `mclk-fp = <12000000 12000000>`，
+  44.1k / 48k 都给 codec 12.000 MHz。旧的 `mclk-fs=250` 只在 48k 对
+  （48000×250 = 12.000 MHz），44.1k 会算成 11.025 MHz；旧的 256 更错（命中 aic3x
+  旁路 PLL，按 12.288 MHz 算分频）；
 - 播放链路：codec `Line Out` → U1 PAM8406 → **J1 螺钉端子**（HPOUT 未接）；
 - 10-28 留档（仍成立的部分）：`i2cdetect` 在 i2c-gpio 下能同时看到 `0x18` 与 `0x6a`；
   TWI7 100k engine-mode 与 i2c-gpio 的报错形态不同，但都源于 codec 不在总线上。
@@ -359,11 +360,12 @@ i2cget -y -f 7 0x18 0x02        # 返回值 -> mixer 初始化是凶手；仍 NA
 ### 时钟
 
 - codec MCLK：板上 **Y1 12.000 MHz** 有源晶振直接进 U2（不是 SoC 的 PB4）；
-- SoC I2S sysclk：参考实现用 **12.288 MHz**（256×48k）；
-- 但 Allwinner 的 `soundcard-mach` 只支持**一个** mclk 值同时给 cpu 和 codec，
-  所以这里取 `mclk-fs = <250>`（48000×250 = 12.000 MHz），保证 codec 的
-  sysclk 与真实晶振一致（codec PLL 由它换算）；SoC 的 PB4 未接到 codec，
-  其数值不影响出声。
+- SoC I2S sysclk：参考实现用 **12.288 MHz**（256×48k），但 PB4 没接到 codec，
+  它只影响 SoC 侧 BCLK 的 PLL 分频；
+- `soundcard-mach` 只用一个 mclk 值同时给 cpu 和 codec，所以用
+  **`mclk-fs = <1>` + `mclk-fp = <12000000 12000000>`**：44.1k/48k 两个频率族
+  都给 codec 12.000 MHz，和 Y1 一致。官方的 RPi/RK 移植用 fixed-clock 12 MHz
+  也是同一个目的（它刻意不用 mclk-fs，避免 machine 用 fs 推导覆盖 codec sysclk）。
 
 ### 功放（PAM8406）
 
@@ -425,8 +427,9 @@ DVDD 加 22 uF 体电容；若换 LDO 仍掉，说明 codec DVDD 侧有短路（
 
 HAT 上的 codec 挂在 **TWI7 @0x18**，走 **I2S0**（PB4–PB8 = MCLK/BCLK/LRCK/DOUT/DIN）。
 
-- DT：`audio_codec: tlv320aic3104@18` + `&i2s0_mach`（name `microduck-audio`，
-  `mclk-fs=250`，frame/bitclock master = SoC）；
+- DT：`audio_codec: tlv320aic3104@18`（compatible = **`ti,tlv320aic3x`**，和官方
+  RPi/RK overlay 一致，控件集相同）+ `&i2s0_mach`（name `microduck-audio`，
+  `mclk-fs=<1>`/`mclk-fp=<12000000 12000000>`，frame/bitclock master = SoC）；
 - 供电：`AVDD/IOVDD/DRVDD` = 3.3V、**`DVDD` = 1.8V**（数字核；接 3.3V 时驱动报
   `Too high supply voltage(s)`）；
 - 模块：`snd-soc-tlv320aic3x` + `snd-soc-tlv320aic3x-i2c`（写在 `/etc/microduck-modules`，
