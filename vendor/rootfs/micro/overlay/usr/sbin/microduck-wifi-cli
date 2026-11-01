@@ -1,6 +1,14 @@
 #!/bin/sh
 # microduck-wifi —— 板端 WiFi 小工具（方便本地反复测试）
 #
+# ⚠️ 这个文件**不能**和 /usr/sbin/microduck-wifi 混用：
+#    /usr/sbin/microduck-wifi      = microduck-wifi.service 跑的 176 行后台脚本（加载驱动、
+#                                    STA 连接、AP 配网回退、掉线重连），开机必须由它启动；
+#    /usr/sbin/microduck-wifi-cli  = 本文件，人在 console / ssh 上用的交互命令。
+#    曾经为了少打几个字做过 `ln -sf microduck-wifi-cli microduck-wifi`，
+#    结果服务开机会执行本 CLI（无参数 → 打印用法 → 退出），wlan0 一直 DOWN、不自动连。
+#    两个名字必须各自是真实文件。
+#
 #   microduck-wifi list                扫描周边 SSID
 #   microduck-wifi join <SSID> <PASS>  连接并保存（重启后 microduck-wifi 服务会自动连）
 #   microduck-wifi forget <SSID>       删除保存的密码
