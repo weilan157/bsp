@@ -1,0 +1,134 @@
+#!/bin/sh
+# microduck-wifi —— 板端 WiFi 小工具（方便本地反复测试）
+#
+#   microduck-wifi list                扫描周边 SSID
+#   microduck-wifi join <SSID> <PASS>  连接并保存（重启后 microduck-wifi 服务会自动连）
+#   microduck-wifi forget <SSID>       删除保存的密码
+#   microduck-wifi status              当前关联 + IP + 默认路由
+#   microduck-wifi saved               已保存的网络
+#
+# 保存位置：/etc/robot/wifi.d/<SSID>（0600，一行明文密码）
+# 每次 join/forget 都会重新生成 /etc/wpa_supplicant/wpa_supplicant.conf，
+# 这样"保存的网络"和"实际配置文件"不会各说各话。
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+CONF=/etc/wpa_supplicant/wpa_supplicant.conf
+STORE=/etc/robot/wifi.d
+IF=wlan0
+UDHCPC_SCRIPT=/usr/share/udhcpc/default.script
+
+die() { echo "microduck-wifi: $*" >&2; exit 1; }
+
+wifi_if() {
+	if [ -e /sys/class/net/$IF ]; then echo $IF; return; fi
+	for d in /sys/class/net/wl*; do
+		[ -e "$d" ] && { basename "$d"; return; }
+	done
+	echo $IF
+}
+
+regenerate_conf() {
+	mkdir -p "$STORE"
+	chmod 700 "$STORE"
+	tmp="$CONF.tmp"
+	{
+		echo "# 由 microduck-wifi join/forget 生成；手改请改 $STORE 下的文件"
+		echo "ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev"
+		echo "update_config=0"
+		echo "country=CN"
+		echo "ap_scan=1"
+		echo "disable_scan_offload=1"
+		echo "p2p_disabled=1"
+		for f in "$STORE"/*; do
+			[ -f "$f" ] || continue
+			ssid=$(basename "$f" | sed 's/"/\\"/g')
+			pass=$(sed 's/"/\\"/g' "$f")
+			printf 'network={\n\tssid="%s"\n\tpsk="%s"\n\tkey_mgmt=WPA-PSK\n}\n' "$ssid" "$pass"
+		done
+	} > "$tmp" || die "写 $tmp 失败"
+	chmod 600 "$tmp"
+	mv -f "$tmp" "$CONF"
+}
+
+reload_wifi() {
+	# 让我们的服务别和手工 wpa_supplicant 抢 wlan0
+	systemctl stop microduck-wifi.service microduck-ap.service 2>/dev/null
+	sleep 0.5
+	ip link set "$IF" down 2>/dev/null
+	ip link set "$IF" up
+	pkill -f "wpa_supplicant -B -i $IF" 2>/dev/null
+	sleep 0.5
+	wpa_supplicant -B -i "$IF" -c "$CONF" 2>&1 | grep -v "^Successfully" || true
+	sleep 5
+	if [ -x "$UDHCPC_SCRIPT" ]; then
+		busybox udhcpc -i "$IF" -b -q -t 6 -T 2 -s "$UDHCPC_SCRIPT" 2>/dev/null
+	else
+		busybox udhcpc -i "$IF" -b -q -t 6 -T 2 2>/dev/null
+	fi
+}
+
+cmd_list() {
+	echo "== 扫描（$IF）=="
+	ip link set "$IF" up 2>/dev/null
+	iw dev "$IF" scan 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | sort -u
+}
+
+cmd_status() {
+	echo "== $IF link =="
+	iw dev "$IF" link 2>/dev/null || echo "  (未关联)"
+	echo "== 地址 =="
+	ip -4 addr show "$IF" 2>/dev/null | sed -n 's/.*inet /  inet /p'
+	echo "== 路由 =="
+	ip route 2>/dev/null | sed -n '1,3p'
+}
+
+cmd_saved() {
+	echo "== 已保存的网络（$STORE）=="
+	[ -d "$STORE" ] || { echo "  (空)"; return; }
+	for f in "$STORE"/*; do [ -f "$f" ] && echo "  $(basename "$f")"; done
+}
+
+cmd_join() {
+	ssid="$1"; pass="$2"
+	[ -n "$ssid" ] && [ -n "$pass" ] || die "用法: microduck-wifi join <SSID> <PASS>"
+	mkdir -p "$STORE"; chmod 700 "$STORE"
+	umask 077
+	printf '%s' "$pass" > "$STORE/$ssid" || die "写 $STORE/$ssid 失败"
+	echo "已保存 $ssid"
+	regenerate_conf
+	# 注意：reload 会 down/up wlan0 并重配地址——如果你正通过 WiFi SSH 登录，
+	# 这个会话会被断开（板子会自己连上新网络，重新用新 IP 连回来即可）。
+	# 在串口 console 上跑就没有这个问题。
+	echo "（切换网络：如果当前是 SSH 登录，连接会断开）"
+	reload_wifi
+	cmd_status
+}
+
+cmd_forget() {
+	ssid="$1"
+	[ -n "$ssid" ] || die "用法: microduck-wifi forget <SSID>"
+	rm -f "$STORE/$ssid"
+	regenerate_conf
+	echo "已删除 $ssid"
+}
+
+case "$1" in
+	list)   cmd_list ;;
+	join)   shift; cmd_join "$@" ;;
+	forget) shift; cmd_forget "$@" ;;
+	status) cmd_status ;;
+	saved)  cmd_saved ;;
+	*)
+		cat <<EOF
+用法: microduck-wifi <命令>
+
+  list                扫描周边 SSID
+  join <SSID> <PASS>  连接并保存（重启后自动连）
+  forget <SSID>       删除保存的密码
+  status              当前关联 + IP + 路由
+  saved               已保存的网络
+EOF
+		;;
+esac

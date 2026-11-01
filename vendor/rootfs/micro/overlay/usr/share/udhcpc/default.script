@@ -14,6 +14,16 @@ export PATH
 
 mask2prefix() {
 	m=$1
+	# busybox 的 udhcpc 把 mask 直接给成**前缀长度**（"24"）；
+	# 有些实现给点分十进制（"255.255.255.0"）。两种都接住：
+	# 之前只按点分处理，"24" 被当成一个 octet 数位数 → 24&23=16, 16&15=0 → 前缀算成 2，
+	# 于是地址变成 192.168.0.154/2（整段 192.0.0.0/2 都被当成 on-link，访问某些网段会走错）。
+	case "$m" in
+	*.*) ;;
+	'') echo 24; return ;;
+	*[!0-9]*) echo 24; return ;;
+	*) echo "$m"; return ;;
+	esac
 	p=0
 	for o in $(echo "$m" | tr '.' ' '); do
 		while [ "$o" -gt 0 ]; do
