@@ -587,3 +587,24 @@ brandy/dramlib，难度高。详见 [`docs/uboot-vs-official.md`](../../docs/ubo
 `/usr/lib/viplite`、`/usr/bin/vpm_run`、`/usr/share/npu`（LeNet）装进 rootfs，
 板端跑 `/usr/sbin/microduck-npu`。参考 `jackhe183/radxa-dev`，详见
 [`docs/npu.md`](../../docs/npu.md)。
+## 上电安全：开机不会动
+
+镜像里 `microduck-robotd.service` 是常驻的，但它**只跑控制环**，上电后机器人是完全松的（limp）：
+
+- `robotd` 启动时**不使能扭矩**——上游 `duck-control/src/io.rs` 的原话是
+  "torque comes on when someone enables the policy"；实测（`--fake` 合成机器人）
+  启动日志里没有任何 torque 写入，直到显式 `robotctl robot init` 才出现 `torque on=true`；
+- 移动到 home pose 只发生在 `robotd init` / `robotctl robot init`（一次性命令），
+  不是开机流程的一部分；
+- `/etc/robot/robotd.toml` 里 `[policy] enabled = false`：连策略都不加载，
+  因此不存在"一上电策略就开始走"；
+- 服务里 `ConditionPathExists=/dev/ttyAS0`：总线设备不在就不启动，避免无意义的重试。
+
+所以：**刷机 → 上电 → 机器人不动**。要站起来必须有人敲：
+
+```sh
+robotctl health        # 先确认 12 个舵机 + 20 号 imu_to_dxl 都在
+robotctl robot init    # 使能扭矩 + 2 秒斜坡到 home pose（这一步才会动）
+```
+
+如果只想让关节松着，`robotctl robot relax`（或在 init 之前就别敲 init）。

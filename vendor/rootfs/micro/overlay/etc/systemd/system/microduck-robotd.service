@@ -1,16 +1,31 @@
 [Unit]
 Description=microduck robot control daemon (robotd)
 Documentation=file:///opt/robot/daemon/current/docs/design/robotd-design.md
-# 总线是 UART0（PB9/PB10），没有其它服务依赖它先起来
+# === 上电安全设计（不要改成 ExecStart=robotd init）===
+# robotd 的常驻进程**只跑控制环**：
+#   * 不在启动时使能扭矩 —— duck-control 的设计原话是 "torque comes on when someone
+#     enables the policy"；上电后机器人是**完全松的（limp）**，断电时是什么姿势就是什么姿势。
+#   * 不会自己动 —— 移动到 home pose 只在显式的 `robotd init` / `robotctl robot init`
+#     里发生（那是独立的一次性进程/一次 IPC 调用，不是开机自启的一部分）。
+#   * [policy] enabled=false（见 /etc/robot/robotd.toml）：连策略都不加载，
+#     因此不存在"一上电策略就开始走"的可能。
+# 也就是说：开机 → 机器人不动；只有人敲 `robotctl robot init` 才会站起来。
+# 总线设备不在就不启动（避免无谓的日志/重试）。
+ConditionPathExists=/dev/ttyAS0
 After=local-fs.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
 # --port 也写在 /etc/robot/robotd.toml 的 [bus] 里；这里显式给一遍，免得配置丢了就没法动
 ExecStart=/usr/local/bin/robotd --port /dev/ttyAS0
-Restart=always
-RestartSec=2
-# 50 Hz 控制环：别让它被普通的 CPU 争抢拖垮（上游的 update_gate.min_achieved_hz=45）
+Environment=RUST_LOG=info
+# on-failure 而不是 always：舵机没上电时 robotd 是**等待**（不退出），
+# 真退出了才重试；重启风暴由上面的 StartLimit 兜住。
+Restart=on-failure
+RestartSec=5
+# 50 Hz 控制环：别让它被普通的 CPU 争抢拖垮（上游 update_gate.min_achieved_hz=45）
 Nice=-5
 StandardOutput=journal
 StandardError=journal
