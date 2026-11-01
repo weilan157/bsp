@@ -1,0 +1,25 @@
+--- drivers/uart/sunxi-uart-ng-core.c.orig	2026-11-01 23:18:38.453390627 +0800
++++ drivers/uart/sunxi-uart-ng-core.c	2026-11-01 23:18:38.455157911 +0800
+@@ -564,6 +564,22 @@
+ 		}
+ 
+ 		setsel = &baud_set[i];
++		if (port->uartclk < setsel->uartclk_min) {
++			/* microduck: raise uartclk for fast bauds.
++			 * apb-uart 默认来自 sys24M（24MHz），而 1Mbps 的波特率分频
++			 * 表要求 uartclk >= 31MHz，否则下面直接 return -1，端口停在
++			 * 旧速率上（用户态 stty 却"成功"）。apb-uart 的父时钟可选
++			 * pll-peri0-600m/480m，抬高到 100MHz 后 1Mbps 才真正可设。
++			 */
++			if (uart_port->mclk && !IS_ERR(uart_port->mclk)) {
++				if (!clk_set_rate(uart_port->mclk, 100000000)) {
++					port->uartclk = clk_get_rate(uart_port->mclk);
++					sunxi_info(port->dev,
++						"uart%d raised uartclk to %d for baud %d\n",
++						uart_port->id, port->uartclk, baud);
++				}
++			}
++		}
+ 		if (port->uartclk < setsel->uartclk_min
+ 			|| port->uartclk > setsel->uartclk_max) {
+ 			sunxi_info(port->dev, "uart%d, select set %d, baud %d, uartclk %d beyond rance[%d, %d]\n",
