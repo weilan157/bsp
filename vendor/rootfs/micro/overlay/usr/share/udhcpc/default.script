@@ -41,9 +41,13 @@ deconfig|leasefail|nak)
 	;;
 bound|renew)
 	pfx=$(mask2prefix "$mask")
-	ip addr flush dev "$interface" 2>/dev/null
-	ip addr add "$ip/$pfx" dev "$interface" 2>/dev/null || \
-		ip addr add "$ip/24" dev "$interface" 2>/dev/null
+	# 用 replace 而不是 flush：flush 会把当前地址删掉，正在用它（比如 WiFi 上的 SSH）
+	# 的连接会立刻断。replace 是"有则改、无则加"，地址不变时连接不受影响。
+	# 只有 replace 失败（比如旧地址的掩码不同导致冲突）才退回到 flush + add。
+	if ! ip addr replace "$ip/$pfx" dev "$interface" 2>/dev/null; then
+		ip addr flush dev "$interface" 2>/dev/null
+		ip addr add "$ip/$pfx" dev "$interface" 2>/dev/null
+	fi
 	if [ -n "$router" ]; then
 		for r in $router; do
 			ip route add default via "$r" dev "$interface" 2>/dev/null && break
