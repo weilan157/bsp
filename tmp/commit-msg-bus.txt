@@ -1,0 +1,29 @@
+audio(a733): 裸总线排查——停掉 HAT 上所有 I2C 设备驱动，撤掉自动 bus recovery
+
+真机 i2cdetect 从"每个空地址 NACK ~30ms"退化成"每个地址 timeout ~3s"，
+扫一遍 0x03-0x77 要十几分钟。根因是 31d1274 引入的
+0007-twi-sunxi-recover-and-retry.patch：它在 xfer 失败路径上对**任何**错误
+都做 soft_reset + i2c_generic_scl_recovery（9 clocks）+ 重试 2 次；而超时本身
+是 600ms 级，于是一个不存在的地址也要 3s。
+
+历史结论（5ddb1a5 / 4a735fd）已经证明 codec 是自己掉线，recovery 从未把它
+救回来；这个补丁只剩副作用：
+  - 扫描/枚举慢十几倍；
+  - 每次 NACK 都往总线打 9 个 clock，可能把总线留在非 idle（这次扫描就变成
+    全程 -62 timeout，和之前全 NACK 不同）；
+  - dmesg 被刷屏，codec 掉线瞬间的关键日志被淹。
+
+改动：
+- 删除 0007 补丁。sunxi_twi_bus_recovery 的 recover_bus 回调仍保留，
+  需要时还能由 i2c_recover_bus() 调用，但不再在 xfer 路径自动触发；
+- dts: audio_codec 与 &i2s0_mach 暂时 disabled，HAT 上不再有任何 I2C
+  设备驱动 bind（ToF/BMI088 本来就是 disabled，IMU 0x6a 无节点）。
+  i2cdetect 看到的就是裸 TWI7：
+    * 只有 0x6a（IMU）→ 总线正常，codec 不在/已死；
+    * 0x18 也在 → codec 其实活着，之前是驱动/软件把它弄掉的；
+    * 全部 timeout / 什么都没有 → 总线被拉死（硬件）。
+- 打包时去掉 microduck-audio.service 的 multi-user.target.wants 链接，
+  避免没有声卡时 oneshot 空等 30 秒。
+
+真机验证：
+  i2cdetect -y -q 7     # 应为亚秒级；dmesg | grep twi 无新增错误
