@@ -1,0 +1,4 @@
+# 把 A733 的总线别名固定下来：sunxi 的 UART0 是 ttyAS0，
+# 上游文档里提到的 /dev/microduck-servo 就用这条规则指过去，
+# robotd.toml 之外的软件也能用稳定名字。
+KERNEL=="ttyAS0", SYMLINK+="microduck-servo"

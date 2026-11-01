@@ -1,0 +1,16 @@
+# microduck 运行参数（A733 / Cubie A7Z 版）
+#
+# 与上游 deploy/robotd.toml 的默认值只差两处，都是 A733 的接线决定的：
+#   1. [bus] port：Radxa Zero 3W 是 /dev/ttyS2；A733 的舵机总线是 UART0（PB9/PB10 = 40-pin
+#      8/10），sunxi 串口驱动建成 /dev/ttyAS0。注意 /dev/ttyS0 是另一个（8250）设备，不是它。
+#   2. [policy] enabled：A733 上暂时没有 ONNX Runtime，先关策略（startup pose / init 不需要它）。
+#      等 runtime 就位后把这行删掉即可，机器人会按 /opt/robot/policies 里的策略走路。
+#
+# 其余参数一律沿用上游默认（不要在这里写死 kP 之类的值：上游文档明确说过，
+# 这里取消注释的值会被永久冻结在板子上）。
+
+[bus]
+port = "/dev/ttyAS0"
+
+[policy]
+enabled = false
