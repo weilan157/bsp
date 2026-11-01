@@ -305,57 +305,66 @@ resize2fs /dev/mmcblk0p2
 `i2s0_dout1`、PB7 改成 `i2s0_din1`，真机更差（codec 掉线、TWI 报错）。
 现固定为 board dts 的默认引脚组：PB7=`i2s0_dout0`、PB8=`i2s0_din0`。
 
-### 现状与结论（2026-10-29 更新，**取代** 10-28 的判断）
+### 结论（2026-11-01，**已出声**，取代 10-28 / 10-29 两次误判）
 
-真机证据链（镜像 `a733-GO-mclk250-pullup.img`，内核 #76）：
+**根因：第一次开流时，"PLL 使能"和"BCLK 起振 + DAC/输出级上电"同时发生，
+这个瞬态会把 codec 打死。** 一旦发生：I2C 全部 `ACK not received`（状态 0x20），
+并把总线 SDA 拉低（连 0x6a 的 IMU 都读不到），**只能拔电源恢复**（热重启无效，
+因为 codec 不断电、寄存器状态保持）。历史上所有怪现象都由此解释：
 
-| 观察（真机日志） | 结论 |
-|---|---|
-| 开机 ~10.4s：`mixer OK（第 1 轮）: Line Switch=on,on PCM=127,127 LOP=9,9` | 那一刻 codec **是活的**：几十个寄存器写入 + 回读校验全部成功 |
-| 开机 10.36s 起每秒 `i2cget -y -f 7 0x18 0x02`，**全部** `SLA+W … ACK not received`（状态 0x20） | codec 在**开机 10 秒前后自己掉线**（掉电或复位），与"播放"无关 |
-| 同一时刻 `i2cdetect -y 7`：`0x6a` 有应答（0x69 之后直接跳到 0x6b），`0x18` 显示 `UU` | `0x6a` = HAT 的 LSM6DSV16X，走**同一对 PJ22/PJ23** → 总线/上拉/控制器都正常，只有 codec 掉了 |
-| 播放时成片的 `Bus error` / `STOP failed` / `SCL is stuck low` / `sda is still low` | 是 codec 掉电过程中拉扯总线的**副产品**，不是原因 |
-| 采样率 8k/16k/44.1k/48k 的新增报错数 90/30/45/45 | 与 I2S BCLK 频率无关，**排除时钟串扰** |
-| 换成 0x02 / 0x07 / 0x08 / 0x18 等任意寄存器，全部 0x20 | 与具体寄存器无关："地址阶段就不 ACK" |
+- "偶发、好几次都不行、有次却能出声"→ 瞬态是否触发取决于时序；
+- "热重启怎么都不行，拔电就好一阵"→ 锁死状态跨热重启保持；
+- "播放时成片 Bus error / SCL is stuck low / sda is still low"→ 是 codec 被
+  打死过程中拉扯总线的副产品；
+- "8k/16k/44.1k/48k 报错数 90/30/45/45"→ 与 BCLK 无关，排除串扰。
 
-**10-28 那条"codec 侧 I2C 电气异常、板级硬件问题、软件无法绕过"的结论是错的。**
-真实现象是 **codec 在开机约 10 秒时掉电/复位**，待分流的两条路：
+**修法（纯软件）**：开机、还没有任何流时，先用 `i2cset` 把 PLL 按 12MHz→48kHz
+的固定值写好并锁住，之后 `hw_params` 里驱动再写同样值就是"无变化的重复写"，
+不再出现使能与上电同时进行的瞬态：
 
-1. mixer 初始化（`Line Playback Switch on` → DAPM 把 Line Out 输出级上电，
-   写 `0x56/0x5D` 的 bit0）导致供电塌陷；
-2. 内核/驱动在开机末期关掉了 codec 那条 regulator。
-
-取证工具：`tools/codec-poll.sh` —— 开机后每 0.3s 轮询 0x18，只记录状态跳变
-（WAIT/OK/DEAD）和跳变瞬间的 `dmesg` 尾巴；按脚本头部注释装成 systemd 服务，
-写进 SD 卡即生效，**不需要重刷镜像**。
-
-A/B 分流：
-
-```sh
-systemctl disable microduck-audio.service alsa-restore.service
-reboot
-i2cget -y -f 7 0x18 0x02        # 返回值 -> mixer 初始化是凶手；仍 NACK -> regulator/供电
+```
+0x65=0x00  CODEC_CLKIN <- PLL
+0x03=0x91  PLL enable, Q=2, P=1
+0x04=0x1f  J=4, D MSB
+0x05=0x02  D LSB, R=2
+0x06=0x01  P=1
+（codec_clk = 2048*48000/(12e6/1000) = 8192 = j*r/p = 4*2/1，d=960 补小数）
 ```
 
-已确认成立、不必再试的事实：
+这段已写进 `microduck-audio-init` 的 `pll_pre()`，每轮 `apply_all` 开头执行。
 
-- HAT 的 I2C 上拉 **R12/R13 = 10k 且已贴装**（接 J5 Stemma 座），SoC 侧另有
-  `bias-pull-up`，**上拉不是瓶颈**；
-- `twi-sunxi` 只支持 100k/400k（50k 报 `unsupport duty with bus freq 50000`）；
-- drv-mode（`twi_drv_used=1`）比 engine-mode 更差（地址阶段就无 ACK），不要用；
-- i2c-gpio 会丢掉 twi7 的 pinctrl（上拉/驱动强度），不如硬件 TWI7；
+真机验证（2026-11-01，镜像 `a733-GQ-audio-ok.img`）：
+
+| 步骤 | 结果 |
+|---|---|
+| 冷启动 → 7 条 Line 通路（PCM 127 / Line DAC 118 / LOP 9 / Line DAC on / 两个 Line Mixer on / Line Playback Switch on） | 每步回读 `0x02` 均为 `0x00`，codec 全程存活 |
+| 手工 PLL 预置后 `speaker-test -r 48000`，每秒回读 0x02 | 20 秒全部 `0x00`，不掉线 |
+| 听感 | **440Hz 干净、音量正常**（此前只有"滋滋"） |
+| 再跑完整 `microduck-audio-init`（含 HP/采集控件）后继续播放 | 仍存活、仍出声 → HP/采集控件无害，可保留 |
+
+排查过程中被推翻/确认的事实（供以后参考）：
+
+- 不是驱动没加载、不是 mixer 配置、不是 WiFi/供电负载：**驱动全关、服务全关、
+  WiFi 不加载**时照样复现；反过来只要"PLL 先锁住"，驱动/服务全开也没事；
+- 手工 `echo tlv320aic3x 0x18 > .../i2c-7/new_device` 能建出 `7-0018`，但因没有
+  DT 节点只能拿到 dummy regulator，会打印
+  `Invalid supply voltage(s) AVDD: -22, DVDD: -22` 并 probe 失败 —— 这条信息只能
+  说明"芯片能应答"，不代表 DT 配好了；
+- DT 里 `audio_codec` 与 `i2s0_mach` **必须成对开关**：只关 codec 会得到
+  `--- no soundcards ---`（且 `7-0018` 根本不存在，modprobe 无用）；
+- HAT 的 I2C 上拉 **R12/R13 = 10k 且已贴装**；`twi-sunxi` 只支持 100k/400k；
+  drv-mode 比 engine-mode 更差；i2c-gpio 会丢 pinctrl；
 - **PA MUTE/MODE 在 D1 HAT 上由 R3/R4/R5=0R 接 +5V**（常开/常不静音/常 Class-D），
   不归 GPIO 管；UART4 用 40-pin 16/18 不冲突；
-- **MCLK 钉死在 12.000 MHz**（Y1）：`mclk-fs = <1>` + `mclk-fp = <12000000 12000000>`，
-  44.1k / 48k 都给 codec 12.000 MHz。旧的 `mclk-fs=250` 只在 48k 对
-  （48000×250 = 12.000 MHz），44.1k 会算成 11.025 MHz；旧的 256 更错（命中 aic3x
-  旁路 PLL，按 12.288 MHz 算分频）；
+- **MCLK 钉死 12.000 MHz**（Y1）：`mclk-fs=<1>` + `mclk-fp=<12000000 12000000>`，
+  44.1k/48k 都给 codec 12 MHz；
 - 播放链路：codec `Line Out` → U1 PAM8406 → **J1 螺钉端子**（HPOUT 未接）；
-- 10-28 留档（仍成立的部分）：`i2cdetect` 在 i2c-gpio 下能同时看到 `0x18` 与 `0x6a`；
-  TWI7 100k engine-mode 与 i2c-gpio 的报错形态不同，但都源于 codec 不在总线上。
+- "上电就有的轻微滋滋"是功放输入在 codec 输出级未上电时悬空的底噪，属正常，
+  与本次故障无关。
 
-早期排查工具（仍可用）：`microduck-audio-probe`（hw_params/mixer/寄存器/时钟）、
-`microduck-i2c-recover`、`i2c-recover`（GPIO 打 9 clocks + STOP）。
+取证工具（保留）：`tools/codec-poll.sh`（每 0.3s 轮询 0x18 记录 OK/DEAD 跳变）、
+`tools/codec-early-test.sh`（一次开机测 BASE/MIX/PLAY 三阶段）、
+`microduck-audio-probe`、`microduck-i2c-recover`、`i2c-recover`。
 
 ### 时钟
 
