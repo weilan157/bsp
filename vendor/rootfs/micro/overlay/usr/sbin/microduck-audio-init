@@ -58,12 +58,27 @@ apply_all() {
 	setv 'Line DAC'                 'on'
 	setv 'HP DAC Playback Volume'   '118,118'
 	setv 'HP Playback Switch'       'on,on'
-	setv 'Right PGA Mixer Mic2R' 'on'
-	setv 'Left PGA Mixer Mic2R'  'off'
-	setv 'Left PGA Mixer Mic2L'  'off'
-	setv 'Right PGA Mixer Mic2L' 'off'
+	# 采集（按 D1 版 Audio 原理图逐脚核对）：
+	#   MK1 板载麦克风 + J2/J9 外接麦克风 -> C40/C41 1uF 耦合 ->
+	#   MIC1LP/LINE1L(10)、MIC1RP/LINE1R(12)；偏置由板上 R42/R43=4k7 上拉到 +3V3，
+	#   codec 的 MICBIAS(15) 只到 TP2 测试点，不参与。
+	#   MIC2L/LINE2L/MICDET(14) 经 0R 出去，是插孔检测，不要拿来做采集。
+	# 官方 aic3104-init.sh 用的是 'Right PGA Mixer Mic3R'，但 AIC3104 没有 MIC3
+	# （0x11/0x12 读回 0xFF），那条在这颗芯片上无效 —— 这是对齐原理图后的结论。
+	setv 'Left PGA Mixer Line1L'  'on'
+	setv 'Right PGA Mixer Line1R' 'on'
+	setv 'Left PGA Mixer Line1R'  'off'
+	setv 'Right PGA Mixer Line1L' 'off'
+	setv 'Left PGA Mixer Line2L'  'off'
+	setv 'Left PGA Mixer Line2R'  'off'
+	setv 'Right PGA Mixer Line2L' 'off'
+	setv 'Right PGA Mixer Line2R' 'off'
+	setv 'Right PGA Mixer Mic3R'  'off'
+	setv 'Left PGA Mixer Mic3L'   'off'
 	setv 'PGA Capture Switch'    'on,on'
-	setv 'PGA Capture Volume'    '60,60'
+	# 0..119 = 0..59.5dB（每步 0.5dB）。板上咪头是小信号，5dB 起步；
+	# 实测 30dB 会把输入直接顶到 32767（削顶），别再回到 60。
+	setv 'PGA Capture Volume'    '10,10'
 }
 
 try=0
