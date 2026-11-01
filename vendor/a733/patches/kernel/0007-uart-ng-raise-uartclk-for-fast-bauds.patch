@@ -1,6 +1,8 @@
---- drivers/uart/sunxi-uart-ng-core.c.orig	2026-11-01 23:18:38.453390627 +0800
-+++ drivers/uart/sunxi-uart-ng-core.c	2026-11-01 23:18:38.455157911 +0800
-@@ -564,6 +564,22 @@
+diff --git a/drivers/uart/sunxi-uart-ng-core.c b/drivers/uart/sunxi-uart-ng-core.c
+index 58b5214..17f0e27 100644
+--- a/drivers/uart/sunxi-uart-ng-core.c
++++ b/drivers/uart/sunxi-uart-ng-core.c
+@@ -564,6 +564,33 @@ static int sunxi_uart_check_baudset(struct uart_port *port, unsigned int baud)
  		}
  
  		setsel = &baud_set[i];
@@ -12,6 +14,17 @@
 +			 * pll-peri0-600m/480m，抬高到 100MHz 后 1Mbps 才真正可设。
 +			 */
 +			if (uart_port->mclk && !IS_ERR(uart_port->mclk)) {
++				/* microduck: switch parent first.
++				 * apb-uart 是 M_WITH_MUX，clk_set_rate 不会自己换父时钟，
++				 * 单独 clk_set_rate(100MHz) 会返回 0 但 rate 仍是 24MHz。
++				 */
++				struct clk *p = clk_get(NULL, "pll-peri0-600m");
++				if (!p || IS_ERR(p))
++					p = clk_get(NULL, "pll-peri0-480m");
++				if (p && !IS_ERR(p)) {
++					clk_set_parent(uart_port->mclk, p);
++					clk_put(p);
++				}
 +				if (!clk_set_rate(uart_port->mclk, 100000000)) {
 +					port->uartclk = clk_get_rate(uart_port->mclk);
 +					sunxi_info(port->dev,
