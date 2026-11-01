@@ -111,7 +111,7 @@ if [ "$INIT" = "systemd" ]; then
 	# microduck-ap 也不要开机自启：它要在 STA 关联成功之后才由 wifi 服务拉起。
 	for u in ssh.service avahi-daemon.service bluetooth.service \
 		microduck-wifi.service microduck-sshd.service microduck-bt.service \
-		microduck-audio.service; do
+		microduck-audio.service microduck-robotd.service; do
 		enable_unit "$u" multi-user.target
 	done
 	for u in microduck-grow.service microduck-zram.service; do

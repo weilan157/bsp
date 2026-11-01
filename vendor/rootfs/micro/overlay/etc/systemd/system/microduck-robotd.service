@@ -1,0 +1,19 @@
+[Unit]
+Description=microduck robot control daemon (robotd)
+Documentation=file:///opt/robot/daemon/current/docs/design/robotd-design.md
+# 总线是 UART0（PB9/PB10），没有其它服务依赖它先起来
+After=local-fs.target
+
+[Service]
+Type=simple
+# --port 也写在 /etc/robot/robotd.toml 的 [bus] 里；这里显式给一遍，免得配置丢了就没法动
+ExecStart=/usr/local/bin/robotd --port /dev/ttyAS0
+Restart=always
+RestartSec=2
+# 50 Hz 控制环：别让它被普通的 CPU 争抢拖垮（上游的 update_gate.min_achieved_hz=45）
+Nice=-5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
