@@ -1,22 +1,53 @@
 #!/bin/sh
-# microduck：udhcpc 最小钩子（busybox 默认脚本路径）
+# microduck：udhcpc 最小钩子（busybox 默认脚本路径 /usr/share/udhcpc/default.script）
 #
-# 注意：udhcpc 调用钩子时环境里的 PATH 可能不含 /usr/sbin（Debian usr-merge 后
-# ip 在 /usr/sbin 下）。原来脚本用裸 `ip` 又把它 2>/dev/null 掉，结果租约拿到了
-# 地址却没配上（ping 报 Network is unreachable）。这里显式设置 PATH。
+# 两个坑（都踩过）：
+#   1. udhcpc 调用钩子时 PATH 可能不含 /usr/sbin（Debian usr-merge 后 ip 在
+#      /usr/sbin 下），裸 `ip` 会找不到 → 这里显式设置 PATH；
+#   2. **$mask 是点分十进制（255.255.255.0），不是前缀长度**。
+#      之前写 `ip addr add "$ip/$mask"`，命令直接报错、又被 2>/dev/null 吃掉，
+#      结果租约拿到了（日志 "lease of 192.168.0.154 obtained"）但地址没配上，
+#      表现为 `ip addr` 只有 link/ether、`ping` 报 Network is unreachable。
+#      这里把点分掩码换算成前缀位数。
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+mask2prefix() {
+	m=$1
+	p=0
+	for o in $(echo "$m" | tr '.' ' '); do
+		while [ "$o" -gt 0 ]; do
+			p=$((p + 1))
+			o=$((o & (o - 1)))
+		done
+	done
+	[ "$p" -gt 0 ] || p=24
+	echo "$p"
+}
+
 case "$1" in
-deconfig)
+deconfig|leasefail|nak)
 	ip addr flush dev "$interface" 2>/dev/null
 	;;
 bound|renew)
-	ip addr add "$ip/$mask" dev "$interface" 2>/dev/null
-	[ -n "$router" ] && ip route add default via "$router" dev "$interface" 2>/dev/null
+	pfx=$(mask2prefix "$mask")
+	ip addr flush dev "$interface" 2>/dev/null
+	ip addr add "$ip/$pfx" dev "$interface" 2>/dev/null || \
+		ip addr add "$ip/24" dev "$interface" 2>/dev/null
+	if [ -n "$router" ]; then
+		for r in $router; do
+			ip route add default via "$r" dev "$interface" 2>/dev/null && break
+		done
+	fi
 	: > /etc/resolv.conf
-	for d in $dns; do
-		echo "nameserver $d" >> /etc/resolv.conf
-	done
+	if [ -n "$dns" ]; then
+		for d in $dns; do
+			echo "nameserver $d" >> /etc/resolv.conf
+		done
+	else
+		echo "nameserver 192.168.0.1" > /etc/resolv.conf
+	fi
 	;;
 esac
+
+exit 0
