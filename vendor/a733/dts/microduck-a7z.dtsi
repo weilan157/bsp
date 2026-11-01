@@ -44,6 +44,16 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&uart0_servo_pins>;
 	pinctrl-1 = <&uart0_servo_sleep>;
+	/* 舵机总线要跑 1 Mbps，但 sunxi-uart-ng 的波特率表要求
+	 *   uartclk ∈ [31 MHz, 120 MHz]（drivers/uart/sunxi-uart-ng-core.c 的 baud_set 表），
+	 * 而默认 uartclk 来自 apb-uart = 24 MHz（父时钟 sys24M）。
+	 * 结果：set_termios 在设置 1 Mbps 时直接 return -1，端口实际停在旧波特率上
+	 * （dmesg: "uart0, select set 5, baud 1000000, uartclk 24000000 beyond rance[31000000, 120000000]"），
+	 * 舵机总线因此永远收不到正确数据。
+	 * apb-uart 的父时钟可选 pll-peri0-600m/480m，这里请求 100 MHz（600/6），
+	 * 让 uartclk 落进 [31,120]，1 Mbps 才能真正设上。console 在 UART4，
+	 * 115200 的约束只要求 uartclk ≥ 24 MHz，不受影响。 */
+	assigned-clock-rates = <100000000>;
 };
 
 /* 注意：console 不能再用 uart0，见 vendor/a733/boot.cmd（console=tty1）。

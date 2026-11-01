@@ -25,14 +25,27 @@ static unsigned short crc16(const unsigned char *d, int n) {
 	return crc;
 }
 
-static int open_port(const char *port) {
+static speed_t baud_of(unsigned int b) {
+	switch (b) {
+	case 9600: return B9600;
+	case 57600: return B57600;
+	case 115200: return B115200;
+	case 500000: return B500000;
+	case 1000000: return B1000000;
+	case 2000000: return B2000000;
+	case 3000000: return B3000000;
+	default: return B1000000;
+	}
+}
+
+static int open_port(const char *port, unsigned int baud) {
 	int fd = open(port, O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if (fd < 0) { perror("open"); return -1; }
 	struct termios tio;
 	if (tcgetattr(fd, &tio) < 0) { perror("tcgetattr"); close(fd); return -1; }
 	cfmakeraw(&tio);
-	cfsetispeed(&tio, B1000000);
-	cfsetospeed(&tio, B1000000);
+	cfsetispeed(&tio, baud_of(baud));
+	cfsetospeed(&tio, baud_of(baud));
 	tio.c_cflag |= (CLOCAL | CREAD);
 	tio.c_cflag &= ~CRTSCTS;
 	tio.c_cc[VMIN] = 0; tio.c_cc[VTIME] = 0;
@@ -78,10 +91,11 @@ static int ping_all(int fd, const char *label) {
 
 int main(int argc, char **argv) {
 	const char *port = argc > 1 ? argv[1] : "/dev/ttyAS0";
-	int fd = open_port(port);
+	unsigned int baud = argc > 2 ? (unsigned int)atoi(argv[2]) : 1000000;
+	int fd = open_port(port, baud);
 	if (fd < 0) return 1;
 
-	printf("== port %s @1Mbps ==\n", port);
+	printf("== port %s @%u bps ==\n", port, baud);
 
 	printf("[1] 普通模式\n");
 	int total = ping_all(fd, "plain");
