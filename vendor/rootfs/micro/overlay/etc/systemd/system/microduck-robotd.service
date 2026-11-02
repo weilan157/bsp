@@ -1,6 +1,5 @@
 [Unit]
 Description=microduck robot control daemon (robotd)
-Documentation=file:///opt/robot/daemon/current/docs/design/robotd-design.md
 # === 上电安全设计（不要改成 ExecStart=robotd init）===
 # robotd 的常驻进程**只跑控制环**：
 #   * 不在启动时使能扭矩 —— duck-control 的设计原话是 "torque comes on when someone
