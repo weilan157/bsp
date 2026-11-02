@@ -865,8 +865,12 @@ cmd_a733_pack() {
 	sed -e "s|@BOOTARGS@|${bootargs}|" \
 		-e "s|@DTB@|${A733_DTS_NAME}.dtb|" \
 		"${BSP_ROOT}/vendor/a733/boot.cmd" > "${A733_OUT}/boot.cmd"
+	# mkimage 归当前用户跑：rootfs 的 boot/ 是 run_root 建的（root 755），
+	# 以普通用户直接往里面写会 "Can't open .../boot/boot.scr: Permission denied"。
+	# 所以先落在 out/ 里，再用 run_root 拷进去——和上面 Image/dtb 一致。
 	"${mkimage_bin}" -C none -A arm64 -T script -d "${A733_OUT}/boot.cmd" \
-		"${rootdir}/boot/boot.scr" >/dev/null || die "生成 boot.scr 失败"
+		"${A733_OUT}/boot.scr" >/dev/null || die "生成 boot.scr 失败"
+	run_root cp -f "${A733_OUT}/boot.scr" "${rootdir}/boot/boot.scr"
 
 	# extlinux.conf：u-boot 的 pxe/extlinux 解析器在没有 "menu title" 时不会画菜单，
 	# 只按 default + timeout 直接启动；timeout 0 = 立刻启动，不需要按键选择。
