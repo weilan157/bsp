@@ -121,6 +121,12 @@ cmd_a733_uboot() {
 	local extra_cflags="-Wno-attributes -Wno-array-bounds -Wno-address-of-packed-member"
 	extra_cflags="${extra_cflags} -Wno-maybe-uninitialized -Wno-misleading-indentation"
 	extra_cflags="${extra_cflags} -Wno-stringop-overflow -Wno-stringop-truncation"
+	# GCC 13（Ubuntu 24.04 的默认 gcc）又加了一条：enum-int-mismatch。这棵 2018.07 的
+	# u-boot 里 common/command.c 的 cmd_process() 定义是 int，头文件声明是
+	# enum command_ret_t —— 本来就不一致，只是老编译器不吭声。枚举在 ABI 上就是 int，
+	# 行为没变；不关它的话 CI 在 common/command.o 就断了（-Werror）。
+	# 注解提醒：以后换更新的 gcc，这里大概率还要跟着加一条。
+	extra_cflags="${extra_cflags} -Wno-enum-int-mismatch"
 
 	# 环境里缺 xxd 时，u-boot 的 prepare 会留下 0 字节的 sunxi_challenge.c，
 	# make 之后看到文件已存在就不再生成，链接时报 undefined reference。
