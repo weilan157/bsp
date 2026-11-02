@@ -646,3 +646,49 @@ robotctl robot init    # 使能扭矩 + 2 秒斜坡到 home pose（这一步才�
 ```
 
 如果只想让关节松着，`robotctl robot relax`（或在 init 之前就别敲 init）。
+
+## 舵机总线（UART0 / Feetech HD-1910M）：bring-up 记录与当前定位
+
+这条线从"完全没反应"查到"只剩硬件待确认"，过程里踩的坑都值得记下来，
+下次换板子可以直接照着验。
+
+### 一、软件侧的四件事（都已验证）
+
+| 项 | 结论 | 怎么验的 |
+|---|---|---|
+| 引脚/设备 | UART0 = **PB9/PB10** = 40-pin 8/10 → `/dev/ttyAS0`（不是 `/dev/ttyS0`） | `pinmux-pins`：`pin 41 (PB9): device 2500000.uart function uart0` |
+| 时钟/波特率 | `apb-uart` 默认 24 MHz，而 1 Mbps 要求 uartclk ∈ [31,120] MHz —— **驱动会直接 `return -1`，波特率根本没设上**（dmesg 只有一行 `beyond rance`） | 补丁 `0007-uart-ng-raise-uartclk-for-fast-bauds.patch`：直写 CCU `0x02002538`，`mux=pll-peri0-480m(4)`、`M=5`，480/5 = **96 MHz**，96MHz/16/6 = 1,000,000 精确整除 |
+| 协议 | **Feetech SCS/STS，不是 Dynamixel**：`FF FF id len instr params chk`，`len = params + 2`，`chk = ~(header 之后字节和)`；PING = `FF FF id 02 01 ~(id+3)`。应用必须用 `feat/feetech` 分支（`robotd/Cargo.toml` 里 `default = ["feetech"]`） | `duck_control::feetech` 的 debug 日志；`servo_probe <port> <baud> feetech` |
+| SoC 收发 | **回环验证通过**：拔掉 HAT、短接排针 8↔10，`servo_probe /dev/ttyAS0 115200` 每个 ID 都回 `ff ff fd 00 …`（自己发的帧原样回来） | 见下 |
+
+### 二、回环测试（判断"是 SoC 还是 HAT"的最快办法）
+
+```sh
+systemctl stop microduck-robotd        # 它常驻占着 /dev/ttyAS0
+# 拔掉 HAT，用杜邦线短接排针 8 和 10
+servo_probe /dev/ttyAS0 115200         # 期望: 每个 ID 都出 reply 10 bytes: ff ff fd 00 …
+servo_probe /dev/ttyAS0 1000000 feetech # 也可用 SCS 帧回环
+```
+
+- 能回环 → SoC 的 UART0/pinmux/分频全部 OK，问题在 HAT 那侧；
+- 不能回环 → 直接查引脚映射或 UART 硬件。
+
+### 三、当前定位（2026-11-02）
+
+HAT 插着、**不发任何字节只监听**时，RX 常读到 `00`：
+
+```
+静默监听 @1Mbps  → 00
+静默监听 @115200 → 00
+```
+
+UART 空闲应为高电平，常低说明 **HAT 把信号线拉在低电平**（或舵机侧没上电、IO 钳位）。
+而拔掉 HAT 后回环完全正常，所以软件侧已全部排除，**待确认的只剩**：
+
+1. HAT 舵机连接器上 **V+ ↔ GND 是否 6–8.4 V**（2S 电池）；
+2. 空闲时 **信号线 ↔ GND 是否 ≈3.3 V**；
+3. 或 HAT 原理图里舵机接口那一段（有无反相/半双工收发器/方向使能）。
+
+已知无效的组合（会读到 `80`/`00` 垃圾字节，别用它下结论）：
+**HAT 插着 + 排针 8/10 短接** —— 短接点和 HAT 电路互相打架。
+另外 `robotd` 常驻时会占着串口，跑 `servo_probe` 前必须先 `systemctl stop microduck-robotd`。
