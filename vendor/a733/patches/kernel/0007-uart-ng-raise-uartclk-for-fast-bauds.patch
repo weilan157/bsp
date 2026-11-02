@@ -1,8 +1,8 @@
 diff --git a/drivers/uart/sunxi-uart-ng-core.c b/drivers/uart/sunxi-uart-ng-core.c
-index 58b5214..f66ceba 100644
+index 58b5214..67277b3 100644
 --- a/drivers/uart/sunxi-uart-ng-core.c
 +++ b/drivers/uart/sunxi-uart-ng-core.c
-@@ -524,6 +524,46 @@ struct baudset {
+@@ -524,6 +524,47 @@ struct baudset {
  	u32 uartclk_max;
  };
  
@@ -11,8 +11,9 @@ index 58b5214..f66ceba 100644
 + * CCF 里 clk_set_rate 只在当前父时钟下分频、clk_get(NULL, name) 又找不到 CCF 时钟，
 + * 所以直接写 CCU 寄存器：ccu@2002000 + 0x0538
 + *   bit0..4   = M（6）
-+ *   bit24..26 = 父时钟（3 = pll-peri0-600m）
-+ *   600 MHz / 6 = 100 MHz
++ *   bit24..26 = 父时钟（4 = pll-peri0-480m）
++ *   480 MHz / 5 = 96 MHz：96MHz/16/6 = 1000000 精确整除。
++ *   （600MHz/6=100MHz 会算出 1041667，+4.2% 误差，舵机不认，不能用）
 + * 注意 apb-uart 是所有 UART 共用，console 的分频要等 getty 重新打开端口时才按新时钟重算。
 + */
 +static bool sunxi_apb_uart_raised;
@@ -36,20 +37,20 @@ index 58b5214..f66ceba 100644
 +
 +	v = readl(base + 0x0538);
 +	v &= ~((0x1f << 0) | (0x7 << 24));
-+	v |= (6 << 0) | (3 << 24);
++	v |= (5 << 0) | (4 << 24);
 +	writel(v, base + 0x0538);
 +	v = readl(base + 0x0538);
 +	iounmap(base);
 +
 +	sunxi_apb_uart_raised = true;
-+	pr_info("microduck: apb-uart -> pll-peri0-600m/6, reg538=0x%08x (expect 100MHz)\n", v);
++	pr_info("microduck: apb-uart -> pll-peri0-480m/5, reg538=0x%08x (expect 96MHz)\n", v);
 +	return 0;
 +}
 +
  static int sunxi_uart_check_baudset(struct uart_port *port, unsigned int baud)
  {
  	struct sunxi_uart_port *uart_port = UART_TO_SPORT(port);
-@@ -564,6 +604,17 @@ static int sunxi_uart_check_baudset(struct uart_port *port, unsigned int baud)
+@@ -564,6 +605,17 @@ static int sunxi_uart_check_baudset(struct uart_port *port, unsigned int baud)
  		}
  
  		setsel = &baud_set[i];
@@ -58,7 +59,7 @@ index 58b5214..f66ceba 100644
 +			 * M_WITH_MUX 的 clk_set_rate 也不会自己换父时钟），直接改 CCU 寄存器。
 +			 */
 +			if (sunxi_uart_raise_apb_uart_clk() == 0) {
-+				port->uartclk = 100000000;
++				port->uartclk = 96000000;
 +				sunxi_info(port->dev,
 +					"uart%d raised uartclk to %d for baud %d\n",
 +					uart_port->id, port->uartclk, baud);
