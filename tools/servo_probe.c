@@ -62,10 +62,37 @@ static int read_reply(int fd, unsigned char *buf, int cap) {
 	return n > 0 ? n : 0;
 }
 
+static int use_feetech;
+
+/* Feetech SCS/STS 帧: FF FF id len instr params chk
+ * len = params + 2；chk = ~(header 之后所有字节之和) & 0xff。PING = 0x01。 */
+static int scs_ping(int fd, unsigned char *buf, int cap, int id)
+{
+	unsigned char f[6];
+	f[0] = 0xFF; f[1] = 0xFF; f[2] = (unsigned char)id;
+	f[3] = 0x02; f[4] = 0x01;
+	f[5] = (unsigned char)(~((id + 0x02 + 0x01) & 0xFF));
+	tcflush(fd, TCIOFLUSH);
+	write(fd, f, 6);
+	return read_reply(fd, buf, cap);
+}
+
 static int ping_all(int fd, const char *label) {
 	int answered = 0;
 	unsigned char buf[64];
 	for (int id = 1; id <= 30; id++) {
+		if (use_feetech) {
+			int n2 = scs_ping(fd, buf, sizeof(buf), id);
+			if (n2 > 0) {
+				answered++;
+				printf("  %s: id=%d SCS reply %d bytes:", label, id, n2);
+				for (int k = 0; k < n2 && k < 16; k++)
+					printf(" %02x", buf[k]);
+				printf("\n");
+			}
+			usleep(20000);
+			continue;
+		}
 		// Dynamixel 2.0 帧: FF FF FD 00 ID LEN_L LEN_H INST PARAM... CRC_L CRC_H
 		// CRC 只算 FD 开始到最后一个参数（不含前两个 FF）
 		unsigned char body[6] = { 0xFD, 0x00, (unsigned char)id, 0x03, 0x00, 0x01 };
@@ -92,6 +119,8 @@ static int ping_all(int fd, const char *label) {
 int main(int argc, char **argv) {
 	const char *port = argc > 1 ? argv[1] : "/dev/ttyAS0";
 	unsigned int baud = argc > 2 ? (unsigned int)atoi(argv[2]) : 1000000;
+	if (argc > 3 && strstr(argv[3], "feetech"))
+		use_feetech = 1;
 	int fd = open_port(port, baud);
 	if (fd < 0) return 1;
 
