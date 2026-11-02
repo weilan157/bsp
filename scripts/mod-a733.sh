@@ -498,6 +498,12 @@ cmd_a733_kernel() {
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart_debug_pins>;
+	/* 调试口和舵机共用 apb-uart：在 probe 前就把它固定到 96MHz，
+	 * 这样 console 的分频（115200 → /52，115384）和舵机 1M（/6，精确）
+	 * 都按同一个时钟算，不会出现“robotd 一设 1M，console 就乱码”。 */
+	assigned-clocks = <&ccu CLK_APB_UART>;
+	assigned-clock-parents = <&ccu CLK_PLL_PERI0_480M>;
+	assigned-clock-rates = <96000000>;
 };
 
 EOF

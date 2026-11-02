@@ -18,6 +18,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/clock/sun60iw2-ccu.h>
 
 /* =====================================================================
  * 1. 舵机串口：UART0 = PB9/PB10（排针 pin 8/10）
@@ -48,11 +49,20 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&uart0_servo_pins>;
 	pinctrl-1 = <&uart0_servo_sleep>;
+	/* 1 Mbps 要求 apb-uart = 96 MHz（96M/16/6 精确整除）。
+	 * 在 probe 前用 CCF 设好，不要等到 robotd set_termios 才在中断上下文里
+	 * 改共享的 apb-uart——那会让同时开着的 UART4 console 分频错掉。
+	 * 96M 下 UART4 115200 的分频是 52（115384，0.16% 误差），console 仍可读。
+	 * u-boot 若把 apb-uart 留在 100MHz（600m/6），内核补丁 0008 会在 1M 时
+	 * 强制切回 96MHz 并校验 CCU 读回值。 */
+	assigned-clocks = <&ccu CLK_APB_UART>;
+	assigned-clock-parents = <&ccu CLK_PLL_PERI0_480M>;
+	assigned-clock-rates = <96000000>;
 };
 
-/* 注意：console 不能再用 uart0，见 vendor/a733/boot.cmd（console=tty1）。
- * 用户态的 /dev/ttyAS0（部分 BSP 是 /dev/ttyS0）由 8250 驱动生成，
- * 具体名字上板后 ls /dev/tty* 确认。 */
+/* 注意：console 不能再用 uart0。默认 `console=tty1`；调试时
+ * `A733_DEBUG_UART=uart4` 会用 `ttyAS4`（40-pin 16/18）。UART0 只给舵机，
+ * 用户态设备名是 BSP uart-ng 注册的 `/dev/ttyAS0`（不是 8250 的 ttyS0）。 */
 
 /* =====================================================================
  * 2. I2C：TWI7 = PJ22/PJ23（排针 pin 3/5）→ /dev/i2c-7

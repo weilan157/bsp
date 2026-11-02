@@ -579,22 +579,32 @@ A7Z 无显示时相当于没有 console。换口方案（UART2/7-11、USB-C gadg
    - boot0：`uart_debug_port = 4`（UART4，PJ24/PJ25），`debug_mode = 0`；
    - u-boot：`A733_DEBUG_UART=none` 时也把 `CONFIG_CONS_INDEX` 设为 5（UART4），不碰 UART0；
    - 要看日志：`A733_DEBUG_UART=uart4` 重编，console 走 `ttyAS4`（40-pin 16/18）。
-2. **1 Mbps 的时钟**：apb-uart 默认 24 MHz，1 Mbps 需要 ≥31 MHz；内核补丁
-   `0007-uart-ng-raise-uartclk-for-fast-bauds.patch` 在第一次设 1 Mbps 时把 CCU `0x0538`
-   切到 `pll-peri0-480m/5 = 96 MHz`（96M/16/6 = 1,000,000 精确整除）。
+2. **1 Mbps 的时钟（和 UART4 console 共用 apb-uart）**：1 Mbps 要求 uartclk ≥31 MHz，
+   而且 **必须精确 96 MHz**（96M/16/6 = 1,000,000）。坑在于 u-boot/CCF 可能已经把
+   apb-uart 留在 **100 MHz**（pll-peri0-600m/6）——100M/16/6 = **1,041,666**（+4.2%），
+   舵机不认；旧的 `0007` 只在 `uartclk < 31M` 时才抬时钟，100M 落在合法区间里会被
+   直接跳过。现在两层保证：
+   - DT 在 `&uart0` 和调试 `&uart4` 的 probe 前用 `assigned-clocks` 把 apb-uart
+     固定到 `pll-peri0-480m/5 = 96 MHz`；UART4 console 的 115200 分频是 /52
+     （115384，0.16% 误差），不会因为 robotd 设 1M 而乱码；
+   - 内核补丁 `0008-uart-ng-force-96m-for-1m.patch`：1 Mbps 时不管当前值，非 96M
+     就强制切，并回读 CCU `0x0538` 必须是 `0x04000005`，否则 `pr_err`。
 3. **引脚**：`uart0_servo_pins` 加了 `bias-pull-up`，端口关闭/对端不驱动时 RX 不悬空。
 
 验证（上板）：
 
 ```sh
-cat /proc/cmdline | tr ' ' '\n' | grep console      # 不应出现 ttyAS0/ttyS0
-dmesg | grep -E 'raised uartclk|uart0'              # 应看到 raised uartclk to 96000000
+cat /proc/cmdline | tr ' ' '\n' | grep console      # console=ttyAS4 可以，ttyAS0 不行
+dmesg | grep -E 'raised uartclk|reg538|uart0'       # 看 96000000 / reg538=0x04000005
 stty -F /dev/ttyAS0 1000000                          # 不报 Invalid argument
+devmem 0x02002538                                    # 应为 0x04000005（480m/5，96M）
 robotctl health                                      # 读 12 个舵机 + IMU 0x6a/200
 ```
 
-- `stty` 报 `Invalid argument` 或 dmesg 没有 `raised uartclk` → 补丁没进内核/CCU 写失败；
-- 能 `stty` 但舵机全超时 → 再查接线/半双工方向/舵机 ID，不是 Linux 串口配置。
+- `devmem` 读到 `0x03000006` = 100M（600m/6）→ 1M 会跑成 1.0417M，这就是舵机
+  “硬件没问题但就是不回”的原因；`0x04000005` 才是 96M；
+- `stty` 报 `Invalid argument` 或 dmesg 有 `expect 0x04000005` → 补丁没进内核/CCU 写失败；
+- 能 `stty`、`devmem` 也对但舵机全超时 → 再查接线/半双工方向/舵机 ID，不是串口配置。
 ## u-boot 与官方差异 / DDR 初始化
 
 `./bsp uboot` 用的就是官方 `radxa/u-boot` 源码，只改构建配置和两处小修；与 rsdk 的差别

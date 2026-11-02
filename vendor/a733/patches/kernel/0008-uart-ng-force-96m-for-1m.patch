@@ -1,0 +1,34 @@
+diff --git a/drivers/uart/sunxi-uart-ng-core.c b/drivers/uart/sunxi-uart-ng-core.c
+--- a/drivers/uart/sunxi-uart-ng-core.c
++++ b/drivers/uart/sunxi-uart-ng-core.c
+@@ -558,6 +558,11 @@
+ 	v |= (5 << 0) | (4 << 24);
+ 	writel(v, base + 0x0538);
+ 	v = readl(base + 0x0538);
++	if ((v & 0x0700001f) != 0x04000005) {
++		pr_err("microduck: apb-uart reg538=0x%08x, expect 0x04000005 (96MHz)\n", v);
++		iounmap(base);
++		return -EIO;
++	}
+ 	iounmap(base);
+ 
+ 	sunxi_apb_uart_raised = true;
+@@ -605,7 +610,17 @@
+ 		}
+ 
+ 		setsel = &baud_set[i];
+-		if (port->uartclk < setsel->uartclk_min) {
++		/*
++		 * microduck: 1 Mbps 必须精确 96MHz。
++		 *
++		 * u-boot/CCF 可能已经把 apb-uart 留在 100MHz
++		 * （pll-peri0-600m/6，常见于 u-boot 自己的 console 初始化），
++		 * 此时 port->uartclk = 100M，落在 [31M, 120M] 的合法区间里，
++		 * 只判断 "< uartclk_min" 会直接跳过，1M 实际跑成 1.0417M
++		 * （100M/16/6）——舵机不认。所以 1M 时不管当前值，非 96M 就强制切。
++		 */
++		if ((baud == 1000000 && port->uartclk != 96000000) ||
++		    port->uartclk < setsel->uartclk_min) {
+ 			/* microduck: CCF 那条路走不通（clk_get(NULL,name) 找不到 CCF 时钟，
+ 			 * M_WITH_MUX 的 clk_set_rate 也不会自己换父时钟），直接改 CCU 寄存器。
+ 			 */
