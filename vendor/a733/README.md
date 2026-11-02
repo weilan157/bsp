@@ -21,7 +21,8 @@
 - `microduck.config`：叠在 `defconfig` 上的精简配置，**保留视频编解码**
   （`CONFIG_AW_VIDEO_ENCODER_DECODER` + `AW_VIDEO_KERNEL_DEC/ENC` + `VIDEO_RT_MEDIA`），
   去掉 DRM/FB/GPU、USB、PCIe、以太网、netfilter/IPv6、多余文件系统、调试设施。
-- `overlay/`：micro rootfs 的 A733 版本（`etc/inittab` 给 `ttyAS0` 挂 getty、模块清单）。
+- `overlay/`：micro rootfs 的 A733 版本（调试口 getty 只挂 tty1/UART4，**不再给
+  `ttyAS0` 挂 getty**——那是舵机总线；模块清单）。
 - `patches/kernel/`：打在 `allwinner-bsp` 驱动上的补丁，`./bsp kernel` 会自动应用（幂等）。
   目前只有一个 `0001-sunxi-mmc-a733-ccu-workaround.patch`（见下文「上板必须的修法」）。
 - `boot.cmd`：u-boot 启动脚本（`fatload` Image/dtb + `booti`，root 指向 `/dev/mmcblk0p4`）。
@@ -49,8 +50,8 @@ cp config.env.example config.env
 
 | HAT 信号 | RK3566 | A733（本 dts） |
 |---|---|---|
-| 舵机串口 | `/dev/ttyS2` | `&uart0` = **PB9/PB10**（pin 8/10）；官方 `uart0_pins_active` 的 pins 是空的，这里换成真实引脚 |
-| console | ttyS2 | 移到 `tty1`（`vendor/a733/boot.cmd`），UART0 只给舵机 |
+| 舵机串口 | `/dev/ttyS2` | `&uart0` = **PB9/PB10**（pin 8/10）→ `/dev/ttyAS0`；1 Mbps，DT 里加 `bias-pull-up` |
+| console | ttyS2 | **`tty1`**（默认）；`A733_DEBUG_UART=uart4/uart2` 才把 console/earlycon 挪到调试口。UART0 只给舵机，**绝不能当 console** |
 | I2C（codec/IMU/Stemma） | `/dev/i2c-3` | `&twi7` = **PJ22/PJ23**（pin 3/5），400 kHz → `/dev/i2c-7`；设备：`tlv320aic3104@0x18`、`vl53l5cx@0x29`、`bmi088-accel@0x19` / `bmi088-gyro@0x68`（D1 版的 `lsm6dsv16x@0x6a` 注释着） |
 | 音频 codec | i2s3_2ch | `&i2s0_plat`/`&i2s0_mach` = **PB4/5/6/7/8**（pin 36/12/35/40/38），soundcard-mach 挂 `tlv320aic3104@0x18` |
 | 关机检测 | GPIO6 | `gpio-keys` on **PB2**（pin 31，原理图确认 pin 31=PB2）→ `KEY_POWER` |
@@ -111,11 +112,12 @@ EXT4-fs (mmcblk0p2): mounted filesystem ... r/w with ordered data mode
 Run /sbin/init as init process
 microduck: userspace ready in 2.74s
 INIT: Entering runlevel: 2
-Debian GNU/Linux 13 (none) ttyAS0
-(none) login:
 ```
 
-上电到 login 约 **2.7 s**（内核 1.7 s + 用户态 1 s），串口是 UART0 = `ttyAS0`，115200。
+上电到 userspace 约 **2.7 s**。**默认 console=tty1（无显示），UART0 不挂 console/getty**；
+要看串口日志/登录必须 `A733_DEBUG_UART=uart4`（`console=ttyAS4`，40-pin 16/18）。
+**不要把 console 放回 `ttyAS0`**——那是舵机总线，内核 printk / login / `/dev/console`
+都会打断 1 Mbps 的舵机帧。
 
 **WiFi 已在真机跑通**（2026-10-25）：
 
@@ -567,6 +569,32 @@ Allwinner 的 6.6 BSP 是按 longan 的构建环境写的，脱离 longan 直接
 `&uart0`（PB9/PB10 = 40-pin 8/10）给了舵机，`boot.cmd` 的 console 是 `tty1`；
 A7Z 无显示时相当于没有 console。换口方案（UART2/7-11、USB-C gadget、SSH-only 的取舍）
 见 [`docs/uart-console-vs-servo.md`](../../docs/uart-console-vs-servo.md)。
+
+### UART0 = 舵机总线（1 Mbps）：三条规则
+
+1. **UART0 绝不能当 console**。只要 `console=ttyAS0`（或 `console=ttyS0`），内核 printk、
+   getty/login、`/dev/console` 写入都会打进 1 Mbps 的舵机帧里；表现是舵机“偶尔能通、
+   大多数时候超时/校验错”。现在默认：
+   - 内核：`console=tty1`，**没有** UART0 的 earlycon；
+   - boot0：`uart_debug_port = 4`（UART4，PJ24/PJ25），`debug_mode = 0`；
+   - u-boot：`A733_DEBUG_UART=none` 时也把 `CONFIG_CONS_INDEX` 设为 5（UART4），不碰 UART0；
+   - 要看日志：`A733_DEBUG_UART=uart4` 重编，console 走 `ttyAS4`（40-pin 16/18）。
+2. **1 Mbps 的时钟**：apb-uart 默认 24 MHz，1 Mbps 需要 ≥31 MHz；内核补丁
+   `0007-uart-ng-raise-uartclk-for-fast-bauds.patch` 在第一次设 1 Mbps 时把 CCU `0x0538`
+   切到 `pll-peri0-480m/5 = 96 MHz`（96M/16/6 = 1,000,000 精确整除）。
+3. **引脚**：`uart0_servo_pins` 加了 `bias-pull-up`，端口关闭/对端不驱动时 RX 不悬空。
+
+验证（上板）：
+
+```sh
+cat /proc/cmdline | tr ' ' '\n' | grep console      # 不应出现 ttyAS0/ttyS0
+dmesg | grep -E 'raised uartclk|uart0'              # 应看到 raised uartclk to 96000000
+stty -F /dev/ttyAS0 1000000                          # 不报 Invalid argument
+robotctl health                                      # 读 12 个舵机 + IMU 0x6a/200
+```
+
+- `stty` 报 `Invalid argument` 或 dmesg 没有 `raised uartclk` → 补丁没进内核/CCU 写失败；
+- 能 `stty` 但舵机全超时 → 再查接线/半双工方向/舵机 ID，不是 Linux 串口配置。
 ## u-boot 与官方差异 / DDR 初始化
 
 `./bsp uboot` 用的就是官方 `radxa/u-boot` 源码，只改构建配置和两处小修；与 rsdk 的差别

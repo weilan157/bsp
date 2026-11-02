@@ -30,12 +30,16 @@
 		pins = "PB9", "PB10";
 		function = "uart0";
 		drive-strength = <10>;
+		/* 舵机总线空闲为高：给 RX 一个弱上拉，避免端口关闭/对端不驱动时
+		 * 悬空收到假起始位。 */
+		bias-pull-up;
 	};
 
 	uart0_servo_sleep: uart0-servo-sleep {
 		pins = "PB9", "PB10";
 		function = "gpio_in";
 		drive-strength = <10>;
+		bias-pull-up;
 	};
 };
 

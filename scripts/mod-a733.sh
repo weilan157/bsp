@@ -170,13 +170,15 @@ cmd_a733_uboot() {
 		# 关键：mmc read 的 block/count 按十六进制解析！
 		# Image@16MiB=0x8000 扇区，dtb@56MiB=0x1C000 扇区；每段 0x8000（16 MiB）
 		local rawboot
-		# console/earlycon 与内核 cmdline 保持一致（uart4 时是 ttyAS4 + 0x02504000）
-		local uboot_console="ttyAS0,115200" uboot_early="0x02500000"
+		# console/earlycon 与内核 cmdline 保持一致。UART0（PB9/PB10）是舵机总线，
+		# **默认不能当 console**：内核 printk / getty 会和舵机帧抢同一条半双工线。
+		# 只有显式 A733_DEBUG_UART=uart4/uart2 才把 console 挪到调试口。
+		local uboot_console="tty1" uboot_earlyopt=""
 		case "${A733_DEBUG_UART:-none}" in
-		uart4) uboot_console="ttyAS4,115200"; uboot_early="0x02504000" ;;
-		uart2) uboot_console="ttyAS2,115200"; uboot_early="0x02502000" ;;
+		uart4) uboot_console="ttyAS4,115200"; uboot_earlyopt="earlycon=uart8250,mmio32,0x02504000" ;;
+		uart2) uboot_console="ttyAS2,115200"; uboot_earlyopt="earlycon=uart8250,mmio32,0x02502000" ;;
 		esac
-		rawboot="mmc dev 0; setenv bootargs console=${uboot_console} earlycon=uart8250,mmio32,${uboot_early} root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait cma=128M loglevel=8"
+		rawboot="mmc dev 0; setenv bootargs console=${uboot_console} ${uboot_earlyopt} root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait cma=128M loglevel=8"
 		rawboot="${rawboot}; mmc read 0x40080000 0x8000 0x8000"
 		rawboot="${rawboot}; mmc read 0x41080000 0x10000 0x8000"
 		rawboot="${rawboot}; mmc read 0x42080000 0x18000 0x2200"
@@ -220,9 +222,11 @@ cmd_a733_uboot() {
 		fi
 		# 调试串口换到 UART2/4 时，u-boot 的 console 索引也跟着换
 		# （sunxi 的 CONFIG_CONS_INDEX 是 1-based：uart0=1, uart2=3, uart4=5）
-		case "${A733_DEBUG_UART:-}" in
+		# A733_DEBUG_UART=none 时也不能留在 UART0（=舵机总线），默认挪到 UART4；
+		# 没接调试线就看不到 u-boot 输出，但不会往舵机总线上打日志。
+		case "${A733_DEBUG_UART:-none}" in
 		uart2) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=3/' .config ;;
-		uart4) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=5/' .config ;;
+		uart4|none) sed -i 's/^CONFIG_CONS_INDEX=.*/CONFIG_CONS_INDEX=5/' .config ;;
 		esac
 		make ARCH=arm CROSS_COMPILE="${cc}" olddefconfig >/dev/null
 
@@ -291,9 +295,11 @@ a733_pack_bootloader() {
 	if [[ "${A733_DEBUG_UART}" == "uart2" ]]; then
 		sed -i 's/^jtag_enable.*/jtag_enable     = 0/' sys_config.fex
 	fi
-	# 调试串口搬到 UART2/4（boot0 从 [uart_para] 读），UART0 留给舵机
-	case "${A733_DEBUG_UART}" in
-	uart4)
+	# 调试串口搬到 UART2/4（boot0 从 [uart_para] 读），UART0 留给舵机。
+	# none 也挪到 UART4：boot0 即使 debug_mode=0，也别把 UART0 的 pinmux/时钟
+	# 配成调试口——那是舵机总线。
+	case "${A733_DEBUG_UART:-none}" in
+	uart4|none)
 		sed -i 's/^uart_debug_port.*/uart_debug_port = 4/' sys_config.fex
 		sed -i 's/^uart_debug_tx.*/uart_debug_tx   = port:PJ24<2><1><default><default>/' sys_config.fex
 		sed -i 's/^uart_debug_rx.*/uart_debug_rx   = port:PJ25<2><1><default><default>/' sys_config.fex
@@ -745,24 +751,28 @@ cmd_a733_pack() {
 	cfg_id="$(printf '%s' "${rootfs_uuid}" | cut -c1-8 | tr 'a-f' 'A-F')"
 	cfg_uuid="${cfg_id:0:4}-${cfg_id:4:4}"
 	# 这颗内核的串口是 Allwinner BSP 驱动，注册的是 /dev/ttyAS*（不是 ttyS*）；
-	# 写 ttyS0 会出现 "unable to open an initial console"。earlycon 仍然用
-	# uart8250 + UART0 基址，保证 console 驱动 probe 之前也能看到 log。
-	# loglevel=4：只保留 warning 以上。115200 下日志本身要占掉几百毫秒，
-	# 调试时临时改成 7/8 即可。
-	# 调试口：默认 UART0；A733_DEBUG_UART=uart4/uart2 时跟着换。
-	# 注意内核串口是 BSP 的 uart-v100 驱动，注册名是 ttyAS*（不是 ttyS*），
-	# 写 ttyS4 会 "unable to open an initial console"。
-	local debug_console="ttyAS0,115200"
-	local earlycon_addr="0x02500000"
+	# 写 ttyS0 会出现 "unable to open an initial console"。
+	# loglevel=6：只保留 info 以上；调试时临时改成 7/8 即可。
+	# 调试口：**默认 tty1**，不能是 UART0。UART0（PB9/PB10）是舵机总线：
+	# 只要内核 console/getty/printk 挂在上面，就会和舵机的半双工帧抢线，
+	# 表现为“舵机偶尔能通、大多数时候超时/校验错”。
+	# A733_DEBUG_UART=uart4/uart2 时才把 console 和 earlycon 挪到调试口。
+	local debug_console="tty1"
+	local earlycon=""
 	case "${A733_DEBUG_UART:-none}" in
-	uart4) debug_console="ttyAS4,115200"; earlycon_addr="0x02504000" ;;
-	uart2) debug_console="ttyAS2,115200"; earlycon_addr="0x02502000" ;;
+	uart4) debug_console="ttyAS4,115200"; earlycon="earlycon=uart8250,mmio32,0x02504000" ;;
+	uart2) debug_console="ttyAS2,115200"; earlycon="earlycon=uart8250,mmio32,0x02502000" ;;
 	esac
 	[[ -n "${A733_CONSOLE:-}" ]] && debug_console="${A733_CONSOLE}"
+	case "${debug_console}" in
+	ttyAS0*|ttyS0*)
+		die "console=${debug_console} 是 UART0=舵机总线；请用 tty1 或 A733_DEBUG_UART=uart4"
+		;;
+	esac
 	# rootfstype=ext4：显式指定文件系统类型。不加的话内核会依次尝试
 	# ext2/ext3/ext4，ext2 对带 extents/64bit/flex_bg 的 rootfs 会报
 	# "unsupported optional features (2c0)"，把真正的 ext4 报错盖住。
-	bootargs="console=${debug_console} root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait cma=128M loglevel=6 net.ifnames=0 biosdevname=0"
+	bootargs="console=${debug_console} ${earlycon} root=/dev/mmcblk0p2 rootfstype=ext4 rw rootwait cma=128M loglevel=6 net.ifnames=0 biosdevname=0"
 
 	# 1) 内核/设备树/启动脚本放进 rootfs 的 /boot（官方镜像就是这样，
 	#    u-boot 的 distro_bootcmd 扫到 ext4 分区根上的 /boot.scr 再 source 它）
