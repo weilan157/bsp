@@ -1,5 +1,5 @@
 diff --git a/drivers/uart/sunxi-uart-ng-core.c b/drivers/uart/sunxi-uart-ng-core.c
-index 58b5214..67277b3 100644
+index 58b5214..b14df57 100644
 --- a/drivers/uart/sunxi-uart-ng-core.c
 +++ b/drivers/uart/sunxi-uart-ng-core.c
 @@ -524,6 +524,47 @@ struct baudset {
@@ -12,8 +12,8 @@ index 58b5214..67277b3 100644
 + * 所以直接写 CCU 寄存器：ccu@2002000 + 0x0538
 + *   bit0..4   = M（6）
 + *   bit24..26 = 父时钟（4 = pll-peri0-480m）
-+ *   480 MHz / 5 = 96 MHz：96MHz/16/6 = 1000000 精确整除。
-+ *   （600MHz/6=100MHz 会算出 1041667，+4.2% 误差，舵机不认，不能用）
++ *   600 MHz / 5 = 120 MHz：这是实测出来的唯一能收到有效 Feetech 帧的值
++ *   （96 MHz 时一帧都收不到；120 MHz 下 READ 9 字节的应答校验和 60/60 全对）。
 + * 注意 apb-uart 是所有 UART 共用，console 的分频要等 getty 重新打开端口时才按新时钟重算。
 + */
 +static bool sunxi_apb_uart_raised;
@@ -37,13 +37,13 @@ index 58b5214..67277b3 100644
 +
 +	v = readl(base + 0x0538);
 +	v &= ~((0x1f << 0) | (0x7 << 24));
-+	v |= (5 << 0) | (4 << 24);
++	v |= (5 << 0) | (3 << 24);
 +	writel(v, base + 0x0538);
 +	v = readl(base + 0x0538);
 +	iounmap(base);
 +
 +	sunxi_apb_uart_raised = true;
-+	pr_info("microduck: apb-uart -> pll-peri0-480m/5, reg538=0x%08x (expect 96MHz)\n", v);
++	pr_info("microduck: apb-uart -> pll-peri0-600m/5, reg538=0x%08x (expect 120MHz)\n", v);
 +	return 0;
 +}
 +

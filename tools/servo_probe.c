@@ -63,6 +63,7 @@ static int read_reply(int fd, unsigned char *buf, int cap) {
 }
 
 static int use_feetech;
+static int use_read9;
 
 /* Feetech SCS/STS 帧: FF FF id len instr params chk
  * len = params + 2；chk = ~(header 之后所有字节之和) & 0xff。PING = 0x01。 */
@@ -77,12 +78,27 @@ static int scs_ping(int fd, unsigned char *buf, int cap, int id)
 	return read_reply(fd, buf, cap);
 }
 
+/* 和 FT SCServo Debug 的"搜索"完全一样的帧：
+ * FF FF id 04 02 00 09 chk   —— READ 地址0 长度9（固件版本/ID/波特率/...）
+ */
+static int scs_read9(int fd, unsigned char *buf, int cap, int id)
+{
+	unsigned char f[8];
+	f[0] = 0xFF; f[1] = 0xFF; f[2] = (unsigned char)id;
+	f[3] = 0x04; f[4] = 0x02; f[5] = 0x00; f[6] = 0x09;
+	f[7] = (unsigned char)(~((id + 0x04 + 0x02 + 0x00 + 0x09) & 0xFF));
+	tcflush(fd, TCIOFLUSH);
+	if (write(fd, f, 8) != 8) return 0;
+	return read_reply(fd, buf, cap);
+}
+
 static int ping_all(int fd, const char *label) {
 	int answered = 0;
 	unsigned char buf[64];
 	for (int id = 1; id <= 30; id++) {
 		if (use_feetech) {
-			int n2 = scs_ping(fd, buf, sizeof(buf), id);
+			int n2 = use_read9 ? scs_read9(fd, buf, sizeof(buf), id)
+					   : scs_ping(fd, buf, sizeof(buf), id);
 			if (n2 > 0) {
 				answered++;
 				printf("  %s: id=%d SCS reply %d bytes:", label, id, n2);
@@ -117,10 +133,38 @@ static int ping_all(int fd, const char *label) {
 }
 
 int main(int argc, char **argv) {
+	if (argc > 2 && strstr(argv[2], "dump")) {
+		/* dump_frames <feetech|dxl> [n] */
+		int n = argc > 3 ? atoi(argv[3]) : 8;
+		int feet = argc > 1 && strstr(argv[1], "feetech");
+		for (int id = 1; id <= n; id++) {
+			if (feet) {
+				unsigned char f[6] = { 0xFF, 0xFF, (unsigned char)id, 0x02, 0x01,
+					(unsigned char)(~((id + 0x02 + 0x01) & 0xFF)) };
+				printf("id=%2d SCS :", id);
+				for (int i = 0; i < 6; i++) printf(" %02X", f[i]);
+				printf("\n");
+			} else {
+				unsigned char body[6] = { 0xFD, 0x00, (unsigned char)id, 0x03, 0x00, 0x01 };
+				unsigned short c = crc16(body, 6);
+				unsigned char f[10] = { 0xFF, 0xFF, 0xFD, 0x00, (unsigned char)id,
+					0x03, 0x00, 0x01, 0, 0 };
+				f[8] = c & 0xFF; f[9] = (c >> 8) & 0xFF;
+				printf("id=%2d DXL :", id);
+				for (int i = 0; i < 10; i++) printf(" %02X", f[i]);
+				printf("\n");
+			}
+		}
+		return 0;
+	}
 	const char *port = argc > 1 ? argv[1] : "/dev/ttyAS0";
 	unsigned int baud = argc > 2 ? (unsigned int)atoi(argv[2]) : 1000000;
 	if (argc > 3 && strstr(argv[3], "feetech"))
 		use_feetech = 1;
+	if (argc > 3 && strstr(argv[3], "read9"))
+		use_feetech = 1, use_read9 = 1;
+	if (argc > 2 && strstr(argv[2], "read9"))
+		use_feetech = 1, use_read9 = 1;
 	int fd = open_port(port, baud);
 	if (fd < 0) return 1;
 
