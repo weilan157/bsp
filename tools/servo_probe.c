@@ -64,6 +64,7 @@ static int read_reply(int fd, unsigned char *buf, int cap) {
 
 static int use_feetech;
 static int use_read9;
+static int one_id = -1;
 
 /* Feetech SCS/STS 帧: FF FF id len instr params chk
  * len = params + 2；chk = ~(header 之后所有字节之和) & 0xff。PING = 0x01。 */
@@ -96,6 +97,7 @@ static int ping_all(int fd, const char *label) {
 	int answered = 0;
 	unsigned char buf[64];
 	for (int id = 1; id <= 250; id++) {
+		if (one_id > 0 && id != one_id) continue;
 		if (use_feetech) {
 			int n2 = use_read9 ? scs_read9(fd, buf, sizeof(buf), id)
 					   : scs_ping(fd, buf, sizeof(buf), id);
@@ -165,6 +167,10 @@ int main(int argc, char **argv) {
 		use_feetech = 1, use_read9 = 1;
 	if (argc > 2 && strstr(argv[2], "read9"))
 		use_feetech = 1, use_read9 = 1;
+	if ((argc > 2 && strstr(argv[2], "one")) || (argc > 3 && strstr(argv[3], "one"))) {
+		use_feetech = 1;
+		one_id = argc > 4 ? atoi(argv[4]) : (argc > 3 && strstr(argv[2], "one") ? atoi(argv[3]) : 10);
+	}
 	int fd = open_port(port, baud);
 	if (fd < 0) return 1;
 
