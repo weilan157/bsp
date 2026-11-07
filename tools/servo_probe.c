@@ -95,7 +95,7 @@ static int scs_read9(int fd, unsigned char *buf, int cap, int id)
 static int ping_all(int fd, const char *label) {
 	int answered = 0;
 	unsigned char buf[64];
-	for (int id = 1; id <= 30; id++) {
+	for (int id = 1; id <= 250; id++) {
 		if (use_feetech) {
 			int n2 = use_read9 ? scs_read9(fd, buf, sizeof(buf), id)
 					   : scs_ping(fd, buf, sizeof(buf), id);
